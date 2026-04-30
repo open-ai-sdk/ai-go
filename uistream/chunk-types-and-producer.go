@@ -226,14 +226,27 @@ func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
 	}
 	tr := ev.ToolResult
 
+	// Mirror ai-sdk-node's contract (packages/ai/src/generate-text/stream-text.ts
+	// — `output: part.output` with schema `output: z.unknown()`): emit the
+	// tool's output as-is. Tools in Go return `(string, error)`, so the raw
+	// `tr.Output` is what flows through. Consumers re-parse with their own
+	// typed shape; the stream layer no longer second-guesses.
+	//
+	// Why this shape matters: the previous behavior parsed `tr.Output` and
+	// fell back to `{"result": tr.Output}` on parse failure, producing three
+	// possible chunk shapes (parsed object / wrap object / re-stringified
+	// string after persistence). Downstream code that expected a string
+	// (e.g. SSE bridges that call `event["output"].(string)`) silently lost
+	// the payload. Tools that return large structured outputs (image
+	// generators, large search results) would also hit storage truncation
+	// boundaries that mangled the JSON before parsing — same wrap fallback
+	// fired, hiding the real shape from callers.
+	//
+	// `input` continues to parse `tr.Args` because tool args are reliably
+	// JSON-emitted by the model and downstream UIs render structured fields.
 	var parsedArgs any
 	if err := json.Unmarshal([]byte(tr.Args), &parsedArgs); err != nil {
 		parsedArgs = map[string]string{"raw": tr.Args}
-	}
-
-	var parsedOutput any
-	if err := json.Unmarshal([]byte(tr.Output), &parsedOutput); err != nil {
-		parsedOutput = map[string]string{"result": tr.Output}
 	}
 
 	inputFields := withProviderMetadata(map[string]any{
@@ -243,7 +256,7 @@ func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
 	}, ev.ProviderMetadata)
 	outputFields := withProviderMetadata(map[string]any{
 		"toolCallId": tr.ID,
-		"output":     parsedOutput,
+		"output":     tr.Output,
 	}, ev.ProviderMetadata)
 
 	return []Chunk{

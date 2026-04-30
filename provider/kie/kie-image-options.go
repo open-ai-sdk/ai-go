@@ -1,6 +1,10 @@
 package kie
 
-import "github.com/open-ai-sdk/ai-go/ai"
+import (
+	"fmt"
+
+	"github.com/open-ai-sdk/ai-go/ai"
+)
 
 // ImageOptions are Kie-specific knobs for a single Generate call. None are
 // required — every model has working defaults via the upstream API.
@@ -47,22 +51,28 @@ func extractOptions(req ai.GenerateImageRequest) ImageOptions {
 // imageURLs returns the image-input URLs from req.Images. Inline data is
 // not supported on Kie input — callers must upload first via
 // Provider.UploadBase64 / Provider.UploadStream and pass the resulting URL.
-func imageURLs(req ai.GenerateImageRequest) []string {
+//
+// An error is returned if any image has an empty URL (indicating inline data
+// that was not uploaded), referencing the image index for context.
+func imageURLs(req ai.GenerateImageRequest) ([]string, error) {
 	if len(req.Images) == 0 {
-		return nil
+		return nil, nil
 	}
 	urls := make([]string, 0, len(req.Images))
-	for _, img := range req.Images {
-		if img.URL != "" {
-			urls = append(urls, img.URL)
+	for i, img := range req.Images {
+		if img.URL == "" {
+			return nil, fmt.Errorf(
+				"kie: image[%d]: inline images not supported; upload and pass URL", i,
+			)
 		}
+		urls = append(urls, img.URL)
 	}
-	return urls
+	return urls, nil
 }
 
 // buildGPTImage2TextInput builds the `input` for `gpt-image-2-text-to-image`.
-// Schema fields: prompt, aspect_ratio, resolution.
-func buildGPTImage2TextInput(req ai.GenerateImageRequest, opts ImageOptions) map[string]any {
+// Schema fields: prompt, aspect_ratio, resolution, n, seed.
+func buildGPTImage2TextInput(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	in := map[string]any{}
 	if req.Prompt != "" {
 		in["prompt"] = req.Prompt
@@ -73,18 +83,28 @@ func buildGPTImage2TextInput(req ai.GenerateImageRequest, opts ImageOptions) map
 	if res := pick(opts.Resolution, req.Size); res != "" {
 		in["resolution"] = res
 	}
+	if req.N > 0 {
+		in["n"] = req.N
+	}
+	if req.Seed != nil {
+		in["seed"] = *req.Seed
+	}
 	applyExtra(in, opts.Extra)
-	return in
+	return in, nil
 }
 
 // buildGPTImage2EditInput builds the `input` for `gpt-image-2-image-to-image`.
-// Schema fields: prompt, input_urls, aspect_ratio, resolution.
-func buildGPTImage2EditInput(req ai.GenerateImageRequest, opts ImageOptions) map[string]any {
+// Schema fields: prompt, input_urls, aspect_ratio, resolution, n, seed.
+func buildGPTImage2EditInput(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	in := map[string]any{}
 	if req.Prompt != "" {
 		in["prompt"] = req.Prompt
 	}
-	if urls := imageURLs(req); len(urls) > 0 {
+	urls, err := imageURLs(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(urls) > 0 {
 		in["input_urls"] = urls
 	}
 	if req.AspectRatio != "" {
@@ -93,18 +113,29 @@ func buildGPTImage2EditInput(req ai.GenerateImageRequest, opts ImageOptions) map
 	if res := pick(opts.Resolution, req.Size); res != "" {
 		in["resolution"] = res
 	}
+	if req.N > 0 {
+		in["n"] = req.N
+	}
+	if req.Seed != nil {
+		in["seed"] = *req.Seed
+	}
 	applyExtra(in, opts.Extra)
-	return in
+	return in, nil
 }
 
 // buildNanoBanana2Input builds the `input` for `nano-banana-2`.
-// Schema fields: prompt, image_input, aspect_ratio, resolution, output_format.
-func buildNanoBanana2Input(req ai.GenerateImageRequest, opts ImageOptions) map[string]any {
+// Schema fields: prompt, image_input, aspect_ratio, resolution, output_format,
+// n, seed.
+func buildNanoBanana2Input(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	in := map[string]any{}
 	if req.Prompt != "" {
 		in["prompt"] = req.Prompt
 	}
-	if urls := imageURLs(req); len(urls) > 0 {
+	urls, err := imageURLs(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(urls) > 0 {
 		in["image_input"] = urls
 	}
 	if req.AspectRatio != "" {
@@ -116,8 +147,14 @@ func buildNanoBanana2Input(req ai.GenerateImageRequest, opts ImageOptions) map[s
 	if opts.OutputFormat != "" {
 		in["output_format"] = opts.OutputFormat
 	}
+	if req.N > 0 {
+		in["n"] = req.N
+	}
+	if req.Seed != nil {
+		in["seed"] = *req.Seed
+	}
 	applyExtra(in, opts.Extra)
-	return in
+	return in, nil
 }
 
 // pick returns the first non-empty string.

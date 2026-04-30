@@ -1,6 +1,8 @@
 package kie
 
-import "os"
+import (
+	"os"
+)
 
 // Provider is the entry point for constructing Kie.AI image models and
 // invoking file-upload helpers.
@@ -24,12 +26,17 @@ func WithConfig(cfg Config) Option {
 	return func(c *Config) { *c = cfg }
 }
 
-// NewProvider builds a Kie.AI provider. apiKey takes precedence; if empty, the
-// constructor falls back to the KIE_API_KEY environment variable.
+// NewProvider builds a Kie.AI provider. apiKey takes precedence over any key
+// set by Options; if still empty after Options, the constructor falls back to
+// the KIE_API_KEY environment variable.
 func NewProvider(apiKey string, opts ...Option) *Provider {
-	cfg := Config{APIKey: apiKey}
+	var cfg Config
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	// Explicit apiKey parameter always wins over whatever Options may have set.
+	if apiKey != "" {
+		cfg.APIKey = apiKey
 	}
 	if cfg.APIKey == "" {
 		cfg.APIKey = os.Getenv("KIE_API_KEY")
@@ -42,5 +49,24 @@ func (p *Provider) Image(modelID ImageModelID) *ImageModel {
 	return newImageModel(modelID, p.cfg)
 }
 
-// Config returns a copy of the resolved configuration.
-func (p *Provider) Config() Config { return p.cfg }
+// Config returns a deep copy of the resolved configuration so callers cannot
+// mutate provider internals (Headers map and HTTPClient are cloned).
+func (p *Provider) Config() Config {
+	cp := p.cfg
+
+	// Deep-clone the mutable Headers map.
+	if p.cfg.Headers != nil {
+		cp.Headers = make(map[string]string, len(p.cfg.Headers))
+		for k, v := range p.cfg.Headers {
+			cp.Headers[k] = v
+		}
+	}
+
+	// Deep-clone the HTTPClient pointer by copying the struct.
+	if p.cfg.HTTPClient != nil {
+		clone := *p.cfg.HTTPClient
+		cp.HTTPClient = &clone
+	}
+
+	return cp
+}

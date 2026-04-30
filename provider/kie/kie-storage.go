@@ -47,41 +47,82 @@ func (p *Provider) UploadBase64(ctx context.Context, data string, opts UploadOpt
 }
 
 // UploadStream sends a binary blob via multipart/form-data to
-// `POST /api/file-stream-upload`. Recommended for files >10MB.
+// `POST /api/file-stream-upload`. This is a convenience wrapper around
+// UploadFromReader for callers that already have the data in memory.
 //
 // `filename` is sent as the multipart `filename=` and, when opts.FileName is
 // empty, also as the `fileName` field.
 func (p *Provider) UploadStream(ctx context.Context, blob []byte, filename string, opts UploadOptions) (string, error) {
-	buf := &bytes.Buffer{}
-	mw := multipart.NewWriter(buf)
+	return p.UploadFromReader(ctx, bytes.NewReader(blob), filename, opts)
+}
 
-	fw, err := mw.CreateFormFile("file", filename)
-	if err != nil {
-		return "", fmt.Errorf("kie: multipart file part: %w", err)
-	}
-	if _, err := io.Copy(fw, bytes.NewReader(blob)); err != nil {
-		return "", fmt.Errorf("kie: copy file part: %w", err)
-	}
-	if err := mw.WriteField("uploadPath", opts.UploadPath); err != nil {
-		return "", fmt.Errorf("kie: multipart uploadPath: %w", err)
-	}
-	if opts.FileName != "" {
-		if err := mw.WriteField("fileName", opts.FileName); err != nil {
-			return "", fmt.Errorf("kie: multipart fileName: %w", err)
+// UploadFromReader streams a file via multipart/form-data to
+// `POST /api/file-stream-upload` without buffering the entire body in memory.
+// It uses an io.Pipe so the multipart.Writer writes directly into the HTTP
+// request body.
+//
+// `filename` is sent as the multipart `filename=` and, when opts.FileName is
+// empty, also as the `fileName` field.
+func (p *Provider) UploadFromReader(
+	ctx context.Context, r io.Reader, filename string, opts UploadOptions,
+) (string, error) {
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	contentType := mw.FormDataContentType()
+
+	// Write multipart form data in a goroutine; the HTTP request reads
+	// from the pipe reader concurrently.
+	errCh := make(chan error, 1)
+	go func() {
+		defer pw.Close()
+
+		fw, err := mw.CreateFormFile("file", filename)
+		if err != nil {
+			pw.CloseWithError(fmt.Errorf("kie: multipart file part: %w", err))
+			errCh <- err
+			return
 		}
-	}
-	if err := mw.Close(); err != nil {
-		return "", fmt.Errorf("kie: multipart close: %w", err)
-	}
+		if _, err := io.Copy(fw, r); err != nil {
+			pw.CloseWithError(fmt.Errorf("kie: copy file part: %w", err))
+			errCh <- err
+			return
+		}
+		if err := mw.WriteField("uploadPath", opts.UploadPath); err != nil {
+			pw.CloseWithError(fmt.Errorf("kie: multipart uploadPath: %w", err))
+			errCh <- err
+			return
+		}
+		if opts.FileName != "" {
+			if err := mw.WriteField("fileName", opts.FileName); err != nil {
+				pw.CloseWithError(fmt.Errorf("kie: multipart fileName: %w", err))
+				errCh <- err
+				return
+			}
+		}
+		if err := mw.Close(); err != nil {
+			pw.CloseWithError(fmt.Errorf("kie: multipart close: %w", err))
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
 
 	url := buildKieURL(&p.cfg, "/api/file-stream-upload")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, pr)
 	if err != nil {
+		pr.Close()
 		return "", fmt.Errorf("kie: build stream upload request: %w", err)
 	}
-	p.applyHeaders(req, mw.FormDataContentType())
+	p.applyHeaders(req, contentType)
 
-	return p.doUpload(req)
+	result, uploadErr := p.doUpload(req)
+
+	// Wait for the writer goroutine to finish; surface its error only if
+	// the upload itself succeeded (upload errors take precedence).
+	if writeErr := <-errCh; writeErr != nil && uploadErr == nil {
+		return "", writeErr
+	}
+	return result, uploadErr
 }
 
 // doUpload runs an upload request and unwraps the standard

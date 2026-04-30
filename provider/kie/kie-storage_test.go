@@ -3,6 +3,7 @@ package kie
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -138,8 +139,8 @@ func TestUploadBase64_ErrorEnvelope(t *testing.T) {
 	if err == nil {
 		t.Fatal("err = nil")
 	}
-	ke, ok := err.(*KieError)
-	if !ok {
+	var ke *KieError
+	if !errors.As(err, &ke) {
 		t.Fatalf("err type=%T", err)
 	}
 	if ke.Code != 400 || ke.Msg != "bad path" {

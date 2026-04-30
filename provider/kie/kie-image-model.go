@@ -143,7 +143,10 @@ func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfo
 		return recordInfoData{}, fmt.Errorf("kie: parse recordInfo response: %w", err)
 	}
 	if parsed.Code != 200 {
-		return recordInfoData{}, &KieError{Code: parsed.Code, Msg: parsed.Msg, Status: status, RawBody: string(respBody)}
+		return recordInfoData{}, &KieError{
+			Code: parsed.Code, Msg: parsed.Msg,
+			Status: status, RawBody: string(respBody),
+		}
 	}
 	return parsed.Data, nil
 }
@@ -152,11 +155,11 @@ func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfo
 func (m *ImageModel) buildInput(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	switch m.modelID {
 	case ModelGPTImage2TextToImage:
-		return buildGPTImage2TextInput(req, opts), nil
+		return buildGPTImage2TextInput(req, opts)
 	case ModelGPTImage2ImageToImage:
-		return buildGPTImage2EditInput(req, opts), nil
+		return buildGPTImage2EditInput(req, opts)
 	case ModelNanoBanana2:
-		return buildNanoBanana2Input(req, opts), nil
+		return buildNanoBanana2Input(req, opts)
 	default:
 		return nil, fmt.Errorf("kie: unsupported model %q", m.modelID)
 	}
@@ -258,7 +261,7 @@ func normalizeState(s string) taskState {
 // doHTTP runs req, returning body + status. Errors at the transport layer are
 // returned verbatim so callers (and tests) can match on them.
 func doHTTP(client *http.Client, req *http.Request) ([]byte, int, error) {
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // URL is constructed internally, not from user input.
 	if err != nil {
 		// Surface ctx errors directly so callers can errors.Is(ctx.Err()).
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -35,8 +35,8 @@ type createTaskResponse struct {
 // string in `resultJson` (e.g. `{"resultUrls":["https://..."]}`). Both shapes
 // are normalised by recordInfoData.URLs.
 type recordInfoResponse struct {
-	Code int             `json:"code"`
-	Msg  string          `json:"msg"`
+	Code int            `json:"code"`
+	Msg  string         `json:"msg"`
 	Data recordInfoData `json:"data"`
 }
 

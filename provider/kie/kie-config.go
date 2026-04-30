@@ -43,15 +43,16 @@ const (
 	defaultPollTimeout  = 5 * time.Minute
 )
 
-// resolved returns a copy of cfg with zero fields filled in.
+// resolved returns a copy of cfg with non-positive fields filled in with
+// defaults. Negative durations are treated as unset (same as zero).
 func (c Config) resolved() Config {
-	if c.Timeout == 0 {
+	if c.Timeout <= 0 {
 		c.Timeout = defaultTimeout
 	}
-	if c.PollInterval == 0 {
+	if c.PollInterval <= 0 {
 		c.PollInterval = defaultPollInterval
 	}
-	if c.PollTimeout == 0 {
+	if c.PollTimeout <= 0 {
 		c.PollTimeout = defaultPollTimeout
 	}
 	if c.HTTPClient == nil {
