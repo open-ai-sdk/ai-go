@@ -191,10 +191,25 @@ func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
 	cp.toolInputStarted[tcID] = true
 	cp.toolArgsAccum[tcID] = ev.ToolCallArgsDelta
 
-	out := []Chunk{{Type: ChunkToolInputStart, Fields: map[string]any{
+	var out []Chunk
+	// End any active reasoning block before the tool call starts so the
+	// downstream PersistedMessageBuilder appends the reasoning part BEFORE
+	// the tool part — preserves chronological order on rehydration.
+	// Mirrors chunksTextDelta's reasoning-end emission at the text/reasoning
+	// boundary (matches ai-sdk-node's per-block reasoning-start/-end events).
+	if cp.reasoningStarted {
+		reasoningEndFields := map[string]any{"id": cp.textBlockID}
+		if cp.lastThoughtSignature != "" {
+			reasoningEndFields["signature"] = cp.lastThoughtSignature
+		}
+		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
+		cp.reasoningStarted = false
+	}
+
+	out = append(out, Chunk{Type: ChunkToolInputStart, Fields: map[string]any{
 		"toolCallId": tcID,
 		"toolName":   ev.ToolCallName,
-	}}}
+	}})
 	if ev.ToolCallArgsDelta != "" {
 		out = append(out, Chunk{Type: ChunkToolInputDelta, Fields: map[string]any{
 			"toolCallId":     tcID,
