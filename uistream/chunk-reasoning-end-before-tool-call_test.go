@@ -86,7 +86,12 @@ func TestChunksToolCallStart_PartOrderInPersistedBuilder(t *testing.T) {
 	events := []engine.StepEvent{
 		{Type: engine.StepEventStepStart},
 		{Type: engine.StepEventReasoningDelta, ReasoningDelta: "I should call the painter."},
-		{Type: engine.StepEventToolCallStart, ToolCallID: "call_1", ToolCallName: "painter", ToolCallArgsDelta: `{"prompt":"cat"}`},
+		{
+			Type:              engine.StepEventToolCallStart,
+			ToolCallID:        "call_1",
+			ToolCallName:      "painter",
+			ToolCallArgsDelta: `{"prompt":"cat"}`,
+		},
 		{Type: engine.StepEventToolCallReady, ToolCallID: "call_1", ToolCallName: "painter"},
 		{Type: engine.StepEventToolResult, ToolResult: &engine.ToolResult{
 			ID: "call_1", Name: "painter", Args: `{"prompt":"cat"}`, Output: `{"kind":"painter","status":"completed"}`,
