@@ -192,6 +192,19 @@ func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
 	cp.toolArgsAccum[tcID] = ev.ToolCallArgsDelta
 
 	var out []Chunk
+	// End any active text block before the tool call starts. Without this,
+	// a model that interleaves text → tool → text within a single step keeps
+	// the same text block id for all text deltas, so downstream consumers
+	// concatenate every text segment into the FIRST text part and render
+	// tool calls after it — losing chronological order. Advancing the block
+	// id ensures the text after the tool gets a fresh text-start with a new
+	// id and lands as a separate part.
+	if cp.textStarted {
+		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
+		cp.textStarted = false
+		cp.textBlockCount++
+		cp.textBlockID = blockID(cp.textBlockCount)
+	}
 	// End any active reasoning block before the tool call starts so the
 	// downstream PersistedMessageBuilder appends the reasoning part BEFORE
 	// the tool part — preserves chronological order on rehydration.
