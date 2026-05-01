@@ -132,9 +132,20 @@ func (cp *ChunkProducer) translateEvent(ev engine.StepEvent) ([]Chunk, string) {
 	return nil, ""
 }
 
-func (cp *ChunkProducer) chunksStepStart() []Chunk {
+// advanceBlockID rotates the active text/reasoning block id. Every block
+// boundary (text↔reasoning, text→tool, reasoning→tool, step→step) calls this
+// before the next start chunk so each conceptual block ends up with a unique
+// id — mirrors ai-sdk-node's use of Anthropic's `content_block_index`, where
+// the provider naturally assigns a fresh index per content block. Without
+// this, downstream UIs that key parts by id (find-or-merge by `id`) collapse
+// consecutive same-type blocks (e.g. text → tool → text) into one part.
+func (cp *ChunkProducer) advanceBlockID() {
 	cp.textBlockCount++
 	cp.textBlockID = blockID(cp.textBlockCount)
+}
+
+func (cp *ChunkProducer) chunksStepStart() []Chunk {
+	cp.advanceBlockID()
 	cp.textStarted = false
 	cp.reasoningStarted = false
 	cp.lastThoughtSignature = ""
@@ -153,6 +164,9 @@ func (cp *ChunkProducer) chunksTextDelta(ev engine.StepEvent) ([]Chunk, string) 
 		}
 		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
 		cp.reasoningStarted = false
+		// Advance so the new text block does not reuse the just-closed
+		// reasoning block's id (downstream UIs key parts by id).
+		cp.advanceBlockID()
 	}
 	if !cp.textStarted {
 		out = append(out, Chunk{Type: ChunkTextStart, Fields: map[string]any{"id": cp.textBlockID}})
@@ -168,6 +182,14 @@ func (cp *ChunkProducer) chunksTextDelta(ev engine.StepEvent) ([]Chunk, string) 
 
 func (cp *ChunkProducer) chunksReasoningDelta(ev engine.StepEvent) []Chunk {
 	var out []Chunk
+	// End active text block before reasoning starts. Symmetric to chunksTextDelta's
+	// reasoning-end emission — preserves chronological order when a model
+	// interleaves text and reasoning within a step.
+	if cp.textStarted {
+		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
+		cp.textStarted = false
+		cp.advanceBlockID()
+	}
 	if !cp.reasoningStarted {
 		out = append(out, Chunk{Type: ChunkReasoningStart, Fields: map[string]any{"id": cp.textBlockID}})
 		cp.reasoningStarted = true
@@ -202,8 +224,7 @@ func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
 	if cp.textStarted {
 		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
 		cp.textStarted = false
-		cp.textBlockCount++
-		cp.textBlockID = blockID(cp.textBlockCount)
+		cp.advanceBlockID()
 	}
 	// End any active reasoning block before the tool call starts so the
 	// downstream PersistedMessageBuilder appends the reasoning part BEFORE
@@ -217,6 +238,9 @@ func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
 		}
 		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
 		cp.reasoningStarted = false
+		// Advance so any text/reasoning block emitted after the tool returns
+		// uses a fresh id (avoid id collision with the just-closed block).
+		cp.advanceBlockID()
 	}
 
 	out = append(out, Chunk{Type: ChunkToolInputStart, Fields: map[string]any{
