@@ -267,14 +267,145 @@ func TestChatLanguageModel_Stream_StructuredOutput(t *testing.T) {
 	}
 }
 
+func TestChatLanguageModel_Stream_ReasoningEffort(t *testing.T) {
+	srv, captured := chatServer(t, chatSSE("thinking reply"))
+	defer srv.Close()
+
+	m := openai.NewChatLanguageModel("claude-sonnet-4-20250514", openai.Config{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+	})
+
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{ai.UserMessage("explain quantum physics")},
+		ProviderOptions: map[string]any{
+			"openai": openai.ChatProviderOptions{
+				ReasoningEffort: "high",
+			},
+		},
+	}
+	ch, err := m.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Drain events.
+	for range ch {
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(*captured, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+
+	re, ok := body["reasoning_effort"]
+	if !ok {
+		t.Fatal("expected reasoning_effort in request body, not found")
+	}
+	if re != "high" {
+		t.Errorf("expected reasoning_effort=high, got %v", re)
+	}
+}
+
+func TestChatLanguageModel_Stream_ReasoningEffort_NotSetWhenEmpty(t *testing.T) {
+	srv, captured := chatServer(t, chatSSE("plain reply"))
+	defer srv.Close()
+
+	m := openai.NewChatLanguageModel("gpt-4o", openai.Config{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+	})
+
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{ai.UserMessage("hello")},
+	}
+	ch, err := m.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range ch {
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(*captured, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+
+	if _, ok := body["reasoning_effort"]; ok {
+		t.Error("expected no reasoning_effort in request body when not configured")
+	}
+}
+
+func TestChatLanguageModel_Stream_UserProviderOption(t *testing.T) {
+	srv, captured := chatServer(t, chatSSE("ok"))
+	defer srv.Close()
+
+	m := openai.NewChatLanguageModel("gpt-4o", openai.Config{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+	})
+
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{ai.UserMessage("hi")},
+		ProviderOptions: map[string]any{
+			"openai": openai.ChatProviderOptions{
+				User: "user-abc-123",
+			},
+		},
+	}
+	ch, err := m.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range ch {
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(*captured, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+
+	if u, ok := body["user"]; !ok || u != "user-abc-123" {
+		t.Errorf("expected user=user-abc-123, got %v", body["user"])
+	}
+}
+
 func TestChatProviderOptions_ParseFromMap(t *testing.T) {
-	// ChatLanguageModel inherits from openaichat — no options are parsed yet.
-	// This test validates that constructing with Config works cleanly.
+	// Validates that constructing with Config works cleanly and options can be
+	// passed as a map (e.g., from JSON deserialization) as well as a struct.
+	srv, captured := chatServer(t, chatSSE("ok"))
+	defer srv.Close()
+
 	m := openai.NewChatLanguageModel("gpt-4o", openai.Config{
 		APIKey:  "key",
-		BaseURL: "http://localhost",
+		BaseURL: srv.URL,
 	})
-	if m.ModelID() != "gpt-4o" {
-		t.Errorf("expected gpt-4o, got %q", m.ModelID())
+
+	// Pass provider options as a map (simulating JSON-deserialized input).
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{ai.UserMessage("hi")},
+		ProviderOptions: map[string]any{
+			"openai": map[string]any{
+				"reasoningEffort": "medium",
+				"user":            "u-456",
+			},
+		},
+	}
+	ch, err := m.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range ch {
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(*captured, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+
+	if re, ok := body["reasoning_effort"]; !ok || re != "medium" {
+		t.Errorf("expected reasoning_effort=medium, got %v", body["reasoning_effort"])
+	}
+	if u, ok := body["user"]; !ok || u != "u-456" {
+		t.Errorf("expected user=u-456, got %v", body["user"])
 	}
 }
