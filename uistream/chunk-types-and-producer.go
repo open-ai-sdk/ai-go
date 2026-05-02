@@ -132,9 +132,20 @@ func (cp *ChunkProducer) translateEvent(ev engine.StepEvent) ([]Chunk, string) {
 	return nil, ""
 }
 
-func (cp *ChunkProducer) chunksStepStart() []Chunk {
+// advanceBlockID rotates the active text/reasoning block id. Every block
+// boundary (text↔reasoning, text→tool, reasoning→tool, step→step) calls this
+// before the next start chunk so each conceptual block ends up with a unique
+// id — mirrors ai-sdk-node's use of Anthropic's `content_block_index`, where
+// the provider naturally assigns a fresh index per content block. Without
+// this, downstream UIs that key parts by id (find-or-merge by `id`) collapse
+// consecutive same-type blocks (e.g. text → tool → text) into one part.
+func (cp *ChunkProducer) advanceBlockID() {
 	cp.textBlockCount++
 	cp.textBlockID = blockID(cp.textBlockCount)
+}
+
+func (cp *ChunkProducer) chunksStepStart() []Chunk {
+	cp.advanceBlockID()
 	cp.textStarted = false
 	cp.reasoningStarted = false
 	cp.lastThoughtSignature = ""
@@ -153,6 +164,9 @@ func (cp *ChunkProducer) chunksTextDelta(ev engine.StepEvent) ([]Chunk, string) 
 		}
 		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
 		cp.reasoningStarted = false
+		// Advance so the new text block does not reuse the just-closed
+		// reasoning block's id (downstream UIs key parts by id).
+		cp.advanceBlockID()
 	}
 	if !cp.textStarted {
 		out = append(out, Chunk{Type: ChunkTextStart, Fields: map[string]any{"id": cp.textBlockID}})
@@ -168,6 +182,14 @@ func (cp *ChunkProducer) chunksTextDelta(ev engine.StepEvent) ([]Chunk, string) 
 
 func (cp *ChunkProducer) chunksReasoningDelta(ev engine.StepEvent) []Chunk {
 	var out []Chunk
+	// End active text block before reasoning starts. Symmetric to chunksTextDelta's
+	// reasoning-end emission — preserves chronological order when a model
+	// interleaves text and reasoning within a step.
+	if cp.textStarted {
+		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
+		cp.textStarted = false
+		cp.advanceBlockID()
+	}
 	if !cp.reasoningStarted {
 		out = append(out, Chunk{Type: ChunkReasoningStart, Fields: map[string]any{"id": cp.textBlockID}})
 		cp.reasoningStarted = true
@@ -191,10 +213,40 @@ func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
 	cp.toolInputStarted[tcID] = true
 	cp.toolArgsAccum[tcID] = ev.ToolCallArgsDelta
 
-	out := []Chunk{{Type: ChunkToolInputStart, Fields: map[string]any{
+	var out []Chunk
+	// End any active text block before the tool call starts. Without this,
+	// a model that interleaves text → tool → text within a single step keeps
+	// the same text block id for all text deltas, so downstream consumers
+	// concatenate every text segment into the FIRST text part and render
+	// tool calls after it — losing chronological order. Advancing the block
+	// id ensures the text after the tool gets a fresh text-start with a new
+	// id and lands as a separate part.
+	if cp.textStarted {
+		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
+		cp.textStarted = false
+		cp.advanceBlockID()
+	}
+	// End any active reasoning block before the tool call starts so the
+	// downstream PersistedMessageBuilder appends the reasoning part BEFORE
+	// the tool part — preserves chronological order on rehydration.
+	// Mirrors chunksTextDelta's reasoning-end emission at the text/reasoning
+	// boundary (matches ai-sdk-node's per-block reasoning-start/-end events).
+	if cp.reasoningStarted {
+		reasoningEndFields := map[string]any{"id": cp.textBlockID}
+		if cp.lastThoughtSignature != "" {
+			reasoningEndFields["signature"] = cp.lastThoughtSignature
+		}
+		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
+		cp.reasoningStarted = false
+		// Advance so any text/reasoning block emitted after the tool returns
+		// uses a fresh id (avoid id collision with the just-closed block).
+		cp.advanceBlockID()
+	}
+
+	out = append(out, Chunk{Type: ChunkToolInputStart, Fields: map[string]any{
 		"toolCallId": tcID,
 		"toolName":   ev.ToolCallName,
-	}}}
+	}})
 	if ev.ToolCallArgsDelta != "" {
 		out = append(out, Chunk{Type: ChunkToolInputDelta, Fields: map[string]any{
 			"toolCallId":     tcID,
@@ -226,14 +278,27 @@ func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
 	}
 	tr := ev.ToolResult
 
+	// Mirror ai-sdk-node's contract (packages/ai/src/generate-text/stream-text.ts
+	// — `output: part.output` with schema `output: z.unknown()`): emit the
+	// tool's output as-is. Tools in Go return `(string, error)`, so the raw
+	// `tr.Output` is what flows through. Consumers re-parse with their own
+	// typed shape; the stream layer no longer second-guesses.
+	//
+	// Why this shape matters: the previous behavior parsed `tr.Output` and
+	// fell back to `{"result": tr.Output}` on parse failure, producing three
+	// possible chunk shapes (parsed object / wrap object / re-stringified
+	// string after persistence). Downstream code that expected a string
+	// (e.g. SSE bridges that call `event["output"].(string)`) silently lost
+	// the payload. Tools that return large structured outputs (image
+	// generators, large search results) would also hit storage truncation
+	// boundaries that mangled the JSON before parsing — same wrap fallback
+	// fired, hiding the real shape from callers.
+	//
+	// `input` continues to parse `tr.Args` because tool args are reliably
+	// JSON-emitted by the model and downstream UIs render structured fields.
 	var parsedArgs any
 	if err := json.Unmarshal([]byte(tr.Args), &parsedArgs); err != nil {
 		parsedArgs = map[string]string{"raw": tr.Args}
-	}
-
-	var parsedOutput any
-	if err := json.Unmarshal([]byte(tr.Output), &parsedOutput); err != nil {
-		parsedOutput = map[string]string{"result": tr.Output}
 	}
 
 	inputFields := withProviderMetadata(map[string]any{
@@ -243,7 +308,7 @@ func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
 	}, ev.ProviderMetadata)
 	outputFields := withProviderMetadata(map[string]any{
 		"toolCallId": tr.ID,
-		"output":     parsedOutput,
+		"output":     tr.Output,
 	}, ev.ProviderMetadata)
 
 	return []Chunk{

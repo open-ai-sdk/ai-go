@@ -39,7 +39,7 @@ func DefineTool[T any](
 
 // schemaFromStruct builds a JSON Schema object map from a struct type.
 func schemaFromStruct(t reflect.Type) map[string]any {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -61,7 +61,7 @@ func schemaFromStruct(t reflect.Type) map[string]any {
 		properties[jsonKey] = prop
 
 		// Non-pointer fields are required.
-		if field.Type.Kind() != reflect.Ptr {
+		if field.Type.Kind() != reflect.Pointer {
 			required = append(required, jsonKey)
 		}
 	}
@@ -98,7 +98,7 @@ func jsonFieldName(field reflect.StructField) string {
 // fieldSchema builds a JSON Schema property map for a single struct field.
 func fieldSchema(field reflect.StructField) map[string]any {
 	ft := field.Type
-	for ft.Kind() == reflect.Ptr {
+	for ft.Kind() == reflect.Pointer {
 		ft = ft.Elem()
 	}
 
