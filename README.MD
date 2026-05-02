@@ -84,6 +84,40 @@ model := openai_compatible.NewLanguageModel("deepseek-chat", openai_compatible.C
 })
 ```
 
+### Reasoning / Thinking (Claude, o-series, gpt-5)
+
+Enable extended thinking for reasoning-capable models by setting `ReasoningEffort`
+in provider options. This sends `reasoning_effort` in the request body, which proxy
+servers like CLIProxyAPI translate to provider-native thinking parameters.
+
+```go
+// Chat Completions path — enable thinking:
+model := openai.NewChatLanguageModel("claude-sonnet-4-20250514", openai.Config{
+    BaseURL: "http://localhost:8080/v1",  // e.g. CLIProxyAPI
+    APIKey:  os.Getenv("API_KEY"),
+})
+
+result, _ := ai.StreamText(ctx, ai.GenerateTextRequest{
+    Model:    model,
+    Messages: []ai.Message{ai.UserMessage("Explain quantum entanglement")},
+    ProviderOptions: map[string]any{
+        "openai": openai.ChatProviderOptions{
+            ReasoningEffort: "high",  // "low", "medium", "high"
+        },
+    },
+})
+```
+
+When displaying the stream in a React UI via the `uistream` package, set
+`SendReasoning: true` to forward thinking chunks to the frontend:
+
+```go
+chunks := uistream.ToUIMessageStream(streamResult, "msg-1", uistream.ToUIStreamOptions{
+    SendReasoning: true,  // Required for thinking/reasoning display
+    SendSources:   true,
+})
+```
+
 ### Streaming with UI Protocol
 
 ```go

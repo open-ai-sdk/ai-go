@@ -44,8 +44,58 @@ func NewChatLanguageModel(modelID string, cfg Config) *ChatLanguageModel {
 			SupportsStreamUsage:      true,
 		},
 		ChunkTimeout: cfg.ChunkTimeout,
+		ExtraBodyFieldsForRequest: func(req ai.LanguageModelRequest) map[string]any {
+			opts := parseChatProviderOptions(req.ProviderOptions)
+			extra := make(map[string]any)
+			if opts.ReasoningEffort != "" {
+				extra["reasoning_effort"] = opts.ReasoningEffort
+			}
+			if opts.User != "" {
+				extra["user"] = opts.User
+			}
+			if len(extra) == 0 {
+				return nil
+			}
+			return extra
+		},
 	})
 	return &ChatLanguageModel{inner: inner}
+}
+
+// parseChatProviderOptions extracts ChatProviderOptions from a generic provider
+// options map. Returns zero-value ChatProviderOptions if the "openai" key is
+// missing or wrong type.
+func parseChatProviderOptions(opts map[string]any) ChatProviderOptions {
+	if opts == nil {
+		return ChatProviderOptions{}
+	}
+	raw, ok := opts["openai"]
+	if !ok {
+		return ChatProviderOptions{}
+	}
+	switch p := raw.(type) {
+	case ChatProviderOptions:
+		return p
+	case map[string]any:
+		return chatProviderOptionsFromMap(p)
+	}
+	return ChatProviderOptions{}
+}
+
+// chatProviderOptionsFromMap builds ChatProviderOptions from a generic map,
+// supporting JSON-deserialized provider options.
+func chatProviderOptionsFromMap(m map[string]any) ChatProviderOptions {
+	var p ChatProviderOptions
+	if s, ok := m["user"].(string); ok {
+		p.User = s
+	}
+	if s, ok := m["reasoningEffort"].(string); ok {
+		p.ReasoningEffort = s
+	}
+	if b, ok := m["strictJsonSchema"].(*bool); ok {
+		p.StrictJSONSchema = b
+	}
+	return p
 }
 
 // ModelID returns the OpenAI model identifier.
