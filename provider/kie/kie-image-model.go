@@ -261,7 +261,7 @@ func normalizeState(s string) taskState {
 // doHTTP runs req, returning body + status. Errors at the transport layer are
 // returned verbatim so callers (and tests) can match on them.
 func doHTTP(client *http.Client, req *http.Request) ([]byte, int, error) {
-	resp, err := client.Do(req) //nolint:gosec // URL is constructed internally, not from user input.
+	resp, err := client.Do(req)
 	if err != nil {
 		// Surface ctx errors directly so callers can errors.Is(ctx.Err()).
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
