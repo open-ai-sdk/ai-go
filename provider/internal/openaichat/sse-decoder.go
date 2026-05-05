@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -74,13 +75,10 @@ func DecodeSSEStream(
 		providerName = "openaichat"
 	}
 
-	scanner := bufio.NewScanner(body)
-	// Allow up to 1 MB per SSE line (tool schemas can be large).
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
+	reader := bufio.NewReader(body)
 	lineCount := 0
 	var finishEmitted bool
-	for scanner.Scan() {
+	for {
 		select {
 		case <-ctx.Done():
 			ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()}
@@ -88,9 +86,27 @@ func DecodeSSEStream(
 		default:
 		}
 
-		line := scanner.Text()
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if line == "" {
+					break
+				}
+			} else {
+				ch <- ai.StreamEvent{
+					Type:  ai.StreamEventError,
+					Error: fmt.Errorf("%s: read stream: %w", providerName, err),
+				}
+				return
+			}
+		}
+
+		line = strings.TrimRight(line, "\r\n")
 		lineCount++
 		if !strings.HasPrefix(line, "data: ") {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")
@@ -115,6 +131,9 @@ func DecodeSSEStream(
 		}
 
 		emitChunkEvents(chunk, ch, params.MetadataExtractor, params.SourceExtractor, &finishEmitted)
+		if errors.Is(err, io.EOF) {
+			break
+		}
 	}
 
 	if lineCount == 0 {
@@ -124,12 +143,6 @@ func DecodeSSEStream(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		ch <- ai.StreamEvent{
-			Type:  ai.StreamEventError,
-			Error: fmt.Errorf("%s: read stream: %w", providerName, err),
-		}
-	}
 }
 
 func emitChunkEvents(

@@ -106,3 +106,28 @@ func TestSSE_StopFinishReason_NoDuplicate(t *testing.T) {
 		t.Errorf("expected finish reason %q, got %q", ai.FinishReasonStop, finishEvents[0].FinishReason)
 	}
 }
+
+func TestSSE_LargeDataLineDoesNotHitScannerLimit(t *testing.T) {
+	large := strings.Repeat("x", 2*1024*1024)
+	body := sseBody(
+		`data: {"choices":[{"delta":{"content":"`+large+`"},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+	)
+
+	ch := make(chan ai.StreamEvent, 8)
+	go DecodeSSEStream(context.Background(), body, ch, SSEDecodeParams{ProviderName: "test"})
+
+	events := collectEvents(ch)
+	var sawText bool
+	for _, ev := range events {
+		if ev.Type == ai.StreamEventError {
+			t.Fatalf("unexpected stream error: %v", ev.Error)
+		}
+		if ev.Type == ai.StreamEventTextDelta && len(ev.TextDelta) == len(large) {
+			sawText = true
+		}
+	}
+	if !sawText {
+		t.Fatalf("expected large text delta event, got %#v", events)
+	}
+}
