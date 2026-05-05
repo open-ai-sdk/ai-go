@@ -93,6 +93,12 @@ func TestGolden_ToolCall(t *testing.T) {
 			ToolCallArgsDelta: `{"q":"go"}`,
 		},
 		engine.StepEvent{
+			Type:              engine.StepEventToolCallReady,
+			ToolCallID:        "tc1",
+			ToolCallName:      "search",
+			ToolCallArgsDelta: `{"q":"go"}`,
+		},
+		engine.StepEvent{
 			Type: engine.StepEventToolResult,
 			ToolResult: &engine.ToolResult{
 				ID:     "tc1",
@@ -116,6 +122,35 @@ func TestGolden_ToolCall(t *testing.T) {
 	assertContains(t, output, `"type":"tool-output-available"`)
 	assertContains(t, output, `"type":"finish-step"`)
 	assertContains(t, output, "[DONE]")
+
+	inputIdx := strings.Index(output, `"type":"tool-input-available"`)
+	outputIdx := strings.Index(output, `"type":"tool-output-available"`)
+	if inputIdx == -1 || outputIdx == -1 || inputIdx > outputIdx {
+		t.Fatalf("tool-input-available must be emitted before tool-output-available\n%s", output)
+	}
+}
+
+func TestGolden_ToolCallReadyEmitsRunningInputBeforeSlowResult(t *testing.T) {
+	output := runAdapter(
+		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
+		engine.StepEvent{
+			Type:              engine.StepEventToolCallStart,
+			ToolCallID:        "tc-slow",
+			ToolCallName:      "painter",
+			ToolCallArgsDelta: `{"prompt":"cat"}`,
+		},
+		engine.StepEvent{
+			Type:              engine.StepEventToolCallReady,
+			ToolCallID:        "tc-slow",
+			ToolCallName:      "painter",
+			ToolCallArgsDelta: `{"prompt":"cat"}`,
+		},
+	)
+
+	assertContains(t, output, `"type":"tool-input-available"`)
+	assertContains(t, output, `"toolName":"painter"`)
+	assertContains(t, output, `"prompt":"cat"`)
+	assertNotContains(t, output, `"type":"tool-output-available"`)
 }
 
 // --- error golden ---

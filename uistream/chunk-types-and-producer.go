@@ -41,6 +41,7 @@ type ChunkProducer struct {
 	textStarted      bool
 	reasoningStarted bool
 	toolInputStarted map[string]bool
+	toolInputReady   map[string]bool
 	toolArgsAccum    map[string]string
 
 	// lastFinishReason stores the finish reason from the most recent StepEventStepEnd.
@@ -54,6 +55,7 @@ func NewChunkProducer(msgID string) *ChunkProducer {
 	return &ChunkProducer{
 		msgID:            msgID,
 		toolInputStarted: make(map[string]bool),
+		toolInputReady:   make(map[string]bool),
 		toolArgsAccum:    make(map[string]string),
 	}
 }
@@ -111,6 +113,8 @@ func (cp *ChunkProducer) translateEvent(ev engine.StepEvent) ([]Chunk, string) {
 		return cp.chunksToolCallStart(ev), ""
 	case engine.StepEventToolCallDelta:
 		return cp.chunksToolCallDelta(ev), ""
+	case engine.StepEventToolCallReady:
+		return cp.chunksToolCallReady(ev), ""
 	case engine.StepEventToolResult:
 		return cp.chunksToolResult(ev), ""
 	case engine.StepEventToolCallInvalid:
@@ -272,6 +276,23 @@ func (cp *ChunkProducer) chunksToolCallDelta(ev engine.StepEvent) []Chunk {
 	}}}
 }
 
+func (cp *ChunkProducer) chunksToolCallReady(ev engine.StepEvent) []Chunk {
+	tcID := ev.ToolCallID
+	if tcID == "" || cp.toolInputReady[tcID] {
+		return nil
+	}
+	args := ev.ToolCallArgsDelta
+	if args == "" {
+		args = cp.toolArgsAccum[tcID]
+	}
+	cp.toolInputReady[tcID] = true
+	return []Chunk{{Type: ChunkToolInputAvailable, Fields: withProviderMetadata(map[string]any{
+		"toolCallId": tcID,
+		"toolName":   ev.ToolCallName,
+		"input":      parseToolArgs(args),
+	}, ev.ProviderMetadata)}}
+}
+
 func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
 	if ev.ToolResult == nil {
 		return nil
@@ -296,25 +317,30 @@ func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
 	//
 	// `input` continues to parse `tr.Args` because tool args are reliably
 	// JSON-emitted by the model and downstream UIs render structured fields.
-	var parsedArgs any
-	if err := json.Unmarshal([]byte(tr.Args), &parsedArgs); err != nil {
-		parsedArgs = map[string]string{"raw": tr.Args}
-	}
-
-	inputFields := withProviderMetadata(map[string]any{
-		"toolCallId": tr.ID,
-		"toolName":   tr.Name,
-		"input":      parsedArgs,
-	}, ev.ProviderMetadata)
 	outputFields := withProviderMetadata(map[string]any{
 		"toolCallId": tr.ID,
 		"output":     tr.Output,
 	}, ev.ProviderMetadata)
 
-	return []Chunk{
-		{Type: ChunkToolInputAvailable, Fields: inputFields},
-		{Type: ChunkToolOutputAvailable, Fields: outputFields},
+	chunks := make([]Chunk, 0, 2)
+	if tr.ID != "" && !cp.toolInputReady[tr.ID] {
+		cp.toolInputReady[tr.ID] = true
+		chunks = append(chunks, Chunk{Type: ChunkToolInputAvailable, Fields: withProviderMetadata(map[string]any{
+			"toolCallId": tr.ID,
+			"toolName":   tr.Name,
+			"input":      parseToolArgs(tr.Args),
+		}, ev.ProviderMetadata)})
 	}
+	chunks = append(chunks, Chunk{Type: ChunkToolOutputAvailable, Fields: outputFields})
+	return chunks
+}
+
+func parseToolArgs(args string) any {
+	var parsed any
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		return map[string]string{"raw": args}
+	}
+	return parsed
 }
 
 func (cp *ChunkProducer) chunksToolCallInvalid(ev engine.StepEvent) []Chunk {
