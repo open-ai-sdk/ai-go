@@ -142,7 +142,6 @@ func DecodeSSEStream(
 			Error: fmt.Errorf("%s: stream ended with zero lines", providerName),
 		}
 	}
-
 }
 
 func emitChunkEvents(
