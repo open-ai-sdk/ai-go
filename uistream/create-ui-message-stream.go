@@ -8,12 +8,12 @@ import (
 type CreateUIStreamOptions struct {
 	MessageID string
 	Metadata  any
-	OnFinish  func(result UIStreamFinishResult)
+	OnEnd     func(result UIStreamEndResult)
 	OnError   func(err error) string // return custom error message, or "" for default
 }
 
-// UIStreamFinishResult holds info about the completed stream.
-type UIStreamFinishResult struct {
+// UIStreamEndResult holds info about the completed stream.
+type UIStreamEndResult struct {
 	Text         string
 	FinishReason string
 }
@@ -113,8 +113,8 @@ func CreateUIMessageStream(w io.Writer, opts CreateUIStreamOptions, execute func
 
 	sw.writer.WriteFinishWithReason(finishReason, nil)
 
-	if opts.OnFinish != nil {
-		opts.OnFinish(UIStreamFinishResult{
+	if opts.OnEnd != nil {
+		opts.OnEnd(UIStreamEndResult{
 			Text:         sw.text,
 			FinishReason: finishReason,
 		})

@@ -200,10 +200,10 @@ func TestOpenAISSE_ContextCancelled(t *testing.T) {
 
 // Request encoder tests
 
-func TestEncodeRequest_SystemAndUserMessage(t *testing.T) {
+func TestEncodeRequest_InstructionsAndUserMessage(t *testing.T) {
 	req := ai.LanguageModelRequest{
-		System:   "You are helpful",
-		Messages: []ai.Message{ai.UserMessage("hello")},
+		Instructions: "You are helpful",
+		Messages:     []ai.Message{ai.UserMessage("hello")},
 	}
 	r, _, err := encodeRequest("gpt-4o", req, true)
 	if err != nil {

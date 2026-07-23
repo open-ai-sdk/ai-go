@@ -56,7 +56,7 @@ func EncodeRequest(
 	req ai.LanguageModelRequest,
 	streaming bool,
 ) (ChatRequest, error) {
-	msgs, err := encodeMessages(req.System, req.Messages)
+	msgs, err := encodeMessages(req.Instructions, req.Messages)
 	if err != nil {
 		return ChatRequest{}, err
 	}

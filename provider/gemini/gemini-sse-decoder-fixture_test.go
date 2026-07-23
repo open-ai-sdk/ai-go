@@ -166,10 +166,10 @@ func TestSanitizeToolSchemas(t *testing.T) {
 	}
 }
 
-func TestEncodeRequest_SystemAndMessages(t *testing.T) {
+func TestEncodeRequest_InstructionsAndMessages(t *testing.T) {
 	req := ai.LanguageModelRequest{
-		System:   "You are helpful",
-		Messages: []ai.Message{ai.UserMessage("hi")},
+		Instructions: "You are helpful",
+		Messages:     []ai.Message{ai.UserMessage("hi")},
 	}
 	cr, err := encodeRequest("gemini-2.5-flash", req, true)
 	if err != nil {

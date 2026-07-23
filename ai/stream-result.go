@@ -9,10 +9,10 @@ import (
 // StreamResult wraps a streaming response with convenient accessors.
 // It fans out the source engine channel to text-delta and raw-event subscribers.
 //
-// Callers must consume at least one channel (Events, TextStream, or Consume)
+// Callers must consume at least one channel (Stream, TextStream, or Consume)
 // or call DrainUnused/ConsumeStream to prevent goroutine leaks.
 //
-// The fan-out goroutine is started lazily on the first call to Events(),
+// The fan-out goroutine is started lazily on the first call to Stream(),
 // TextStream(), Consume(), DrainUnused(), or ConsumeStream(). Channels that
 // are not requested before the fan-out starts are automatically drained, so
 // callers never need to worry about deadlocks from unconsumed channels.
@@ -97,11 +97,11 @@ func (sr *StreamResult) TextStream() <-chan string {
 	return sr.textCh
 }
 
-// Events returns the raw engine StepEvent channel.
+// Stream returns the raw engine StepEvent channel.
 // This is an escape hatch for callers such as uistream.Adapter that need
 // full event visibility.
 // The channel is closed when the stream completes.
-func (sr *StreamResult) Events() <-chan engine.StepEvent {
+func (sr *StreamResult) Stream() <-chan engine.StepEvent {
 	sr.mu.Lock()
 	sr.eventsRequested = true
 	sr.mu.Unlock()
@@ -110,7 +110,7 @@ func (sr *StreamResult) Events() <-chan engine.StepEvent {
 }
 
 // DrainUnused starts goroutines to consume channels that won't be read.
-// Call this when only Events() is being consumed (e.g. from StreamToWriter)
+// Call this when only Stream() is being consumed (e.g. from StreamToWriter)
 // to prevent the fan-out goroutine from deadlocking on full buffers.
 //
 // Safe to call multiple times; only the first call spawns drain goroutines.
@@ -123,7 +123,7 @@ func (sr *StreamResult) DrainUnused() {
 	sr.drainOnce.Do(func() {
 		// Mark textCh and consumeCh as requested so the fan-out sends to them,
 		// then drain them in background goroutines.
-		// NOTE: Do NOT call ensureStarted() here — the caller will call Events()
+		// NOTE: Do NOT call ensureStarted() here — the caller will call Stream()
 		// (or TextStream/Consume) which triggers ensureStarted with all flags set.
 		sr.mu.Lock()
 		sr.textRequested = true
@@ -145,7 +145,7 @@ func (sr *StreamResult) DrainUnused() {
 // Call this when you want the stream to run to completion without reading
 // any output — e.g. when side effects are handled via callbacks or merge.
 //
-// Unlike DrainUnused (which preserves Events() for reading), ConsumeStream
+// Unlike DrainUnused (which preserves Stream() for reading), ConsumeStream
 // drains everything including the events channel.
 //
 // Must not be combined with DrainUnused or direct channel reads.

@@ -30,8 +30,8 @@ func TestProviderContract_ProviderOptionsPassthrough(t *testing.T) {
 
 	model := &captureOptsModel{capture: &capturedOpts}
 	_, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-		Model:  model,
-		System: "test",
+		Model:        model,
+		Instructions: "test",
 		Messages: []ai.Message{
 			ai.UserMessage("hello"),
 		},

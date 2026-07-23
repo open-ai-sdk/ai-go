@@ -26,8 +26,8 @@ type EmbeddingModel interface {
 // LanguageModelRequest is the normalized input passed to LanguageModel.Stream.
 // Providers should read ToolChoice to determine the tool selection policy.
 type LanguageModelRequest struct {
-	// System is the system prompt, already resolved from GenerateTextRequest.System.
-	System string
+	// Instructions is the system prompt, already resolved from GenerateTextRequest.Instructions.
+	Instructions string
 	// Messages is the full conversation history for this step.
 	Messages []Message
 	// Tools is the list of callable function tools available for this step.

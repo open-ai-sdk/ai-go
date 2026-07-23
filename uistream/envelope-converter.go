@@ -51,7 +51,7 @@ func applyBodyHints(req *ai.GenerateTextRequest, body map[string]any) {
 	}
 
 	if system, ok := body["system"].(string); ok && system != "" {
-		req.System = system
+		req.Instructions = system
 	}
 
 	if maxSteps, ok := numericInt(body["maxSteps"]); ok && maxSteps > 0 {

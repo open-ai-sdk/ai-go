@@ -4,8 +4,8 @@ import "testing"
 
 // --- StopCondition helpers ---
 
-func TestStepCountIs(t *testing.T) {
-	cond := StepCountIs(3)
+func TestIsStepCount(t *testing.T) {
+	cond := IsStepCount(3)
 
 	if cond(2, &StepResult{}) {
 		t.Error("should not stop at step 2 when limit is 3")

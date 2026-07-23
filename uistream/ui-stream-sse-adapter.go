@@ -34,7 +34,7 @@ type Adapter struct {
 	msgID              string
 	toolResultHook     ToolResultHook
 	sourceHook         SourceHook
-	onFinish           func(text, finishReason string)
+	onEnd              func(text, finishReason string)
 	persistenceBuilder *PersistedMessageBuilder
 }
 
@@ -58,11 +58,11 @@ func (a *Adapter) WithSourceHook(hook SourceHook) *Adapter {
 	return a
 }
 
-// WithOnFinish sets a callback invoked after the stream completes.
+// WithOnEnd sets a callback invoked after the stream completes.
 // text is the full accumulated assistant text; finishReason is "stop" or the
 // finish reason captured from the last finish chunk.
-func (a *Adapter) WithOnFinish(fn func(text, finishReason string)) *Adapter {
-	a.onFinish = fn
+func (a *Adapter) WithOnEnd(fn func(text, finishReason string)) *Adapter {
+	a.onEnd = fn
 	return a
 }
 
@@ -217,8 +217,8 @@ func (a *Adapter) Stream(ch <-chan engine.StepEvent, w io.Writer) string {
 
 	text := cs.FullText()
 
-	if a.onFinish != nil {
-		a.onFinish(text, lastFinishReason)
+	if a.onEnd != nil {
+		a.onEnd(text, lastFinishReason)
 	}
 
 	return text

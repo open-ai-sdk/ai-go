@@ -11,8 +11,8 @@ type StepResult struct {
 	Text         string
 }
 
-// StepCountIs returns a StopCondition that stops after n completed steps.
-func StepCountIs(n int) StopCondition {
+// IsStepCount returns a StopCondition that stops after n completed steps.
+func IsStepCount(n int) StopCondition {
 	return func(step int, _ *StepResult) bool {
 		return step >= n
 	}

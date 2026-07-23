@@ -6,8 +6,8 @@ import "encoding/json"
 type GenerateTextRequest struct {
 	// Model is the language model to call.
 	Model LanguageModel
-	// System is an optional system prompt prepended before the conversation.
-	System string
+	// Instructions is an optional system prompt prepended before the conversation.
+	Instructions string
 	// Messages is the conversation history.
 	Messages []Message
 	// Tools is an optional set of callable functions for multi-step tool loops.
@@ -28,15 +28,15 @@ type GenerateTextRequest struct {
 	ProviderOptions map[string]any
 	// PrepareStep is called before each tool-loop step to allow per-step overrides.
 	PrepareStep PrepareStepFunc
-	// ExperimentalRepairToolCall attempts to repair invalid or unknown tool calls
-	// before they are surfaced as invalid. Experimental and subject to change.
-	ExperimentalRepairToolCall ExperimentalRepairToolCallFunc
+	// RepairToolCall attempts to repair invalid or unknown tool calls
+	// before they are surfaced as invalid.
+	RepairToolCall RepairToolCallFunc
 	// ActiveTools filters the tool set to only these tool names. Nil means all tools.
 	ActiveTools []string
-	// OnStepFinish is called after each step completes.
-	OnStepFinish func(StepFinishEvent)
-	// OnFinish is called when the entire run completes.
-	OnFinish func(FinishEvent)
+	// OnStepEnd is called after each step completes.
+	OnStepEnd func(StepEndEvent)
+	// OnEnd is called when the entire run completes.
+	OnEnd func(EndEvent)
 	// OnChunk is called for every engine event during streaming.
 	OnChunk func(ChunkEvent)
 	// OnError is called when an error occurs during the run.
@@ -118,15 +118,15 @@ type PrepareStepResult struct {
 	Model           LanguageModel
 	ToolChoice      *ToolChoice
 	ActiveTools     []string
-	System          string
+	Instructions    string
 	ProviderOptions map[string]any
 }
 
 // PrepareStepFunc is called before each step to allow per-step configuration overrides.
 type PrepareStepFunc func(ctx PrepareStepContext) *PrepareStepResult
 
-// StepFinishEvent is passed to the OnStepFinish callback after each step.
-type StepFinishEvent struct {
+// StepEndEvent is passed to the OnStepEnd callback after each step.
+type StepEndEvent struct {
 	StepNumber       int
 	Text             string
 	Reasoning        string
@@ -139,8 +139,8 @@ type StepFinishEvent struct {
 	Response         Response
 }
 
-// FinishEvent is passed to the OnFinish callback when the entire run completes.
-type FinishEvent struct {
+// EndEvent is passed to the OnEnd callback when the entire run completes.
+type EndEvent struct {
 	Text             string
 	Reasoning        string
 	Steps            []StepOutput

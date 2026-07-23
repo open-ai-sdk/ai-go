@@ -43,7 +43,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 
 		model := params.Model
 		req := params.Request
-		req.System = "" // already prepended as system message in history
+		req.Instructions = "" // already prepended as system message in history
 		req.Messages = history
 		if len(req.Tools) == 0 && params.Tools != nil && len(params.Tools.Definitions) > 0 {
 			req.Tools = params.Tools.Definitions
@@ -61,8 +61,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				if psResult.ToolChoice != nil {
 					req.ToolChoice = psResult.ToolChoice
 				}
-				if psResult.System != "" {
-					req.System = psResult.System
+				if psResult.Instructions != "" {
+					req.Instructions = psResult.Instructions
 				}
 				if psResult.ProviderOptions != nil {
 					req.ProviderOptions = mergeProviderOptions(req.ProviderOptions, psResult.ProviderOptions)
@@ -97,7 +97,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				Warnings:         sr.warnings,
 			}
 			out <- stepEndEv
-			emitOnStepFinish(params.Callbacks, step, nil, nil, sr)
+			emitOnStepEnd(params.Callbacks, step, nil, nil, sr)
 			completedSteps = append(completedSteps, StepResultInfo{
 				StepNumber:       step,
 				Text:             fullText,
@@ -109,7 +109,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				Warnings:         sr.warnings,
 			})
 			emitStructuredOutput(ctx, out, params, history)
-			emitOnFinish(params.Callbacks, completedSteps, sr)
+			emitOnEnd(params.Callbacks, completedSteps, sr)
 			out <- StepEvent{Type: StepEventDone}
 			return
 		}
@@ -142,7 +142,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			ProviderMetadata: sr.providerMeta,
 			Warnings:         sr.warnings,
 		}
-		emitOnStepFinish(params.Callbacks, step, stepToolCalls, stepToolResults, sr)
+		emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr)
 
 		completedSteps = append(completedSteps, StepResultInfo{
 			StepNumber:       step,
@@ -163,7 +163,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
 			if params.StopWhen(step+1, stopResult) {
 				emitStructuredOutput(ctx, out, params, history)
-				emitOnFinish(params.Callbacks, completedSteps, sr)
+				emitOnEnd(params.Callbacks, completedSteps, sr)
 				out <- StepEvent{Type: StepEventDone}
 				return
 			}
@@ -178,7 +178,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
 	// Matches ai-sdk-node semantics (see packages/ai generate-text.ts:1008).
 	emitStructuredOutput(ctx, out, params, history)
-	emitOnFinish(params.Callbacks, completedSteps, lastSR)
+	emitOnEnd(params.Callbacks, completedSteps, lastSR)
 	out <- StepEvent{Type: StepEventDone}
 }
 
@@ -528,8 +528,8 @@ func validateAndRepairToolCall(
 	}
 
 	repaired, repairErr := repair(ctx, ToolCallRepairContext{
-		System:   req.System,
-		Messages: req.Messages,
+		Instructions: req.Instructions,
+		Messages:     req.Messages,
 		ToolCall: ToolCallInfo{
 			ID:               tc.id,
 			Name:             tc.name,
@@ -675,8 +675,8 @@ func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState) *Too
 
 func buildInitialHistory(req Request) []Message {
 	msgs := make([]Message, 0, len(req.Messages)+1)
-	if req.System != "" {
-		msgs = append(msgs, Message{Role: "system", Content: []ContentPart{{Type: "text", Text: req.System}}})
+	if req.Instructions != "" {
+		msgs = append(msgs, Message{Role: "system", Content: []ContentPart{{Type: "text", Text: req.Instructions}}})
 	}
 	msgs = append(msgs, req.Messages...)
 	return msgs
@@ -745,17 +745,17 @@ func filterTools(tools []ToolDefinition, active []string) []ToolDefinition {
 	return filtered
 }
 
-func emitOnStepFinish(
+func emitOnStepEnd(
 	cb *LifecycleCallbacks,
 	step int,
 	toolCalls []ToolCallInfo,
 	toolResults []ToolResult,
 	sr streamResult,
 ) {
-	if cb == nil || cb.OnStepFinish == nil {
+	if cb == nil || cb.OnStepEnd == nil {
 		return
 	}
-	cb.OnStepFinish(StepFinishEvent{
+	cb.OnStepEnd(StepEndEvent{
 		StepNumber:       step,
 		Text:             sr.text,
 		Reasoning:        sr.reasoning,
@@ -768,8 +768,8 @@ func emitOnStepFinish(
 	})
 }
 
-func emitOnFinish(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) {
-	if cb == nil || cb.OnFinish == nil {
+func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) {
+	if cb == nil || cb.OnEnd == nil {
 		return
 	}
 	var totalText, totalReasoning string
@@ -798,7 +798,7 @@ func emitOnFinish(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResul
 	if sr.providerMeta != nil {
 		lastMeta = sr.providerMeta
 	}
-	cb.OnFinish(FinishEvent{
+	cb.OnEnd(EndEvent{
 		Text:             totalText,
 		Reasoning:        totalReasoning,
 		Steps:            steps,

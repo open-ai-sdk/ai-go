@@ -47,14 +47,14 @@ type UsageInfo struct {
 }
 
 // ToUIMessageStream converts events from a StreamEventer into a channel of typed Chunks.
-// It bridges StreamResult.Events() → UI protocol chunks with configurable options.
+// It bridges StreamResult.Stream() → UI protocol chunks with configurable options.
 // The returned channel is closed when the stream completes.
 //
 // This is the Go equivalent of AI SDK Node's result.toUIMessageStream({ sendReasoning, messageMetadata }).
 func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <-chan Chunk {
 	sr.DrainUnused()
 
-	eventCh := sr.Events()
+	eventCh := sr.Stream()
 
 	// Determine whether we need to intercept events.
 	needIntercept := !opts.SendReasoning || !opts.SendSources || opts.MessageMetadata != nil

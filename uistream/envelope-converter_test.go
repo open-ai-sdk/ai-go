@@ -44,7 +44,7 @@ func TestToGenerateTextRequest_BasicMessages(t *testing.T) {
 	}
 }
 
-func TestToGenerateTextRequest_BodyHints_System(t *testing.T) {
+func TestToGenerateTextRequest_BodyHints_Instructions(t *testing.T) {
 	env := uistream.ChatRequestEnvelope{
 		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{"system": "You are a helpful assistant."},
@@ -52,8 +52,8 @@ func TestToGenerateTextRequest_BodyHints_System(t *testing.T) {
 
 	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
-	if req.System != "You are a helpful assistant." {
-		t.Errorf("System: got %q", req.System)
+	if req.Instructions != "You are a helpful assistant." {
+		t.Errorf("Instructions: got %q", req.Instructions)
 	}
 }
 
@@ -91,8 +91,8 @@ func TestToGenerateTextRequest_NilBody(t *testing.T) {
 	// Should not panic.
 	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
-	if req.System != "" {
-		t.Errorf("expected empty system, got %q", req.System)
+	if req.Instructions != "" {
+		t.Errorf("expected empty system, got %q", req.Instructions)
 	}
 }
 

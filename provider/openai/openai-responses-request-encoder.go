@@ -163,10 +163,10 @@ func encodeInput(req ai.LanguageModelRequest) ([]inputItem, []ai.Warning, error)
 	var items []inputItem
 	var warnings []ai.Warning
 
-	if req.System != "" {
+	if req.Instructions != "" {
 		items = append(items, inputItem{
 			Role:    "system",
-			Content: []inputPart{{Type: "input_text", Text: req.System}},
+			Content: []inputPart{{Type: "input_text", Text: req.Instructions}},
 		})
 	}
 

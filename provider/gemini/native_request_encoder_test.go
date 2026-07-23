@@ -23,9 +23,9 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, nr.Contents[0].Parts[0].Text, "Hello")
 	})
 
-	t.Run("system from req.System field", func(t *testing.T) {
+	t.Run("system from req.Instructions field", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
-			System: "You are a helpful assistant.",
+			Instructions: "You are a helpful assistant.",
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Hi")}},
 			},
@@ -41,7 +41,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 
 	t.Run("system from leading system messages", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
-			System: "Base system.",
+			Instructions: "Base system.",
 			Messages: []ai.Message{
 				ai.SystemMessage("Extra system context."),
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Hi")}},
@@ -406,7 +406,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		temp := float32(0.5)
 		budget := 4096
 		req := ai.LanguageModelRequest{
-			System: "Be helpful.",
+			Instructions: "Be helpful.",
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Hello")}},
 			},
@@ -450,7 +450,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 	t.Run("full tool loop conversation", func(t *testing.T) {
 		args := json.RawMessage(`{"city":"NYC"}`)
 		req := ai.LanguageModelRequest{
-			System: "You help with weather.",
+			Instructions: "You help with weather.",
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Weather in NYC?")}},
 				{Role: ai.RoleAssistant, Content: []ai.ContentPart{

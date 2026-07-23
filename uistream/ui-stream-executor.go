@@ -16,8 +16,8 @@ type StreamOptions struct {
 	// Metadata is optional message-level metadata emitted alongside the start chunk.
 	Metadata any
 
-	// OnFinish is called after the stream completes with the finish reason ("stop" or "error").
-	OnFinish func(finishReason string)
+	// OnEnd is called after the stream completes with the finish reason ("stop" or "error").
+	OnEnd func(finishReason string)
 }
 
 // Execute runs a UI message stream with managed lifecycle.
@@ -45,7 +45,7 @@ func Execute(w io.Writer, opts StreamOptions, fn ExecuteFunc) {
 		wr.WriteFinish()
 	}
 
-	if opts.OnFinish != nil {
-		opts.OnFinish(finishReason)
+	if opts.OnEnd != nil {
+		opts.OnEnd(finishReason)
 	}
 }

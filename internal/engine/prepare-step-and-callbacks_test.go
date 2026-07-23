@@ -91,7 +91,7 @@ func TestPrepareStep_ModelOverride(t *testing.T) {
 	}
 }
 
-func TestPrepareStep_SystemOverride(t *testing.T) {
+func TestPrepareStep_InstructionsOverride(t *testing.T) {
 	model := &capturingModel{calls: [][]StreamEvent{
 		{toolCallEvt(0, "tc1", "search", `{}`), finishEvt(FinishReasonToolCalls)},
 		{textEvt("done"), finishEvt(FinishReasonStop)},
@@ -101,10 +101,10 @@ func TestPrepareStep_SystemOverride(t *testing.T) {
 	ch := Run(context.Background(), RunParams{
 		Model:   model,
 		Tools:   &ToolSet{Executor: exec},
-		Request: Request{System: "original system"},
+		Request: Request{Instructions: "original system"},
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			if ctx.StepNumber == 1 {
-				return &PrepareStepResult{System: "step-1 system"}
+				return &PrepareStepResult{Instructions: "step-1 system"}
 			}
 			return nil
 		},
@@ -120,11 +120,11 @@ func TestPrepareStep_SystemOverride(t *testing.T) {
 	if len(model.requests) != 2 {
 		t.Fatalf("expected 2 requests, got %d", len(model.requests))
 	}
-	if model.requests[0].System != "" {
-		t.Errorf("step 0: system should be empty (already in history), got %q", model.requests[0].System)
+	if model.requests[0].Instructions != "" {
+		t.Errorf("step 0: instructions should be empty (already in history), got %q", model.requests[0].Instructions)
 	}
-	if model.requests[1].System != "step-1 system" {
-		t.Errorf("step 1: expected 'step-1 system', got %q", model.requests[1].System)
+	if model.requests[1].Instructions != "step-1 system" {
+		t.Errorf("step 1: expected 'step-1 system', got %q", model.requests[1].Instructions)
 	}
 }
 
@@ -307,20 +307,20 @@ func TestActiveTools_EmptySliceClearsTools(t *testing.T) {
 	}
 }
 
-func TestLifecycleCallbacks_OnStepFinish(t *testing.T) {
+func TestLifecycleCallbacks_OnStepEnd(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
 		{toolCallEvt(0, "tc1", "search", `{"q":"test"}`), finishEvt(FinishReasonToolCalls)},
 		{textEvt("done"), finishEvt(FinishReasonStop)},
 	}}
 	exec := &mockExecutor{results: map[string]string{"search": `{"ok":true}`}}
 
-	var stepEvents []StepFinishEvent
+	var stepEvents []StepEndEvent
 	ch := Run(context.Background(), RunParams{
 		Model:    model,
 		Tools:    &ToolSet{Executor: exec},
 		MaxSteps: 5,
 		Callbacks: &LifecycleCallbacks{
-			OnStepFinish: func(ev StepFinishEvent) {
+			OnStepEnd: func(ev StepEndEvent) {
 				stepEvents = append(stepEvents, ev)
 			},
 		},
@@ -333,7 +333,7 @@ func TestLifecycleCallbacks_OnStepFinish(t *testing.T) {
 	}
 
 	if len(stepEvents) != 2 {
-		t.Fatalf("expected 2 OnStepFinish calls, got %d", len(stepEvents))
+		t.Fatalf("expected 2 OnStepEnd calls, got %d", len(stepEvents))
 	}
 	if stepEvents[0].StepNumber != 0 {
 		t.Errorf("first step should be 0, got %d", stepEvents[0].StepNumber)
@@ -352,18 +352,18 @@ func TestLifecycleCallbacks_OnStepFinish(t *testing.T) {
 	}
 }
 
-func TestLifecycleCallbacks_OnFinish(t *testing.T) {
+func TestLifecycleCallbacks_OnEnd(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
 		{textEvt("hello world"), finishEvt(FinishReasonStop)},
 	}}
 
-	var finishEvent *FinishEvent
+	var endEvent *EndEvent
 	ch := Run(context.Background(), RunParams{
 		Model:    model,
 		MaxSteps: 5,
 		Callbacks: &LifecycleCallbacks{
-			OnFinish: func(ev FinishEvent) {
-				finishEvent = &ev
+			OnEnd: func(ev EndEvent) {
+				endEvent = &ev
 			},
 		},
 	})
@@ -374,14 +374,14 @@ func TestLifecycleCallbacks_OnFinish(t *testing.T) {
 		}
 	}
 
-	if finishEvent == nil {
-		t.Fatal("expected OnFinish to be called")
+	if endEvent == nil {
+		t.Fatal("expected OnEnd to be called")
 	}
-	if finishEvent.Text != "hello world" {
-		t.Errorf("expected text 'hello world', got %q", finishEvent.Text)
+	if endEvent.Text != "hello world" {
+		t.Errorf("expected text 'hello world', got %q", endEvent.Text)
 	}
-	if finishEvent.FinishReason != FinishReasonStop {
-		t.Errorf("expected FinishReasonStop, got %q", finishEvent.FinishReason)
+	if endEvent.FinishReason != FinishReasonStop {
+		t.Errorf("expected FinishReasonStop, got %q", endEvent.FinishReason)
 	}
 }
 

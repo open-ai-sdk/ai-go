@@ -21,7 +21,7 @@ func newMockStreamEventer(evs ...engine.StepEvent) *mockStreamEventer {
 	return &mockStreamEventer{ch: ch}
 }
 
-func (m *mockStreamEventer) Events() <-chan engine.StepEvent { return m.ch }
+func (m *mockStreamEventer) Stream() <-chan engine.StepEvent { return m.ch }
 func (m *mockStreamEventer) DrainUnused()                    { m.drained = true }
 
 // drainChunks reads all chunks from ch into a slice.

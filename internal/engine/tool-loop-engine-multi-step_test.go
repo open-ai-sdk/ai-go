@@ -253,7 +253,7 @@ func TestRunLoop_RepairToolCall_HistoryUsesRepairedToolCall(t *testing.T) {
 	}
 }
 
-func TestRunLoop_StepCountIs(t *testing.T) {
+func TestRunLoop_IsStepCount(t *testing.T) {
 	exec := &mockExecutor{}
 	model := &mockModel{calls: [][]StreamEvent{
 		{toolCallEvt(0, "tc1", "search", `{"q":"a"}`), finishEvt(FinishReasonToolCalls)},
@@ -385,11 +385,11 @@ func TestRunLoop_ToolsNeverStripped(t *testing.T) {
 	}
 }
 
-// TestRunLoop_MaxStepsExhausted_OnFinishUsesLastStepSr verifies the OnFinish
+// TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr verifies the OnEnd
 // callback receives the actual last-step streamResult (FinishReasonToolCalls)
 // instead of a faked FinishReasonStop that the old emitFinalGeneration path
 // used to synthesize. Matches ai-sdk-node: honest signal about loop state.
-func TestRunLoop_MaxStepsExhausted_OnFinishUsesLastStepSr(t *testing.T) {
+func TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr(t *testing.T) {
 	exec := &mockExecutor{}
 	calls := [][]StreamEvent{
 		{toolCallEvt(0, "tc", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
@@ -397,16 +397,16 @@ func TestRunLoop_MaxStepsExhausted_OnFinishUsesLastStepSr(t *testing.T) {
 	}
 	model := &mockModel{calls: calls}
 
-	var finishEvent FinishEvent
-	var finishSeen bool
+	var endEvent EndEvent
+	var endSeen bool
 	ch := Run(context.Background(), RunParams{
 		Model:    model,
 		Tools:    &ToolSet{Executor: exec},
 		MaxSteps: 2,
 		Callbacks: &LifecycleCallbacks{
-			OnFinish: func(event FinishEvent) {
-				finishEvent = event
-				finishSeen = true
+			OnEnd: func(event EndEvent) {
+				endEvent = event
+				endSeen = true
 			},
 		},
 	})
@@ -416,14 +416,14 @@ func TestRunLoop_MaxStepsExhausted_OnFinishUsesLastStepSr(t *testing.T) {
 		}
 	}
 
-	if !finishSeen {
-		t.Fatal("OnFinish was not called")
+	if !endSeen {
+		t.Fatal("OnEnd was not called")
 	}
-	if finishEvent.FinishReason != FinishReasonToolCalls {
-		t.Errorf("OnFinish.FinishReason: expected ToolCalls (honest), got %v", finishEvent.FinishReason)
+	if endEvent.FinishReason != FinishReasonToolCalls {
+		t.Errorf("OnEnd.FinishReason: expected ToolCalls (honest), got %v", endEvent.FinishReason)
 	}
-	if len(finishEvent.Steps) != 2 {
-		t.Errorf("expected 2 completed steps, got %d", len(finishEvent.Steps))
+	if len(endEvent.Steps) != 2 {
+		t.Errorf("expected 2 completed steps, got %d", len(endEvent.Steps))
 	}
 }
 

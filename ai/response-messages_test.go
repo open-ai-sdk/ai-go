@@ -132,8 +132,8 @@ func TestResponseMessagesForStep_UsesToModelOutput(t *testing.T) {
 
 func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 	model := &responseMessageModel{}
-	var stepEvents []ai.StepFinishEvent
-	var finishEvent ai.FinishEvent
+	var stepEvents []ai.StepEndEvent
+	var endEvent ai.EndEvent
 
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:    model,
@@ -148,11 +148,11 @@ func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 			Executor: &addExecutor{},
 		},
 		MaxSteps: 5,
-		OnStepFinish: func(event ai.StepFinishEvent) {
+		OnStepEnd: func(event ai.StepEndEvent) {
 			stepEvents = append(stepEvents, event)
 		},
-		OnFinish: func(event ai.FinishEvent) {
-			finishEvent = event
+		OnEnd: func(event ai.EndEvent) {
+			endEvent = event
 		},
 	})
 	if err != nil {
@@ -193,15 +193,15 @@ func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 	if stepEvents[1].Reasoning != "I used a calculator." {
 		t.Fatalf("expected reasoning on step finish, got %q", stepEvents[1].Reasoning)
 	}
-	if finishEvent.TotalUsage.TotalTokens != 12 {
-		t.Fatalf("expected total usage across steps, got %d", finishEvent.TotalUsage.TotalTokens)
+	if endEvent.TotalUsage.TotalTokens != 12 {
+		t.Fatalf("expected total usage across steps, got %d", endEvent.TotalUsage.TotalTokens)
 	}
-	if len(finishEvent.Response.Messages) != 3 {
-		t.Fatalf("expected finish response messages, got %d", len(finishEvent.Response.Messages))
+	if len(endEvent.Response.Messages) != 3 {
+		t.Fatalf("expected finish response messages, got %d", len(endEvent.Response.Messages))
 	}
 }
 
-func TestGenerateText_ExperimentalRepairToolCall(t *testing.T) {
+func TestGenerateText_RepairToolCall(t *testing.T) {
 	model := &repairToolCallModel{}
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:    model,
@@ -211,7 +211,7 @@ func TestGenerateText_ExperimentalRepairToolCall(t *testing.T) {
 			Executor:    &addExecutor{},
 		},
 		MaxSteps: 5,
-		ExperimentalRepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
+		RepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
 			var noSuchToolErr *ai.NoSuchToolError
 			if !errors.As(input.Error, &noSuchToolErr) {
 				return nil, errors.New("expected NoSuchToolError during repair")
@@ -240,7 +240,7 @@ func TestGenerateText_ExperimentalRepairToolCall(t *testing.T) {
 	}
 }
 
-func TestGenerateText_ExperimentalRepairToolCall_PreservesArgsWhenOnlyNameChanges(t *testing.T) {
+func TestGenerateText_RepairToolCall_PreservesArgsWhenOnlyNameChanges(t *testing.T) {
 	model := &repairToolCallModel{}
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:    model,
@@ -250,7 +250,7 @@ func TestGenerateText_ExperimentalRepairToolCall_PreservesArgsWhenOnlyNameChange
 			Executor:    &addExecutor{},
 		},
 		MaxSteps: 5,
-		ExperimentalRepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
+		RepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
 			return &ai.ToolCallOutput{Name: "add"}, nil
 		},
 	})

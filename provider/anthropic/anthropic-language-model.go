@@ -155,7 +155,7 @@ func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, erro
 		ar.MaxTokens = 8192
 	}
 
-	ar.System = req.System
+	ar.System = req.Instructions
 	ar.ToolChoice = mapToolChoice(req.ToolChoice)
 	ar.Thinking = extractThinkingConfig(req.ProviderOptions)
 	ar.Messages = encodeMessages(req.Messages)

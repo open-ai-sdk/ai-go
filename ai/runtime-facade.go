@@ -6,9 +6,9 @@ import "context"
 // Options are applied in order after the prompt is set.
 type Option func(*GenerateTextRequest)
 
-// WithSystem sets the system prompt.
-func WithSystem(s string) Option {
-	return func(r *GenerateTextRequest) { r.System = s }
+// WithInstructions sets the system prompt.
+func WithInstructions(s string) Option {
+	return func(r *GenerateTextRequest) { r.Instructions = s }
 }
 
 // WithMessages sets (or replaces) the conversation history.
@@ -72,9 +72,9 @@ func WithSmoothStream(ss *SmoothStream) Option {
 	return func(r *GenerateTextRequest) { r.SmoothStream = ss }
 }
 
-// WithExperimentalRepairToolCall enables automatic repair for invalid tool calls.
-func WithExperimentalRepairToolCall(fn ExperimentalRepairToolCallFunc) Option {
-	return func(r *GenerateTextRequest) { r.ExperimentalRepairToolCall = fn }
+// WithRepairToolCall enables automatic repair for invalid tool calls.
+func WithRepairToolCall(fn RepairToolCallFunc) Option {
+	return func(r *GenerateTextRequest) { r.RepairToolCall = fn }
 }
 
 // WithParallelToolExecution enables parallel execution of tool calls within a step.

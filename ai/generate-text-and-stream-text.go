@@ -206,7 +206,7 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 
 // StreamText runs the tool loop and returns a *StreamResult for callers that
 // need live streaming (e.g. SSE adapters). Use StreamResult.TextStream() for
-// text deltas, StreamResult.Events() for raw engine events, or
+// text deltas, StreamResult.Stream() for raw engine events, or
 // StreamResult.Consume() to block and get the full aggregated result.
 func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 	ch := engine.Run(ctx, toEngineParams(req))
@@ -222,7 +222,7 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 	engReq, engTools := toEngineRequest(req)
 	stopWhen := toEngineStopWhen(req.StopWhen)
 	engPrepareStep := toEnginePrepareStep(req.PrepareStep)
-	repairToolCall := toEngineRepairToolCall(req.ExperimentalRepairToolCall)
+	repairToolCall := toEngineRepairToolCall(req.RepairToolCall)
 	engCallbacks := toEngineLifecycleCallbacks(req)
 
 	return engine.RunParams{
@@ -241,7 +241,7 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 
 func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) {
 	engReq := engine.Request{
-		System:          req.System,
+		Instructions:    req.Instructions,
 		Messages:        toEngineMessages(req.Messages),
 		ProviderOptions: req.ProviderOptions,
 		Settings: engine.CallSettings{
@@ -318,7 +318,7 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 		}
 		engResult := &engine.PrepareStepResult{
 			ActiveTools:     result.ActiveTools,
-			System:          result.System,
+			Instructions:    result.Instructions,
 			ProviderOptions: result.ProviderOptions,
 		}
 		if result.Model != nil {
@@ -334,14 +334,14 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 	}
 }
 
-func toEngineRepairToolCall(fn ExperimentalRepairToolCallFunc) engine.ToolCallRepairFunc {
+func toEngineRepairToolCall(fn RepairToolCallFunc) engine.ToolCallRepairFunc {
 	if fn == nil {
 		return nil
 	}
 	return func(ctx context.Context, input engine.ToolCallRepairContext) (*engine.ToolCallInfo, error) {
 		publicInput := RepairToolCallInput{
-			System:   input.System,
-			Messages: fromEngineMessages(input.Messages),
+			Instructions: input.Instructions,
+			Messages:     fromEngineMessages(input.Messages),
 			ToolCall: ToolCallOutput{
 				ID:               input.ToolCall.ID,
 				Name:             input.ToolCall.Name,
@@ -383,14 +383,14 @@ func toEngineRepairToolCall(fn ExperimentalRepairToolCallFunc) engine.ToolCallRe
 }
 
 func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallbacks {
-	if req.OnStepFinish == nil && req.OnFinish == nil && req.OnChunk == nil && req.OnError == nil {
+	if req.OnStepEnd == nil && req.OnEnd == nil && req.OnChunk == nil && req.OnError == nil {
 		return nil
 	}
 
 	callbacks := &engine.LifecycleCallbacks{}
-	if req.OnStepFinish != nil {
-		callbacks.OnStepFinish = func(ev engine.StepFinishEvent) {
-			stepEvent := StepFinishEvent{
+	if req.OnStepEnd != nil {
+		callbacks.OnStepEnd = func(ev engine.StepEndEvent) {
+			stepEvent := StepEndEvent{
 				StepNumber:       ev.StepNumber,
 				Text:             ev.Text,
 				Reasoning:        ev.Reasoning,
@@ -407,13 +407,13 @@ func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallba
 				ToolCalls:   stepEvent.ToolCalls,
 				ToolResults: stepEvent.ToolResults,
 			}, req.Tools)}
-			req.OnStepFinish(stepEvent)
+			req.OnStepEnd(stepEvent)
 		}
 	}
-	if req.OnFinish != nil {
-		callbacks.OnFinish = func(ev engine.FinishEvent) {
+	if req.OnEnd != nil {
+		callbacks.OnEnd = func(ev engine.EndEvent) {
 			steps := fromEngineStepInfos(ev.Steps, req.Tools)
-			finishEvent := FinishEvent{
+			endEvent := EndEvent{
 				Text:             ev.Text,
 				Reasoning:        ev.Reasoning,
 				Steps:            steps,
@@ -421,8 +421,8 @@ func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallba
 				FinishReason:     FinishReason(ev.FinishReason),
 				ProviderMetadata: ev.ProviderMetadata,
 			}
-			finishEvent.Response = Response{Messages: ResponseMessagesForSteps(steps, req.Tools)}
-			req.OnFinish(finishEvent)
+			endEvent.Response = Response{Messages: ResponseMessagesForSteps(steps, req.Tools)}
+			req.OnEnd(endEvent)
 		}
 	}
 	if req.OnChunk != nil {
@@ -641,7 +641,7 @@ func (a *engineModelAdapter) ModelID() string { return a.m.ModelID() }
 
 func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-chan engine.StreamEvent, error) {
 	aiReq := LanguageModelRequest{
-		System:          req.System,
+		Instructions:    req.Instructions,
 		Messages:        fromEngineMessages(req.Messages),
 		ProviderOptions: req.ProviderOptions,
 		Settings: CallSettings{

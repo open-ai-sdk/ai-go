@@ -128,15 +128,15 @@ func TestCreateUIMessageStream_ErrorHandling(t *testing.T) {
 	}
 }
 
-// TestCreateUIMessageStream_OnFinishCallback verifies the callback fires with correct data.
-func TestCreateUIMessageStream_OnFinishCallback(t *testing.T) {
+// TestCreateUIMessageStream_OnEndCallback verifies the callback fires with correct data.
+func TestCreateUIMessageStream_OnEndCallback(t *testing.T) {
 	var buf bytes.Buffer
-	var finishResult UIStreamFinishResult
+	var endResult UIStreamEndResult
 
 	CreateUIMessageStream(&buf, CreateUIStreamOptions{
 		MessageID: "msg-create-4",
-		OnFinish: func(result UIStreamFinishResult) {
-			finishResult = result
+		OnEnd: func(result UIStreamEndResult) {
+			endResult = result
 		},
 	}, func(sw *UIStreamWriter) error {
 		sr := newMockStreamEventer(
@@ -152,11 +152,11 @@ func TestCreateUIMessageStream_OnFinishCallback(t *testing.T) {
 		return nil
 	})
 
-	if finishResult.Text != "Hello world" {
-		t.Errorf("expected Text=%q, got %q", "Hello world", finishResult.Text)
+	if endResult.Text != "Hello world" {
+		t.Errorf("expected Text=%q, got %q", "Hello world", endResult.Text)
 	}
-	if finishResult.FinishReason != "stop" {
-		t.Errorf("expected FinishReason=stop, got %q", finishResult.FinishReason)
+	if endResult.FinishReason != "stop" {
+		t.Errorf("expected FinishReason=stop, got %q", endResult.FinishReason)
 	}
 }
 
@@ -246,21 +246,21 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 	assertContains(t, output, `"tokens":15`)
 }
 
-// TestCreateUIMessageStream_OnFinishWithError verifies OnFinish fires with error reason.
-func TestCreateUIMessageStream_OnFinishWithError(t *testing.T) {
+// TestCreateUIMessageStream_OnEndWithError verifies OnEnd fires with error reason.
+func TestCreateUIMessageStream_OnEndWithError(t *testing.T) {
 	var buf bytes.Buffer
-	var finishResult UIStreamFinishResult
+	var endResult UIStreamEndResult
 
 	CreateUIMessageStream(&buf, CreateUIStreamOptions{
 		MessageID: "msg-create-9",
-		OnFinish: func(result UIStreamFinishResult) {
-			finishResult = result
+		OnEnd: func(result UIStreamEndResult) {
+			endResult = result
 		},
 	}, func(sw *UIStreamWriter) error {
 		return fmt.Errorf("something broke")
 	})
 
-	if finishResult.FinishReason != "error" {
-		t.Errorf("expected FinishReason=error, got %q", finishResult.FinishReason)
+	if endResult.FinishReason != "error" {
+		t.Errorf("expected FinishReason=error, got %q", endResult.FinishReason)
 	}
 }

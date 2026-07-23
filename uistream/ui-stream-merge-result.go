@@ -7,8 +7,8 @@ import (
 // StreamEventer is satisfied by *ai.StreamResult; using an interface avoids
 // an import cycle between the uistream and ai packages.
 type StreamEventer interface {
-	Events() <-chan engine.StepEvent
-	// DrainUnused prevents fan-out deadlocks when only Events() is consumed.
+	Stream() <-chan engine.StepEvent
+	// DrainUnused prevents fan-out deadlocks when only Stream() is consumed.
 	DrainUnused()
 }
 
@@ -16,7 +16,7 @@ type StreamEventer interface {
 type mergeConfig struct {
 	toolResultHook     ToolResultHook
 	sourceHook         SourceHook
-	onFinish           func(text string)
+	onEnd              func(text string)
 	persistenceBuilder *PersistedMessageBuilder
 }
 
@@ -37,10 +37,10 @@ func MergeWithSourceHook(hook SourceHook) MergeOption {
 	}
 }
 
-// MergeWithOnFinish sets a callback invoked when the merged stream completes.
-func MergeWithOnFinish(fn func(text string)) MergeOption {
+// MergeWithOnEnd sets a callback invoked when the merged stream completes.
+func MergeWithOnEnd(fn func(text string)) MergeOption {
 	return func(c *mergeConfig) {
-		c.onFinish = fn
+		c.onEnd = fn
 	}
 }
 
@@ -72,7 +72,7 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 	// Drain unused channels to prevent fan-out goroutine deadlock.
 	sr.DrainUnused()
 
-	ch := sr.Events()
+	ch := sr.Stream()
 
 	// If a tool result hook is set, intercept events before the producer.
 	producerCh := ch
@@ -150,8 +150,8 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 
 	text := cs.FullText()
 
-	if cfg.onFinish != nil {
-		cfg.onFinish(text)
+	if cfg.onEnd != nil {
+		cfg.onEnd(text)
 	}
 
 	return text

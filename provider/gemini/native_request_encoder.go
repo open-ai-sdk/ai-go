@@ -93,7 +93,7 @@ type nativeImageConfig struct {
 func encodeNativeRequest(req ai.LanguageModelRequest) nativeRequest {
 	nr := nativeRequest{}
 
-	// System instruction: collect from req.System and any leading system messages.
+	// System instruction: collect from req.Instructions and any leading system messages.
 	nr.SystemInstruction = buildSystemInstruction(req)
 
 	// Convert messages to native contents.
@@ -105,13 +105,13 @@ func encodeNativeRequest(req ai.LanguageModelRequest) nativeRequest {
 	return nr
 }
 
-// buildSystemInstruction collects system text from req.System and any leading
+// buildSystemInstruction collects system text from req.Instructions and any leading
 // RoleSystem messages in req.Messages.
 func buildSystemInstruction(req ai.LanguageModelRequest) *nativeSystemInstruction {
 	var parts []nativeTextPart
 
-	if req.System != "" {
-		parts = append(parts, nativeTextPart{Text: req.System})
+	if req.Instructions != "" {
+		parts = append(parts, nativeTextPart{Text: req.Instructions})
 	}
 
 	for _, msg := range req.Messages {

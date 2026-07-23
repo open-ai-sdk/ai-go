@@ -90,7 +90,7 @@ type ToolChoice struct {
 
 // Request is the engine-internal model request.
 type Request struct {
-	System          string
+	Instructions    string
 	Messages        []Message
 	Tools           []ToolDefinition
 	ToolChoice      *ToolChoice
@@ -153,7 +153,7 @@ type PrepareStepResult struct {
 	Model           Model
 	ToolChoice      *ToolChoice
 	ActiveTools     []string
-	System          string
+	Instructions    string
 	ProviderOptions map[string]any
 }
 
@@ -162,14 +162,14 @@ type PrepareStepFunc func(ctx PrepareStepContext) *PrepareStepResult
 
 // LifecycleCallbacks holds optional callbacks for observability during a run.
 type LifecycleCallbacks struct {
-	OnStepFinish func(event StepFinishEvent)
-	OnFinish     func(event FinishEvent)
-	OnChunk      func(event StepEvent)
-	OnError      func(err error)
+	OnStepEnd func(event StepEndEvent)
+	OnEnd     func(event EndEvent)
+	OnChunk   func(event StepEvent)
+	OnError   func(err error)
 }
 
-// StepFinishEvent holds data passed to OnStepFinish after each step.
-type StepFinishEvent struct {
+// StepEndEvent holds data passed to OnStepEnd after each step.
+type StepEndEvent struct {
 	StepNumber       int
 	Text             string
 	Reasoning        string
@@ -181,8 +181,8 @@ type StepFinishEvent struct {
 	Warnings         []Warning
 }
 
-// FinishEvent holds data passed to OnFinish when the entire run completes.
-type FinishEvent struct {
+// EndEvent holds data passed to OnEnd when the entire run completes.
+type EndEvent struct {
 	Text             string
 	Reasoning        string
 	Steps            []StepResultInfo
@@ -205,11 +205,11 @@ type ToolCallInfo struct {
 
 // ToolCallRepairContext describes a tool call that failed validation.
 type ToolCallRepairContext struct {
-	System   string
-	Messages []Message
-	ToolCall ToolCallInfo
-	Tools    *ToolSet
-	Error    error
+	Instructions string
+	Messages     []Message
+	ToolCall     ToolCallInfo
+	Tools        *ToolSet
+	Error        error
 }
 
 // ToolCallRepairFunc attempts to repair an invalid tool call before it is surfaced.
