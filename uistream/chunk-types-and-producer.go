@@ -118,17 +118,21 @@ func (cp *ChunkProducer) translateEvent(ev engine.StepEvent) ([]Chunk, string) {
 	case engine.StepEventToolResult:
 		return cp.chunksToolResult(ev), ""
 	case engine.StepEventToolApprovalRequest:
-		return []Chunk{
-			{
-				Type: ChunkToolApprovalRequest,
-				Fields: map[string]any{
-					"approvalId": ev.ToolCallID,
-					"toolCallId": ev.ToolCallID,
-					"toolName":   ev.ToolCallName,
-					"args":       ev.ToolCallArgsDelta,
-				},
-			},
-		}, ""
+		fields := map[string]any{
+			"approvalId": ev.ToolCallID,
+			"toolCallId": ev.ToolCallID,
+			"toolName":   ev.ToolCallName,
+			"args":       ev.ToolCallArgsDelta,
+		}
+		// isAutomatic and signature are optional in the protocol; include them
+		// only when set so the chunk matches node's omit-when-absent shape.
+		if ev.ApprovalIsAutomatic {
+			fields["isAutomatic"] = true
+		}
+		if ev.ApprovalSignature != "" {
+			fields["signature"] = ev.ApprovalSignature
+		}
+		return []Chunk{{Type: ChunkToolApprovalRequest, Fields: fields}}, ""
 	case engine.StepEventToolOutputDenied:
 		return []Chunk{{Type: ChunkToolOutputDenied, Fields: map[string]any{"toolCallId": ev.ToolCallID}}}, ""
 	case engine.StepEventToolCallInvalid:
@@ -369,11 +373,12 @@ func (cp *ChunkProducer) chunksSource(ev engine.StepEvent) []Chunk {
 	if ev.Source == nil || ev.Source.URL == "" {
 		return nil
 	}
-	return []Chunk{{Type: ChunkSourceURL, Fields: map[string]any{
+	fields := map[string]any{
 		"sourceId": ev.Source.ID,
 		"url":      ev.Source.URL,
 		"title":    ev.Source.Title,
-	}}}
+	}
+	return []Chunk{{Type: ChunkSourceURL, Fields: withProviderMetadata(fields, ev.Source.ProviderMetadata)}}
 }
 
 func (cp *ChunkProducer) chunksStepEnd() []Chunk {

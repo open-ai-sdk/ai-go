@@ -73,12 +73,18 @@ func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		// Bound the error body: attacker-influenced and only used for a message.
+		errBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if readErr != nil {
+			return nil, fmt.Errorf("gemini-image: unexpected status %d (failed to read body: %w)", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("gemini-image: unexpected status %d: %s", resp.StatusCode, string(errBody))
+	}
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-image: read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini-image: unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return m.parseResponse(respBody)

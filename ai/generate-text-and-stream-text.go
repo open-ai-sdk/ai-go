@@ -258,11 +258,24 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 // text deltas, StreamResult.Stream() for raw engine events, or
 // StreamResult.Consume() to block and get the full aggregated result.
 func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
+	if err := validateToolsContext(req); err != nil {
+		return NewStreamResultWithTools(erroredEventChannel(err), req.Tools)
+	}
 	ch := engine.Run(ctx, toEngineParams(req))
 	if req.SmoothStream != nil {
 		ch = req.SmoothStream.Transform(ctx, ch)
 	}
 	return NewStreamResultWithTools(ch, req.Tools)
+}
+
+// erroredEventChannel returns a closed channel yielding a single error event, so
+// a pre-flight validation failure surfaces through the normal stream API
+// (Consume returns the error, Stream emits it) instead of being silently dropped.
+func erroredEventChannel(err error) <-chan engine.StepEvent {
+	ch := make(chan engine.StepEvent, 1)
+	ch <- engine.StepEvent{Type: engine.StepEventError, Error: err}
+	close(ch)
+	return ch
 }
 
 // toEngineParams converts a public GenerateTextRequest to engine.RunParams.

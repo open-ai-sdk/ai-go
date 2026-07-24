@@ -58,6 +58,33 @@ type nativeUsageMetadata struct {
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
 }
 
+// nativeUsageToAI maps Gemini usage metadata to the v7 nested usage shape.
+// promptTokenCount already includes cached content, so the non-cached count is
+// the remainder after subtracting cachedContentTokenCount.
+func nativeUsageToAI(u *nativeUsageMetadata) *ai.Usage {
+	noCache := u.PromptTokenCount - u.CachedContentTokenCount
+	if noCache < 0 {
+		noCache = 0
+	}
+	return &ai.Usage{
+		InputTokens: u.PromptTokenCount,
+		InputTokenDetails: ai.InputTokenDetails{
+			NoCacheTokens:   noCache,
+			CacheReadTokens: u.CachedContentTokenCount,
+		},
+		OutputTokens:       u.CandidatesTokenCount,
+		OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: u.ThoughtsTokenCount},
+		TotalTokens:        u.TotalTokenCount,
+		Raw: map[string]any{
+			"promptTokenCount":        u.PromptTokenCount,
+			"candidatesTokenCount":    u.CandidatesTokenCount,
+			"totalTokenCount":         u.TotalTokenCount,
+			"thoughtsTokenCount":      u.ThoughtsTokenCount,
+			"cachedContentTokenCount": u.CachedContentTokenCount,
+		},
+	}
+}
+
 type nativeGroundingMetadata struct {
 	WebSearchQueries  []string               `json:"webSearchQueries"`
 	GroundingChunks   []nativeGroundingChunk `json:"groundingChunks"`
@@ -220,13 +247,8 @@ func emitNativeChunkEvents(
 		// 3. Usage (emit before finish so consumers see token counts first).
 		if chunk.UsageMetadata != nil {
 			ch <- ai.StreamEvent{
-				Type: ai.StreamEventUsage,
-				Usage: &ai.Usage{
-					InputTokens:        chunk.UsageMetadata.PromptTokenCount,
-					OutputTokens:       chunk.UsageMetadata.CandidatesTokenCount,
-					TotalTokens:        chunk.UsageMetadata.TotalTokenCount,
-					OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: chunk.UsageMetadata.ThoughtsTokenCount},
-				},
+				Type:  ai.StreamEventUsage,
+				Usage: nativeUsageToAI(chunk.UsageMetadata),
 			}
 		}
 
@@ -251,13 +273,8 @@ func emitNativeChunkEvents(
 	// No candidates — might still have usage metadata.
 	if chunk.UsageMetadata != nil {
 		ch <- ai.StreamEvent{
-			Type: ai.StreamEventUsage,
-			Usage: &ai.Usage{
-				InputTokens:        chunk.UsageMetadata.PromptTokenCount,
-				OutputTokens:       chunk.UsageMetadata.CandidatesTokenCount,
-				TotalTokens:        chunk.UsageMetadata.TotalTokenCount,
-				OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: chunk.UsageMetadata.ThoughtsTokenCount},
-			},
+			Type:  ai.StreamEventUsage,
+			Usage: nativeUsageToAI(chunk.UsageMetadata),
 		}
 	}
 }

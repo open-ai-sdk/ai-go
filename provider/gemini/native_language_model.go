@@ -87,7 +87,8 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		respBody, readErr := io.ReadAll(resp.Body)
+		// Bound the error body: attacker-influenced and only used for a message.
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		if readErr != nil {
 			return nil, fmt.Errorf(
 				"gemini-native: unexpected status %d (failed to read body: %w)",

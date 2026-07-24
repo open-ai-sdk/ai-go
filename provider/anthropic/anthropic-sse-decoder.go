@@ -171,14 +171,24 @@ func handleMessageStart(
 	var msg sseMessageStart
 	if json.Unmarshal([]byte(data), &msg) == nil {
 		u := msg.Message.Usage
+		// Anthropic reports input_tokens as the non-cached prompt tokens; cache
+		// reads and writes are counted separately. The v7 InputTokens total is
+		// their sum, and NoCacheTokens is the raw input_tokens.
 		return send(ai.StreamEvent{
 			Type: ai.StreamEventUsage,
 			Usage: &ai.Usage{
-				InputTokens:  u.InputTokens,
+				InputTokens:  u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens,
 				OutputTokens: u.OutputTokens,
 				InputTokenDetails: ai.InputTokenDetails{
+					NoCacheTokens:    u.InputTokens,
 					CacheReadTokens:  u.CacheReadInputTokens,
 					CacheWriteTokens: u.CacheCreationInputTokens,
+				},
+				Raw: map[string]any{
+					"input_tokens":                u.InputTokens,
+					"output_tokens":               u.OutputTokens,
+					"cache_read_input_tokens":     u.CacheReadInputTokens,
+					"cache_creation_input_tokens": u.CacheCreationInputTokens,
 				},
 			},
 		})

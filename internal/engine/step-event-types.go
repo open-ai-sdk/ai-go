@@ -44,6 +44,13 @@ type StepEvent struct {
 	ToolCallArgsDelta string
 	ThoughtSignature  string
 
+	// Approval fields (set for StepEventToolApprovalRequest). ApprovalIsAutomatic
+	// marks an approval that was granted without human input; ApprovalSignature
+	// carries a provider-supplied signature for the approval. Both are optional
+	// and omitted from the UI chunk when unset.
+	ApprovalIsAutomatic bool
+	ApprovalSignature   string
+
 	// Tool result.
 	ToolResult *ToolResult
 
@@ -105,6 +112,38 @@ type InputTokenDetails struct {
 type OutputTokenDetails struct {
 	TextTokens      int
 	ReasoningTokens int
+}
+
+// mergeUsage combines two usage reports from the same step, taking each field
+// from the incoming report when it is non-zero and otherwise keeping the prior
+// value. This lets providers report token counts across multiple stream events
+// without a later partial update zeroing an earlier one.
+func mergeUsage(prior, incoming *Usage) *Usage {
+	if incoming == nil {
+		return prior
+	}
+	if prior == nil {
+		return incoming
+	}
+	takeInt := func(cur, next int) int {
+		if next != 0 {
+			return next
+		}
+		return cur
+	}
+	merged := *prior
+	merged.InputTokens = takeInt(prior.InputTokens, incoming.InputTokens)
+	merged.OutputTokens = takeInt(prior.OutputTokens, incoming.OutputTokens)
+	merged.TotalTokens = takeInt(prior.TotalTokens, incoming.TotalTokens)
+	merged.InputTokenDetails.NoCacheTokens = takeInt(prior.InputTokenDetails.NoCacheTokens, incoming.InputTokenDetails.NoCacheTokens)
+	merged.InputTokenDetails.CacheReadTokens = takeInt(prior.InputTokenDetails.CacheReadTokens, incoming.InputTokenDetails.CacheReadTokens)
+	merged.InputTokenDetails.CacheWriteTokens = takeInt(prior.InputTokenDetails.CacheWriteTokens, incoming.InputTokenDetails.CacheWriteTokens)
+	merged.OutputTokenDetails.TextTokens = takeInt(prior.OutputTokenDetails.TextTokens, incoming.OutputTokenDetails.TextTokens)
+	merged.OutputTokenDetails.ReasoningTokens = takeInt(prior.OutputTokenDetails.ReasoningTokens, incoming.OutputTokenDetails.ReasoningTokens)
+	if incoming.Raw != nil {
+		merged.Raw = incoming.Raw
+	}
+	return &merged
 }
 
 // Tool-result content part kinds. Images, audio and documents all travel as a

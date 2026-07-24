@@ -25,9 +25,16 @@ type responsesNonStreamResponse struct {
 		Arguments string `json:"arguments"`
 	} `json:"output"`
 	Usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-		TotalTokens  int `json:"total_tokens"`
+		InputTokens        int `json:"input_tokens"`
+		OutputTokens       int `json:"output_tokens"`
+		TotalTokens        int `json:"total_tokens"`
+		InputTokensDetails *struct {
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
+		} `json:"input_tokens_details,omitempty"`
+		OutputTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"output_tokens_details,omitempty"`
 	} `json:"usage"`
 	Error *struct {
 		Code    string `json:"code"`
@@ -76,10 +83,40 @@ func decodeResponsesNonStream(body []byte, warnings []ai.Warning) (*ai.GenerateT
 	}
 
 	if resp.Usage != nil {
+		u := resp.Usage
+		var cachedTokens, cacheWriteTokens, reasoningTokens int
+		if u.InputTokensDetails != nil {
+			cachedTokens = u.InputTokensDetails.CachedTokens
+			cacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
+		}
+		if u.OutputTokensDetails != nil {
+			reasoningTokens = u.OutputTokensDetails.ReasoningTokens
+		}
+		// input_tokens already includes cached and cache-write tokens.
+		noCache := u.InputTokens - cachedTokens - cacheWriteTokens
+		if noCache < 0 {
+			noCache = 0
+		}
 		result.Usage = ai.Usage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			TotalTokens:  resp.Usage.TotalTokens,
+			InputTokens: u.InputTokens,
+			InputTokenDetails: ai.InputTokenDetails{
+				NoCacheTokens:    noCache,
+				CacheReadTokens:  cachedTokens,
+				CacheWriteTokens: cacheWriteTokens,
+			},
+			OutputTokens: u.OutputTokens,
+			OutputTokenDetails: ai.OutputTokenDetails{
+				TextTokens:      u.OutputTokens - reasoningTokens,
+				ReasoningTokens: reasoningTokens,
+			},
+			TotalTokens: u.TotalTokens,
+			Raw: map[string]any{
+				"input_tokens":     u.InputTokens,
+				"output_tokens":    u.OutputTokens,
+				"total_tokens":     u.TotalTokens,
+				"cached_tokens":    cachedTokens,
+				"reasoning_tokens": reasoningTokens,
+			},
 		}
 	}
 

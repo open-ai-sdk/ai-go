@@ -21,9 +21,16 @@ type responsesChunk struct {
 		ID     string `json:"id"`
 		Status string `json:"status"`
 		Usage  *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-			TotalTokens  int `json:"total_tokens"`
+			InputTokens        int `json:"input_tokens"`
+			OutputTokens       int `json:"output_tokens"`
+			TotalTokens        int `json:"total_tokens"`
+			InputTokensDetails *struct {
+				CachedTokens     int `json:"cached_tokens"`
+				CacheWriteTokens int `json:"cache_write_tokens"`
+			} `json:"input_tokens_details,omitempty"`
+			OutputTokensDetails *struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"output_tokens_details,omitempty"`
 		} `json:"usage"`
 	} `json:"response"`
 
@@ -204,10 +211,39 @@ func handleResponseCompleted(
 		state.responseID = chunk.Response.ID
 	}
 	if u := chunk.Response.Usage; u != nil {
+		var cachedTokens, cacheWriteTokens, reasoningTokens int
+		if u.InputTokensDetails != nil {
+			cachedTokens = u.InputTokensDetails.CachedTokens
+			cacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
+		}
+		if u.OutputTokensDetails != nil {
+			reasoningTokens = u.OutputTokensDetails.ReasoningTokens
+		}
+		// input_tokens already includes cached and cache-write tokens.
+		noCache := u.InputTokens - cachedTokens - cacheWriteTokens
+		if noCache < 0 {
+			noCache = 0
+		}
 		ch <- ai.StreamEvent{Type: ai.StreamEventUsage, Usage: &ai.Usage{
-			InputTokens:  u.InputTokens,
+			InputTokens: u.InputTokens,
+			InputTokenDetails: ai.InputTokenDetails{
+				NoCacheTokens:    noCache,
+				CacheReadTokens:  cachedTokens,
+				CacheWriteTokens: cacheWriteTokens,
+			},
 			OutputTokens: u.OutputTokens,
-			TotalTokens:  u.TotalTokens,
+			OutputTokenDetails: ai.OutputTokenDetails{
+				TextTokens:      u.OutputTokens - reasoningTokens,
+				ReasoningTokens: reasoningTokens,
+			},
+			TotalTokens: u.TotalTokens,
+			Raw: map[string]any{
+				"input_tokens":     u.InputTokens,
+				"output_tokens":    u.OutputTokens,
+				"total_tokens":     u.TotalTokens,
+				"cached_tokens":    cachedTokens,
+				"reasoning_tokens": reasoningTokens,
+			},
 		}}
 	}
 	ch <- ai.StreamEvent{

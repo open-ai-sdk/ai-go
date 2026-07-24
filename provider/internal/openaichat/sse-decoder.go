@@ -39,10 +39,17 @@ type StreamChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens       int `json:"prompt_tokens"`
-		CompletionTokens   int `json:"completion_tokens"`
-		TotalTokens        int `json:"total_tokens"`
-		ThoughtsTokenCount int `json:"thoughts_token_count,omitempty"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
+		ThoughtsTokenCount  int `json:"thoughts_token_count,omitempty"`
+		PromptTokensDetails *struct {
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
 	} `json:"usage"`
 	// ProviderMetadata holds provider-specific metadata from the response (e.g. Gemini groundingMetadata).
 	ProviderMetadata map[string]any `json:"provider_metadata,omitempty"`
@@ -159,13 +166,44 @@ func emitChunkEvents(
 
 	// Emit usage when present (may arrive on a chunk with empty choices).
 	if chunk.Usage != nil {
+		u := chunk.Usage
+		var cachedTokens, cacheWriteTokens int
+		if u.PromptTokensDetails != nil {
+			cachedTokens = u.PromptTokensDetails.CachedTokens
+			cacheWriteTokens = u.PromptTokensDetails.CacheWriteTokens
+		}
+		reasoningTokens := u.ThoughtsTokenCount
+		if u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens != 0 {
+			reasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+		}
+		// prompt_tokens already includes cached and cache-write tokens; the
+		// non-cached remainder is what is left after removing them.
+		noCache := u.PromptTokens - cachedTokens - cacheWriteTokens
+		if noCache < 0 {
+			noCache = 0
+		}
 		ch <- ai.StreamEvent{
 			Type: ai.StreamEventUsage,
 			Usage: &ai.Usage{
-				InputTokens:        chunk.Usage.PromptTokens,
-				OutputTokens:       chunk.Usage.CompletionTokens,
-				TotalTokens:        chunk.Usage.TotalTokens,
-				OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: chunk.Usage.ThoughtsTokenCount},
+				InputTokens: u.PromptTokens,
+				InputTokenDetails: ai.InputTokenDetails{
+					NoCacheTokens:    noCache,
+					CacheReadTokens:  cachedTokens,
+					CacheWriteTokens: cacheWriteTokens,
+				},
+				OutputTokens: u.CompletionTokens,
+				OutputTokenDetails: ai.OutputTokenDetails{
+					TextTokens:      u.CompletionTokens - reasoningTokens,
+					ReasoningTokens: reasoningTokens,
+				},
+				TotalTokens: u.TotalTokens,
+				Raw: map[string]any{
+					"prompt_tokens":     u.PromptTokens,
+					"completion_tokens": u.CompletionTokens,
+					"total_tokens":      u.TotalTokens,
+					"cached_tokens":     cachedTokens,
+					"reasoning_tokens":  reasoningTokens,
+				},
 			},
 		}
 	}

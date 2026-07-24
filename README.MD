@@ -37,9 +37,9 @@ model := openai.NewChatLanguageModel("gpt-4o", openai.Config{
 })
 
 result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:    model,
-    System:   "You are a helpful assistant.",
-    Messages: []ai.Message{ai.UserMessage("Hello!")},
+    Model:        model,
+    Instructions: "You are a helpful assistant.",
+    Messages:     []ai.Message{ai.UserMessage("Hello!")},
 })
 fmt.Println(result.Text)
 ```
@@ -127,6 +127,56 @@ var buf bytes.Buffer
 adapter := uistream.NewAdapter("msg-1")
 text := adapter.Stream(stream, &buf)
 // buf contains SSE-encoded AI SDK UI message stream chunks
+```
+
+### Tool approval
+
+Gate individual tool calls behind a human decision. `ToolApproval` maps a tool
+name to a policy that decides whether the call needs approval; `ToolApprovalResponder`
+resolves each request (blocking until a decision or context cancellation). A call
+proceeds only when the responder approves it — the default is deny.
+
+```go
+result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model:    model,
+    Messages: []ai.Message{ai.UserMessage("Delete stale records")},
+    Tools:    tools,
+    ToolApproval: map[string]ai.ToolApprovalFunc{
+        "deleteRecords": func(name string, args json.RawMessage) ai.ApprovalDecision {
+            return ai.ApprovalRequired
+        },
+    },
+    ToolApprovalResponder: func(ctx context.Context, req ai.ToolApprovalRequest) (ai.ToolApprovalResponse, error) {
+        approved := promptOperator(req.ToolName, req.Args) // your UI/CLI decision
+        return ai.ToolApprovalResponse{ApprovalID: req.ApprovalID, Approved: approved}, nil
+    },
+})
+```
+
+### Tool context
+
+Supply per-tool data with `ToolsContext` (keyed by tool name) and run-wide data
+with `RuntimeContext`. Both reach the executor through the call `context.Context`;
+read them with `ai.ToolContextFrom` / `ai.TypedToolContext[T]` and `ai.RuntimeContextFrom`.
+When a tool defines a `ContextSchema`, its `ToolsContext` entry is required and the
+call fails fast if it is missing (in both `GenerateText` and `StreamText`).
+
+```go
+ai.GenerateTextRequest{
+    Model:          model,
+    Tools:          tools,
+    ToolsContext:   ai.ToolsContext{"lookup": map[string]any{"tenant": "acme"}},
+    RuntimeContext: ai.RuntimeContext{"requestID": "req-123"},
+}
+
+// Inside the tool executor:
+func (e myExec) Execute(ctx context.Context, name, args string) (string, error) {
+    toolCtx, _ := ai.ToolContextFrom(ctx)      // per-tool value for `name`
+    runtime := ai.RuntimeContextFrom(ctx)      // shared across all tools
+    _ = toolCtx
+    _ = runtime
+    // ...
+}
 ```
 
 ## v7 protocol migration

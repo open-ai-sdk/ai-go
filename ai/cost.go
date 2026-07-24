@@ -57,17 +57,30 @@ func (ct *CostTracker) Steps() []StepCost {
 }
 
 // CalculateCost computes USD cost from usage and pricing.
+//
+// InputTokens is the cache-inclusive total (input = non-cached + cache-read +
+// cache-write). Cache-read and cache-write tokens are priced at their own rates,
+// so the base prompt rate applies only to the non-cached remainder. Deriving that
+// remainder from the total keeps cost correct across providers that report the
+// total either directly (OpenAI/Gemini) or as non-cached plus cache (Anthropic),
+// and avoids double-billing the cached portion at the full prompt rate.
 func CalculateCost(model string, usage Usage, price ModelPrice) StepCost {
-	promptCost := float64(usage.InputTokens) * price.PromptPer1M / 1_000_000
+	cacheReadTokens := usage.InputTokenDetails.CacheReadTokens
+	cacheWriteTokens := usage.InputTokenDetails.CacheWriteTokens
+	nonCachedTokens := usage.InputTokens - cacheReadTokens - cacheWriteTokens
+	if nonCachedTokens < 0 {
+		nonCachedTokens = 0
+	}
+	promptCost := float64(nonCachedTokens) * price.PromptPer1M / 1_000_000
 	completionCost := float64(usage.OutputTokens) * price.CompletionPer1M / 1_000_000
-	cacheReadCost := float64(usage.InputTokenDetails.CacheReadTokens) * price.CacheReadPer1M / 1_000_000
-	cacheWriteCost := float64(usage.InputTokenDetails.CacheWriteTokens) * price.CacheWritePer1M / 1_000_000
+	cacheReadCost := float64(cacheReadTokens) * price.CacheReadPer1M / 1_000_000
+	cacheWriteCost := float64(cacheWriteTokens) * price.CacheWritePer1M / 1_000_000
 	return StepCost{
 		Model:            model,
 		PromptTokens:     usage.InputTokens,
 		CompletionTokens: usage.OutputTokens,
-		CacheReadTokens:  usage.InputTokenDetails.CacheReadTokens,
-		CacheWriteTokens: usage.InputTokenDetails.CacheWriteTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
 		CostUSD:          promptCost + completionCost + cacheReadCost + cacheWriteCost,
 	}
 }

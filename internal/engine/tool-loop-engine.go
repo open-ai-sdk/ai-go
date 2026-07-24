@@ -253,8 +253,12 @@ func applyStreamEvent(
 		handleToolCallDelta(ev, acc, out, cb)
 
 	case StreamEventUsage:
-		sr.usage = ev.Usage
-		emitChunk(StepEvent{Type: StepEventUsage, Usage: ev.Usage})
+		// Providers may report usage across several events within one step
+		// (e.g. Anthropic emits input/cache tokens up front and the final
+		// output count later). Merge non-zero fields so no partial update
+		// clobbers a previously reported count.
+		sr.usage = mergeUsage(sr.usage, ev.Usage)
+		emitChunk(StepEvent{Type: StepEventUsage, Usage: sr.usage})
 
 	case StreamEventSource:
 		if ev.Source != nil {
