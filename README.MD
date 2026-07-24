@@ -243,6 +243,100 @@ transports reject redirects by default; set `Redirect: mcp.RedirectFollow` only 
 Provider-specific v7 defaults (OpenAI Responses reasoning detail, Anthropic cache-creation removal,
 Google provider rename, xAI Responses default, and runtime rejection of system messages) remain deferred.
 
+## Streaming views
+
+`StreamText` returns a `*StreamResult` that fans out to as many views as a caller registers; each
+view gets its own branch of the underlying event stream, so using more than one (e.g. `TextStream()`
+for display and `Consume()` for the final result) does not race or steal events from the others.
+
+| View | Returns | Use for |
+|---|---|---|
+| `Stream()` | `<-chan StepEvent` | Raw engine events, one channel |
+| `Events()` | `iter.Seq2[StepEvent, error]` | `for ev, err := range sr.Events()` — idiomatic Go 1.23+ iteration |
+| `TextStream()` | `<-chan string` | Text deltas only, e.g. printing to a terminal |
+| `Consume()` | `(*GenerateTextResult, error)` | Block for the full aggregated result |
+
+```go
+sr := ai.StreamText(ctx, req)
+for ev, err := range sr.Events() {
+    if err != nil {
+        // err is the stream's terminal error (including a mid-stream provider failure);
+        // ranging simply stops after this — no further events follow.
+        break
+    }
+    if ev.Type == ai.StepEventTextDelta {
+        fmt.Print(ev.TextDelta)
+    }
+}
+```
+
+Breaking out of a `range` early unregisters only that view — it does not cancel the run, since other
+views (or a later `Consume()`) may still be reading. To stop the run itself, cancel the `context.Context`
+passed to `StreamText`.
+
+## Error handling
+
+Provider HTTP failures surface as `*ai.APIError` (an alias of the shared `aitypes.APIError`), never as
+an opaque string. The raw response body is deliberately never embedded — it has, in other SDKs, leaked
+credentials and internal identifiers through error logs — but the fields a caller actually needs
+(status code, provider error code/message, request ID, `Retry-After`) are parsed out and kept:
+
+```go
+result, err := ai.GenerateText(ctx, req)
+if err != nil {
+    var apiErr *ai.APIError
+    if errors.As(err, &apiErr) {
+        fmt.Println(apiErr.Provider, apiErr.StatusCode, apiErr.RequestID)
+    }
+    switch {
+    case errors.Is(err, ai.ErrRateLimited):
+        // apiErr.RetryAfter holds the provider's Retry-After value, when sent.
+    case errors.Is(err, ai.ErrContextLength):
+    case errors.Is(err, ai.ErrUnauthorized):
+    }
+}
+```
+
+`ai.ErrNoSuchTool` classifies a tool call for a name the request's `ToolSet` does not define, the same
+way — `errors.Is(err, ai.ErrNoSuchTool)` rather than matching an error string.
+
+## Observability
+
+By default the SDK produces no logs and no trace spans: instrumentation is opt-in, never assumed.
+
+`WithLogger` injects a `*slog.Logger` that receives structured diagnostics — a panic recovered at a
+goroutine or callback boundary, and a provider error body that `*APIError` deliberately drops (see
+"Error handling" above) — at debug/error level. Leaving it unset is silent; the SDK never writes to
+`slog.Default()`, since a library taking over a consumer's log stream without being asked is exactly
+the surprise this option exists to prevent.
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model:    model,
+    Messages: []ai.Message{ai.UserMessage("Hello!")},
+    Logger:   logger,
+})
+```
+
+Tracing follows the standard OpenTelemetry pattern: the SDK always instruments run/step/model-call/
+tool-call spans through the `go.opentelemetry.io/otel/trace` API, but until *your application* calls
+`otel.SetTracerProvider(...)` with a real SDK, that global provider is OTel's own no-op — spans cost a
+few interface calls and nothing is exported. No `ai-go`-specific option is needed to turn tracing on;
+wiring up an exporter is the application's concern, not this SDK's.
+
+Span attributes are metadata only by default — model ID, step number, tool name, token usage, finish
+reason — never prompt, completion, or tool-argument content, since spans are commonly exported to a
+third-party backend. Opt into content with `ai.WithTraceContent(true)` on the request:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model:        model,
+    Messages:     []ai.Message{ai.UserMessage("Hello!")},
+    TraceContent: true, // spans now include prompt/completion/tool-argument text
+})
+```
+
 ## Requirements
 
 - Go 1.25+
