@@ -171,7 +171,7 @@ func TestEncodeRequest_InstructionsAndMessages(t *testing.T) {
 		Instructions: "You are helpful",
 		Messages:     []ai.Message{ai.UserMessage("hi")},
 	}
-	cr, err := encodeRequest("gemini-2.5-flash", req, true)
+	cr, _, err := encodeRequest("gemini-2.5-flash", req, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -198,12 +198,20 @@ func TestEncodeRequest_MultimodalImageURL(t *testing.T) {
 		},
 	}
 	req := ai.LanguageModelRequest{Messages: []ai.Message{msg}}
-	cr, err := encodeRequest("gemini-2.5-flash", req, false)
+	cr, _, err := encodeRequest("gemini-2.5-flash", req, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	content, ok := cr.Messages[0]["content"].([]map[string]any)
 	if !ok || len(content) != 2 {
-		t.Errorf("expected multipart content with 2 parts, got %v", cr.Messages[0]["content"])
+		t.Fatalf("expected multipart content with 2 parts, got %v", cr.Messages[0]["content"])
+	}
+	// The image must survive as an image_url part; the generic-file branch would
+	// downgrade it to a text placeholder and the model would never see it.
+	if content[1]["type"] != "image_url" {
+		t.Fatalf("expected type=image_url, got %v", content[1]["type"])
+	}
+	if url := content[1]["image_url"].(map[string]string)["url"]; url != "https://example.com/img.png" {
+		t.Errorf("unexpected url: %q", url)
 	}
 }

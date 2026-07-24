@@ -83,6 +83,7 @@ func decodeSSEStream(
 	ctx context.Context,
 	body io.ReadCloser,
 	out chan<- ai.StreamEvent,
+	encodeWarnings ...ai.Warning,
 ) {
 	defer close(out)
 	defer body.Close()
@@ -127,7 +128,7 @@ func decodeSSEStream(
 		}
 		data := strings.TrimPrefix(line, "data: ")
 
-		if !dispatchSSEEvent(eventType, data, blocks, send) {
+		if !dispatchSSEEvent(eventType, data, blocks, send, encodeWarnings) {
 			return
 		}
 	}
@@ -146,6 +147,7 @@ func dispatchSSEEvent(
 	eventType, data string,
 	blocks map[int]*blockState,
 	send func(ai.StreamEvent) bool,
+	encodeWarnings []ai.Warning,
 ) bool {
 	switch eventType {
 	case eventMessageStart:
@@ -155,7 +157,7 @@ func dispatchSSEEvent(
 	case eventContentBlockDelta:
 		return handleContentBlockDelta(data, blocks, send)
 	case eventMessageDelta:
-		return handleMessageDelta(data, send)
+		return handleMessageDelta(data, send, encodeWarnings)
 	case eventError:
 		return handleError(data, send)
 	}
@@ -243,6 +245,7 @@ func handleContentBlockDelta(
 func handleMessageDelta(
 	data string,
 	send func(ai.StreamEvent) bool,
+	encodeWarnings []ai.Warning,
 ) bool {
 	var msg sseMessageDelta
 	if json.Unmarshal([]byte(data), &msg) != nil {
@@ -261,6 +264,7 @@ func handleMessageDelta(
 		Type:            ai.StreamEventFinish,
 		FinishReason:    mapStopReason(msg.Delta.StopReason),
 		RawFinishReason: msg.Delta.StopReason,
+		Warnings:        encodeWarnings,
 	})
 }
 

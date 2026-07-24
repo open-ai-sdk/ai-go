@@ -51,9 +51,9 @@ func TestUploadFile_Success(t *testing.T) {
 
 	model := NewLanguageModel("gpt-4o", Config{APIKey: "test-key", BaseURL: srv.URL})
 	got, err := model.UploadFile(context.Background(), UploadFileRequest{
-		Filename: "report.pdf",
-		Purpose:  FilePurposeUserData,
-		Data:     []byte("fake pdf content"),
+		Filename:  "report.pdf",
+		Purpose:   FilePurposeUserData,
+		Data:      []byte("fake pdf content"),
 		MediaType: "application/pdf",
 	})
 	if err != nil {

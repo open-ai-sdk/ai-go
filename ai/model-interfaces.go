@@ -111,8 +111,8 @@ type StreamEvent struct {
 	Source *Source
 
 	// File fields are set for StreamEventFileDelta.
-	FileData     []byte
-	FileMimeType string
+	FileData      []byte
+	FileMediaType string
 
 	// Error is set for StreamEventError.
 	Error error

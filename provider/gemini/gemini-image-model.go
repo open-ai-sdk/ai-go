@@ -118,7 +118,7 @@ func (m *ImageModel) buildRequest(req ai.GenerateImageRequest) nativeRequest {
 			parts = append(parts, nativePart{
 				InlineData: &nativeInlineData{
 					MediaType: img.MediaType,
-					Data:     base64.StdEncoding.EncodeToString(img.Data),
+					Data:      base64.StdEncoding.EncodeToString(img.Data),
 				},
 			})
 		} else if img.URL != "" {
@@ -170,7 +170,7 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 					continue
 				}
 				result.Images = append(result.Images, ai.GeneratedImage{
-					Data:     decoded,
+					Data:      decoded,
 					MediaType: part.InlineData.MediaType,
 				})
 			}

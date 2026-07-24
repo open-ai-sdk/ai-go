@@ -129,8 +129,6 @@ text := adapter.Stream(stream, &buf)
 // buf contains SSE-encoded AI SDK UI message stream chunks
 ```
 
-## Requirements
-
 ## v7 protocol migration
 
 This release intentionally breaks compatibility with the earlier API: request `System` is now
@@ -138,11 +136,18 @@ This release intentionally breaks compatibility with the earlier API: request `S
 `Events()`, and usage is reported as `InputTokens`/`OutputTokens` with nested cache and reasoning
 details. Aggregated results expose `Usage` and `FinalStep`.
 
+Images no longer have a dedicated content part. Everything non-text travels as a file part carrying
+a `MediaType` — either a full IANA media type (`image/png`) or the bare top-level segment (`image`).
+`ImageURLPart`/`ImageDataPart`/`ImageFileIDPart` keep their signatures as conveniences that emit file
+parts; `MimeType` fields are now `MediaType`, and tool-result content is `text` or `file`.
+
 UI streams support v7 `tool-approval-response`, `custom`, and `reasoning-file` chunks. MCP HTTP
 transports reject redirects by default; set `Redirect: mcp.RedirectFollow` only for trusted endpoints.
 
 Provider-specific v7 defaults (OpenAI Responses reasoning detail, Anthropic cache-creation removal,
 Google provider rename, xAI Responses default, and runtime rejection of system messages) remain deferred.
+
+## Requirements
 
 - Go 1.25+
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
@@ -45,7 +46,7 @@ func (m *LanguageModel) ModelID() string { return m.modelID }
 
 // Stream sends a streaming request to the Anthropic Messages API.
 func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
-	body, err := m.encodeRequest(req)
+	body, encodeWarnings, err := m.encodeRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: encode request: %w", err)
 	}
@@ -79,7 +80,9 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 	}
 
 	ch := make(chan ai.StreamEvent, 64)
-	go decodeSSEStream(ctx, resp.Body, ch)
+	// Encoding warnings are merged onto the finish event so callers see them in
+	// GenerateTextResult.Warnings.
+	go decodeSSEStream(ctx, resp.Body, ch, encodeWarnings...)
 	return ch, nil
 }
 
@@ -141,9 +144,11 @@ type thinkingConfig struct {
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
-func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, error) {
+// encodeRequest builds the Messages API body. Returned warnings describe content
+// the API cannot carry; they are surfaced on the stream's finish event.
+func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, []ai.Warning, error) {
 	if req.Output != nil {
-		return nil, fmt.Errorf("anthropic: output schema is not yet supported")
+		return nil, nil, fmt.Errorf("anthropic: output schema is not yet supported")
 	}
 
 	ar := anthropicRequest{
@@ -158,7 +163,8 @@ func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, erro
 	ar.System = req.Instructions
 	ar.ToolChoice = mapToolChoice(req.ToolChoice)
 	ar.Thinking = extractThinkingConfig(req.ProviderOptions)
-	ar.Messages = encodeMessages(req.Messages)
+	msgs, warnings := encodeMessages(req.Messages)
+	ar.Messages = msgs
 	ar.Tools = encodeTools(req.Tools)
 
 	// Enable caching on last tool if caching is enabled
@@ -166,7 +172,11 @@ func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, erro
 		ar.Tools[len(ar.Tools)-1].CacheControl = &cacheControl{Type: "ephemeral"}
 	}
 
-	return json.Marshal(ar)
+	body, err := json.Marshal(ar)
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, warnings, nil
 }
 
 func mapToolChoice(tc *ai.ToolChoice) *anthropicToolChoice {
@@ -207,12 +217,15 @@ func extractThinkingConfig(opts map[string]any) *thinkingConfig {
 	return &thinkingConfig{Type: "enabled", BudgetTokens: budget}
 }
 
-func encodeMessages(msgs []ai.Message) []anthropicMsg {
+func encodeMessages(msgs []ai.Message) ([]anthropicMsg, []ai.Warning) {
 	var out []anthropicMsg
+	var warnings []ai.Warning
 	for _, msg := range msgs {
 		am := anthropicMsg{Role: string(msg.Role)}
 		for _, part := range msg.Content {
-			if cb := encodeContentPart(part); cb != nil {
+			cb, w := encodeContentPart(part)
+			warnings = append(warnings, w...)
+			if cb != nil {
 				am.Content = append(am.Content, *cb)
 			}
 		}
@@ -220,46 +233,93 @@ func encodeMessages(msgs []ai.Message) []anthropicMsg {
 			out = append(out, am)
 		}
 	}
-	return out
+	return out, warnings
 }
 
-func encodeContentPart(part ai.ContentPart) *contentBlock {
+func encodeContentPart(part ai.ContentPart) (*contentBlock, []ai.Warning) {
 	switch part.Type {
 	case ai.ContentPartTypeText:
-		return &contentBlock{Type: "text", Text: part.Text}
+		return &contentBlock{Type: "text", Text: part.Text}, nil
 	case ai.ContentPartTypeFile:
-		if len(part.Data) == 0 {
-			return nil
-		}
-		return &contentBlock{
-			Type: "image",
-			Source: &imageSource{
-				Type:      "base64",
-				MediaType: part.MediaType,
-				Data:      base64.StdEncoding.EncodeToString(part.Data),
-			},
-		}
+		return encodeFilePart(part)
 	case ai.ContentPartTypeToolCall:
 		return &contentBlock{
 			Type:  "tool_use",
 			ID:    part.ToolCallID,
 			Name:  part.ToolCallName,
 			Input: part.ToolCallArgs,
-		}
+		}, nil
 	case ai.ContentPartTypeToolResult:
 		return &contentBlock{
 			Type:      "tool_result",
 			ToolUseID: part.ToolResultID,
 			Content:   part.ToolResultOutput,
-		}
+		}, nil
 	case ai.ContentPartTypeReasoning:
 		return &contentBlock{
 			Type:      "thinking",
 			Thinking:  part.ReasoningText,
 			Signature: part.ThoughtSignature,
-		}
+		}, nil
 	default:
-		return nil
+		return nil, nil
+	}
+}
+
+// encodeFilePart maps a file content part onto an Anthropic content block.
+// Anthropic splits what the SDK models as one file part into two block kinds:
+// "image" (jpeg/png/gif/webp only) and "document" (PDF). Anything else, and any
+// part the Messages API cannot reference, is dropped with a warning rather than
+// silently vanishing from the request.
+func encodeFilePart(part ai.ContentPart) (*contentBlock, []ai.Warning) {
+	if len(part.Data) == 0 {
+		ref := part.FileURL
+		setting := "fileURL"
+		if ref == "" {
+			ref, setting = part.FileID, "fileID"
+		}
+		return nil, []ai.Warning{{
+			Type:    "unsupported-setting",
+			Setting: setting,
+			Message: fmt.Sprintf(
+				"anthropic: only inline file data is supported; dropping file part %q", ref,
+			),
+		}}
+	}
+
+	blockType, ok := anthropicFileBlockType(part.MediaType)
+	if !ok {
+		return nil, []ai.Warning{{
+			Type:    "unsupported-setting",
+			Setting: "mediaType",
+			Message: fmt.Sprintf(
+				"anthropic: media type %q is not supported as an image or document; dropping file part",
+				part.MediaType,
+			),
+		}}
+	}
+
+	return &contentBlock{
+		Type: blockType,
+		Source: &imageSource{
+			Type:      "base64",
+			MediaType: part.MediaType,
+			Data:      base64.StdEncoding.EncodeToString(part.Data),
+		},
+	}, nil
+}
+
+// anthropicFileBlockType resolves a media type to the Anthropic block kind that
+// accepts it. A bare "image" segment is treated as an image; the API rejects the
+// bare segment as a source media_type, so callers must supply a full type there.
+func anthropicFileBlockType(mediaType string) (string, bool) {
+	switch {
+	case mediaType == "application/pdf":
+		return "document", true
+	case strings.HasPrefix(mediaType, "image/"), mediaType == "image":
+		return "image", true
+	default:
+		return "", false
 	}
 }
 

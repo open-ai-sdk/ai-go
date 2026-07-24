@@ -18,7 +18,7 @@ func TestToAIContentParts_ImageFileID(t *testing.T) {
 	}
 	p := got[0]
 	if p.Type != ai.ContentPartTypeFile {
-		t.Errorf("expected type image_url, got %q", p.Type)
+		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileID != "file-abc123" {
 		t.Errorf("expected FileID=file-abc123, got %q", p.FileID)
@@ -44,7 +44,7 @@ func TestToAIContentParts_ImageData(t *testing.T) {
 	}
 	p := got[0]
 	if p.Type != ai.ContentPartTypeFile {
-		t.Errorf("expected type image_url, got %q", p.Type)
+		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if string(p.Data) != string(data) {
 		t.Errorf("expected Data=%v, got %v", data, p.Data)
@@ -69,7 +69,7 @@ func TestToAIContentParts_ImageURL(t *testing.T) {
 	}
 	p := got[0]
 	if p.Type != ai.ContentPartTypeFile {
-		t.Errorf("expected type image_url, got %q", p.Type)
+		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileURL != "https://example.com/img.png" {
 		t.Errorf("expected FileURL=https://example.com/img.png, got %q", p.FileURL)

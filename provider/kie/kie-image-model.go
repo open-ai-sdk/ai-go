@@ -217,7 +217,7 @@ func (m *ImageModel) downloadOne(ctx context.Context, url string) (ai.GeneratedI
 		return ai.GeneratedImage{}, fmt.Errorf("kie: read image body: %w", err)
 	}
 	return ai.GeneratedImage{
-		Data:     data,
+		Data:      data,
 		MediaType: resp.Header.Get("Content-Type"),
 	}, nil
 }

@@ -52,14 +52,16 @@ type EncodeRequestParams struct {
 }
 
 // EncodeRequest converts an ai.LanguageModelRequest into a ChatRequest.
+// Returned warnings describe content the chat-completions wire format cannot
+// carry; they are surfaced to the caller on the stream's finish event.
 func EncodeRequest(
 	params EncodeRequestParams,
 	req ai.LanguageModelRequest,
 	streaming bool,
-) (ChatRequest, error) {
-	msgs, err := encodeMessages(req.Instructions, req.Messages)
+) (ChatRequest, []ai.Warning, error) {
+	msgs, warnings, err := encodeMessages(req.Instructions, req.Messages)
 	if err != nil {
-		return ChatRequest{}, err
+		return ChatRequest{}, nil, err
 	}
 
 	cr := ChatRequest{
@@ -114,55 +116,75 @@ func EncodeRequest(
 		cr.ResponseFormat = encodeOutputSchema(req.Output)
 	}
 
-	return cr, nil
+	return cr, warnings, nil
 }
 
-func encodeMessages(system string, messages []ai.Message) ([]map[string]any, error) {
+func encodeMessages(system string, messages []ai.Message) ([]map[string]any, []ai.Warning, error) {
 	var out []map[string]any
+	var warnings []ai.Warning
 
 	if system != "" {
 		out = append(out, map[string]any{"role": "system", "content": system})
 	}
 
 	for _, m := range messages {
-		encoded, err := encodeMessage(m)
+		encoded, w, err := encodeMessage(m)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		warnings = append(warnings, w...)
 		out = append(out, encoded)
 	}
-	return out, nil
+	return out, warnings, nil
 }
 
-func encodeMessage(m ai.Message) (map[string]any, error) {
+func encodeMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 	switch m.Role {
 	case ai.RoleTool:
-		return encodeToolResultMessage(m)
+		msg, err := encodeToolResultMessage(m)
+		return msg, nil, err
 	default:
 		return encodeContentMessage(m)
 	}
 }
 
-func encodeContentMessage(m ai.Message) (map[string]any, error) {
+func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 	// Single text part shortcut.
 	if len(m.Content) == 1 && m.Content[0].Type == ai.ContentPartTypeText {
-		return map[string]any{"role": string(m.Role), "content": m.Content[0].Text}, nil
+		return map[string]any{"role": string(m.Role), "content": m.Content[0].Text}, nil, nil
 	}
 
 	parts := make([]map[string]any, 0, len(m.Content))
 	var toolCalls []map[string]any
+	var warnings []ai.Warning
 
 	for _, part := range m.Content {
 		switch part.Type {
 		case ai.ContentPartTypeText:
 			parts = append(parts, map[string]any{"type": "text", "text": part.Text})
 		case ai.ContentPartTypeFile:
+			// Chat-completions has no file-reference form: a provider file ID can be
+			// sent neither as an image_url nor as a file part. Warn rather than emit
+			// an empty URL, which the API would reject with an opaque 400.
+			if part.FileID != "" && len(part.Data) == 0 && part.FileURL == "" {
+				warnings = append(warnings, ai.Warning{
+					Type:    "unsupported-setting",
+					Setting: "fileID",
+					Message: fmt.Sprintf(
+						"chat completions cannot reference provider file IDs; dropping file part %q",
+						part.FileID,
+					),
+				})
+				continue
+			}
 			if strings.HasPrefix(part.MediaType, "image/") || part.MediaType == "image" {
 				var imageURL string
 				switch {
 				case len(part.Data) > 0:
+					// A bare "image" segment carries no subtype, so fall back to PNG:
+					// a data URI requires a full type and PNG decodes the widest range.
 					mediaType := part.MediaType
-					if mediaType == "" {
+					if mediaType == "" || mediaType == "image" {
 						mediaType = "image/png"
 					}
 					imageURL = "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
@@ -215,7 +237,7 @@ func encodeContentMessage(m ai.Message) (map[string]any, error) {
 	if len(toolCalls) > 0 {
 		msg["tool_calls"] = toolCalls
 	}
-	return msg, nil
+	return msg, warnings, nil
 }
 
 func encodeToolResultMessage(m ai.Message) (map[string]any, error) {

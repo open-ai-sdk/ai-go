@@ -261,7 +261,7 @@ func encodeMediaFromURL(url, mimeType string) nativePart {
 	}
 	m := mimeType
 	if m == "" {
-		m = guessMimeTypeFromURL(url)
+		m = guessMediaTypeFromURL(url)
 	}
 	return nativePart{FileData: &nativeFileData{MediaType: m, FileUri: url}}
 }
@@ -284,7 +284,7 @@ func encodeFilePart(p ai.ContentPart) nativePart {
 	}
 	m := p.MediaType
 	if m == "" {
-		m = guessMimeTypeFromURL(p.FileURL)
+		m = guessMediaTypeFromURL(p.FileURL)
 	}
 	return nativePart{FileData: &nativeFileData{MediaType: m, FileUri: p.FileURL}}
 }
@@ -457,8 +457,8 @@ func parseDataURI(uri string) (mimeType, data string, ok bool) {
 	return mime, base64.StdEncoding.EncodeToString([]byte(payload)), true
 }
 
-// guessMimeTypeFromURL returns a MIME type based on common URL file extensions.
-func guessMimeTypeFromURL(url string) string {
+// guessMediaTypeFromURL returns a media type based on common URL file extensions.
+func guessMediaTypeFromURL(url string) string {
 	lower := strings.ToLower(url)
 	switch {
 	case strings.HasSuffix(lower, ".png"):

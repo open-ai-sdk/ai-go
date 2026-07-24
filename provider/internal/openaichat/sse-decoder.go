@@ -57,6 +57,9 @@ type SSEDecodeParams struct {
 	// SourceExtractor is an optional hook to extract ai.Source events from a chunk.
 	// Called for every chunk; returned sources are emitted before text/tool deltas.
 	SourceExtractor func(chunk StreamChunk) []ai.Source
+	// EncodeWarnings are advisories raised while encoding the request. They are
+	// merged onto the finish event so callers see them in the aggregated result.
+	EncodeWarnings []ai.Warning
 }
 
 // DecodeSSEStream reads SSE lines from body and emits normalized ai.StreamEvents onto ch.
@@ -116,6 +119,7 @@ func DecodeSSEStream(
 					Type:            ai.StreamEventFinish,
 					FinishReason:    ai.FinishReasonStop,
 					RawFinishReason: "stop",
+					Warnings:        params.EncodeWarnings,
 				}
 			}
 			return
@@ -130,7 +134,7 @@ func DecodeSSEStream(
 			return
 		}
 
-		emitChunkEvents(chunk, ch, params.MetadataExtractor, params.SourceExtractor, &finishEmitted)
+		emitChunkEvents(chunk, ch, params, &finishEmitted)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -147,10 +151,12 @@ func DecodeSSEStream(
 func emitChunkEvents(
 	chunk StreamChunk,
 	ch chan<- ai.StreamEvent,
-	metaExtractor func(StreamChunk) map[string]any,
-	sourceExtractor func(StreamChunk) []ai.Source,
+	params SSEDecodeParams,
 	finishEmitted *bool,
 ) {
+	metaExtractor := params.MetadataExtractor
+	sourceExtractor := params.SourceExtractor
+
 	// Emit usage when present (may arrive on a chunk with empty choices).
 	if chunk.Usage != nil {
 		ch <- ai.StreamEvent{
@@ -188,6 +194,7 @@ func emitChunkEvents(
 			FinishReason:     MapFinishReason(choice.FinishReason),
 			RawFinishReason:  choice.FinishReason,
 			ProviderMetadata: meta,
+			Warnings:         params.EncodeWarnings,
 		}
 		*finishEmitted = true
 	}

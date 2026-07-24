@@ -256,9 +256,9 @@ func applyStreamEvent(
 
 	case StreamEventFileDelta:
 		emitChunk(StepEvent{
-			Type:         StepEventFileDelta,
-			FileData:     ev.FileData,
-			FileMimeType: ev.FileMimeType,
+			Type:          StepEventFileDelta,
+			FileData:      ev.FileData,
+			FileMediaType: ev.FileMediaType,
 		})
 
 	case StreamEventFinish:

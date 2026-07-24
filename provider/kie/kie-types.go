@@ -80,7 +80,7 @@ type kieFileUploadResponse struct {
 		FilePath    string `json:"filePath"`
 		DownloadURL string `json:"downloadUrl"`
 		FileSize    int64  `json:"fileSize"`
-		MediaType    string `json:"mimeType"`
+		MediaType   string `json:"mimeType"`
 		UploadedAt  string `json:"uploadedAt"`
 	} `json:"data"`
 }

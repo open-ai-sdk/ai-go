@@ -64,8 +64,8 @@ type StepEvent struct {
 	Source *Source
 
 	// File fields are set for StepEventFileDelta.
-	FileData     []byte
-	FileMimeType string
+	FileData      []byte
+	FileMediaType string
 
 	// Structured output (final step only).
 	StructuredOutput json.RawMessage
@@ -107,12 +107,21 @@ type OutputTokenDetails struct {
 	ReasoningTokens int
 }
 
+// Tool-result content part kinds. Images, audio and documents all travel as a
+// single file part carrying a media type — there is no separate image kind.
+const (
+	ToolResultContentTypeText = "text"
+	ToolResultContentTypeFile = "file"
+)
+
 // ToolResultContent represents a single content part in a tool result.
 type ToolResultContent struct {
-	Type      string // "text" or "image"
-	Text      string // for type="text"
-	Data      []byte // for type="image"
-	MediaType string // for type="image"
+	Type string // ToolResultContentTypeText or ToolResultContentTypeFile
+	Text string // for type="text"
+	Data []byte // for type="file"
+	// MediaType is either a full IANA media type ("image/png") or just the
+	// top-level segment ("image"); providers narrow it as their API requires.
+	MediaType string // for type="file"
 }
 
 // ToolResult holds the output of a single tool invocation.
@@ -177,7 +186,7 @@ type StreamEvent struct {
 	// Source is set for StreamEventSource events.
 	Source *Source
 	// File fields are set for StreamEventFileDelta.
-	FileData     []byte
-	FileMimeType string
-	Error        error
+	FileData      []byte
+	FileMediaType string
+	Error         error
 }

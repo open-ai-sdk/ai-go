@@ -90,7 +90,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		params.ExtraTools = m.cfg.ExtraToolsForRequest(req)
 	}
 
-	cr, err := EncodeRequest(params, req, true)
+	cr, encodeWarnings, err := EncodeRequest(params, req, true)
 	if err != nil {
 		return nil, fmt.Errorf("%s: encode request: %w", m.cfg.ProviderName, err)
 	}
@@ -164,6 +164,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 	go DecodeSSEStream(ctx, respBody, ch, SSEDecodeParams{
 		ProviderName:      m.cfg.ProviderName,
 		MetadataExtractor: m.cfg.MetadataExtractor,
+		EncodeWarnings:    encodeWarnings,
 	})
 	return ch, nil
 }

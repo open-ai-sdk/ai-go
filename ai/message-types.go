@@ -42,10 +42,12 @@ type ContentPart struct {
 
 	// FileURL is the URL or data URI when Type == ContentPartTypeFile.
 	FileURL string
-	// MediaType is the MIME type for image or file parts.
+	// MediaType is either a full IANA media type ("image/png") or just the
+	// top-level segment ("image") when the subtype is unknown. Providers narrow
+	// it as their API requires.
 	MediaType string
 
-	// Data holds inline binary content for image or file parts.
+	// Data holds inline binary content for file parts.
 	// Exactly one of FileURL, Data, or FileID should be set per part.
 	Data []byte
 	// FileID is a provider-specific file identifier (e.g. OpenAI "file-abc123").
@@ -79,27 +81,32 @@ func TextPart(text string) ContentPart {
 	return ContentPart{Type: ContentPartTypeText, Text: text}
 }
 
-// ImageURLPart constructs an image ContentPart from a URL or data URI.
+// ImageURLPart constructs a file ContentPart for an image at a URL or data URI.
+// Images have no dedicated part kind — this is a convenience over FilePart.
+// MediaType is set to the bare top-level segment "image" because the subtype is
+// unknown here; without it, encoders that route on media type would treat the
+// part as a generic file and drop the image.
 func ImageURLPart(url string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileURL: url}
+	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MediaType: "image"}
 }
 
 // FilePart constructs a file ContentPart from a URL or data URI.
-func FilePart(url, mimeType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MediaType: mimeType}
+func FilePart(url, mediaType string) ContentPart {
+	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MediaType: mediaType}
 }
 
 // ImageDataPart constructs an image ContentPart from inline binary data.
 // Use this when you have raw image bytes in memory (e.g. read from disk or
 // received over the network) and want to send the image inline to the model.
-// The mimeType must be a valid image MIME type such as "image/png" or "image/jpeg".
+// The mediaType must be an image media type such as "image/png" or "image/jpeg",
+// or the bare top-level segment "image" when the subtype is unknown.
 //
 // Example:
 //
 //	data, _ := os.ReadFile("screenshot.png")
 //	part := ai.ImageDataPart(data, "image/png")
-func ImageDataPart(data []byte, mimeType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mimeType}
+func ImageDataPart(data []byte, mediaType string) ContentPart {
+	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mediaType}
 }
 
 // ImageFileIDPart constructs an image ContentPart referencing a provider-hosted file.
@@ -123,20 +130,20 @@ func ImageFileIDPart(fileID string) ContentPart {
 //
 //	data, _ := os.ReadFile("report.pdf")
 //	part := ai.FileDataPart(data, "application/pdf", "report.pdf")
-func FileDataPart(data []byte, mimeType, filename string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mimeType, Filename: filename}
+func FileDataPart(data []byte, mediaType, filename string) ContentPart {
+	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mediaType, Filename: filename}
 }
 
 // FileIDPart constructs a file ContentPart referencing a provider-hosted file.
 // Use this when a non-image file has already been uploaded to the provider
 // (e.g. via the OpenAI Files API) and you have a file ID such as "file-xyz".
-// The mimeType hints to the provider how the file should be interpreted.
+// The mediaType hints to the provider how the file should be interpreted.
 //
 // Example:
 //
 //	part := ai.FileIDPart("file-xyz", "application/pdf")
-func FileIDPart(fileID, mimeType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MediaType: mimeType}
+func FileIDPart(fileID, mediaType string) ContentPart {
+	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MediaType: mediaType}
 }
 
 // ReasoningPart constructs a reasoning ContentPart for history replay.

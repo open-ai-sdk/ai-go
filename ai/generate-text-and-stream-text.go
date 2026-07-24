@@ -216,7 +216,7 @@ func handleFileDelta(ev engine.StepEvent, result *GenerateTextResult, step *Step
 	}
 	f := GeneratedFile{
 		Data:      ev.FileData,
-		MediaType: ev.FileMimeType,
+		MediaType: ev.FileMediaType,
 	}
 	result.Files = append(result.Files, f)
 	if step != nil {
@@ -760,7 +760,7 @@ func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
 		RawFinishReason:   ev.RawFinishReason,
 		ProviderMetadata:  ev.ProviderMetadata,
 		FileData:          ev.FileData,
-		FileMimeType:      ev.FileMimeType,
+		FileMediaType:     ev.FileMediaType,
 		Error:             ev.Error,
 	}
 	if ev.Usage != nil {

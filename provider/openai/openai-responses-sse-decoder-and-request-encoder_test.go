@@ -469,3 +469,28 @@ func TestDecodeNonStream_ErrorResponse(t *testing.T) {
 		t.Error("expected error, got nil")
 	}
 }
+
+// An image URL must be encoded as input_image. Before media-type routing
+// replaced the old type discriminator, an ImageURLPart carried no media type
+// and fell through to the input_file branch, so the model never saw an image.
+func TestEncodeRequest_ImageURLInput(t *testing.T) {
+	msg := ai.Message{
+		Role: ai.RoleUser,
+		Content: []ai.ContentPart{
+			ai.TextPart("describe this image"),
+			ai.ImageURLPart("https://example.com/img.png"),
+		},
+	}
+	req := ai.LanguageModelRequest{Messages: []ai.Message{msg}}
+	r, _, err := encodeRequest("gpt-4o", req, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	imgPart := r.Input[0].Content[1]
+	if imgPart.Type != "input_image" {
+		t.Errorf("expected type=input_image, got %q", imgPart.Type)
+	}
+	if imgPart.ImageURL != "https://example.com/img.png" {
+		t.Errorf("unexpected ImageURL: %q", imgPart.ImageURL)
+	}
+}

@@ -50,7 +50,8 @@ type Message struct {
 }
 
 // ContentPart is a single part of a message.
-// Type is one of: "text", "image_url", "file", "tool_call", "tool_result", "reasoning".
+// Type is one of: "text", "file", "tool_call", "tool_result", "reasoning".
+// Images have no dedicated type — they are file parts carrying an image MediaType.
 type ContentPart struct {
 	Type string
 
@@ -61,7 +62,7 @@ type ContentPart struct {
 	FileURL   string
 	MediaType string
 
-	// Shared multimodal fields (image_url and file parts).
+	// Shared multimodal fields (file parts).
 	Data     []byte // Inline binary content.
 	FileID   string // Provider-specific file identifier.
 	Filename string // Original filename (file parts).

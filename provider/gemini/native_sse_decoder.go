@@ -208,9 +208,9 @@ func emitNativeChunkEvents(
 					decoded, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 					if err == nil {
 						ch <- ai.StreamEvent{
-							Type:         ai.StreamEventFileDelta,
-							FileData:     decoded,
-							FileMimeType: part.InlineData.MediaType,
+							Type:          ai.StreamEventFileDelta,
+							FileData:      decoded,
+							FileMediaType: part.InlineData.MediaType,
 						}
 					}
 				}
