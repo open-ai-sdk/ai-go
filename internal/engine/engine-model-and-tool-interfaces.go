@@ -33,6 +33,7 @@ type ToolDefinition struct {
 	Name          string
 	Description   string
 	InputSchema   map[string]any
+	ContextSchema map[string]any
 	ToModelOutput func(result string) string
 }
 

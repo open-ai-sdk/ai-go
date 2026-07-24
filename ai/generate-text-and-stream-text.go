@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
 func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextResult, error) {
+	if err := validateToolsContext(req); err != nil {
+		return nil, err
+	}
 	ch := engine.Run(ctx, toEngineParams(req))
 
 	result := &GenerateTextResult{}
@@ -66,6 +70,37 @@ func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextRe
 
 	result.Response = Response{Messages: ResponseMessagesForSteps(result.Steps, req.Tools)}
 	return result, nil
+}
+
+func validateToolsContext(req GenerateTextRequest) error {
+	if req.Tools == nil {
+		return nil
+	}
+	for _, tool := range req.Tools.Definitions {
+		if tool.ContextSchema == nil {
+			continue
+		}
+		value, found := req.ToolsContext[tool.Name]
+		if !found {
+			return fmt.Errorf("ai: missing context for tool %q", tool.Name)
+		}
+		object, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("ai: context for tool %q must be an object", tool.Name)
+		}
+		if required, ok := tool.ContextSchema["required"].([]any); ok {
+			for _, raw := range required {
+				key, ok := raw.(string)
+				if !ok {
+					continue
+				}
+				if _, ok := object[key]; !ok {
+					return fmt.Errorf("ai: context for tool %q missing required field %q", tool.Name, key)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func handleToolCallStart(ev engine.StepEvent, step *StepOutput) {
@@ -288,6 +323,7 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 			Name:          d.Name,
 			Description:   d.Description,
 			InputSchema:   d.InputSchema,
+			ContextSchema: d.ContextSchema,
 			ToModelOutput: d.ToModelOutput,
 		}
 	}

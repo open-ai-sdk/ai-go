@@ -11,6 +11,8 @@ type ToolDefinition struct {
 	// InputSchema is a JSON Schema object describing the tool's input parameters.
 	// Use the schema package to build this map, or construct it manually.
 	InputSchema map[string]any
+	// ContextSchema describes the optional per-tool context value supplied in ToolsContext.
+	ContextSchema map[string]any
 	// ToModelOutput optionally transforms the tool execution result before it
 	// enters the conversation history. The original output is still reported in
 	// ToolResult events. If nil, the raw output is used as-is.
@@ -43,9 +45,9 @@ func ToolChoiceSpecific(toolName string) ToolChoice {
 
 // ToolResultContent represents a single content part in a tool result.
 type ToolResultContent struct {
-	Type     string // "text" or "image"
-	Text     string // for type="text"
-	Data     []byte // for type="image"
+	Type      string // "text" or "image"
+	Text      string // for type="text"
+	Data      []byte // for type="image"
 	MediaType string // for type="image"
 }
 
