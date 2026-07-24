@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // Chunk is a typed UI stream chunk that can be serialized to different transports.
@@ -75,6 +76,7 @@ func (cp *ChunkProducer) Produce(ch <-chan engine.StepEvent) *ChunkStream {
 	go func() {
 		defer close(out)
 		defer close(cs.done)
+		defer safego.Recover(nil, recoverToChunk(out))
 
 		// Emit the stream-start chunk first.
 		out <- Chunk{Type: ChunkStart, Fields: map[string]any{"messageId": cp.msgID}}
@@ -448,14 +450,21 @@ func MergeChunks(sources ...<-chan Chunk) <-chan Chunk {
 	remaining := make(chan struct{}, len(sources))
 	for _, src := range sources {
 		go func() {
+			// Signal completion even on panic so the closer below never
+			// deadlocks waiting on a source that died mid-relay.
+			defer func() { remaining <- struct{}{} }()
+			defer safego.Recover(nil, recoverToChunk(out))
 			for c := range src {
 				out <- c
 			}
-			remaining <- struct{}{}
 		}()
 	}
 
 	go func() {
+		// The only panic source here is a double close(out), which is
+		// unreachable — so a bare boundary is correct: emitting onto out would
+		// be self-defeating (out is the very channel being closed).
+		defer safego.Recover(nil, nil)
 		for i := 0; i < len(sources); i++ {
 			<-remaining
 		}

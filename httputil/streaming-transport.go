@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // DefaultStreamingTransport returns an *http.Transport tuned for long-lived
@@ -58,6 +59,14 @@ func GuardStream(ctx context.Context, raw <-chan ai.StreamEvent) <-chan ai.Strea
 	out := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer close(out)
+		// A panic while forwarding surfaces as an error event (ctx-guarded)
+		// before close instead of crashing the process.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+			case <-ctx.Done():
+			}
+		})
 		for ev := range raw {
 			select {
 			case out <- ev:
@@ -83,6 +92,7 @@ func GuardStream(ctx context.Context, raw <-chan ai.StreamEvent) <-chan ai.Strea
 func CloseOnCancel(ctx context.Context, c io.Closer) (stop func()) {
 	done := make(chan struct{})
 	go func() {
+		defer safego.Recover(nil, nil)
 		select {
 		case <-ctx.Done():
 			_ = c.Close()

@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamEventer is satisfied by *ai.StreamResult; using an interface avoids
@@ -95,6 +96,7 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 		intercepted := make(chan engine.StepEvent, 64)
 		go func() {
 			defer close(intercepted)
+			defer safego.Recover(nil, recoverToEvent(intercepted))
 			for ev := range ch {
 				if ev.Type == engine.StepEventToolResult && ev.ToolResult != nil {
 					tr := ev.ToolResult

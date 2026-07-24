@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ToUIStreamOptions configures the ToUIMessageStream bridge.
@@ -105,6 +106,7 @@ func interceptEvents(
 
 	go func() {
 		defer close(intercepted)
+		defer safego.Recover(nil, recoverToEvent(intercepted))
 		for ev := range eventCh {
 			// Track usage for metadata.
 			if ev.Type == engine.StepEventUsage && ev.Usage != nil {
@@ -145,6 +147,7 @@ func wrapChunksWithMetadata(
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
+		defer safego.Recover(nil, recoverToChunk(out))
 		var lastFinishReason string
 		for c := range chunks {
 			if !sendStart && c.Type == ChunkStart {
@@ -183,9 +186,14 @@ func attachMessageMetadata(
 	usageMu.Lock()
 	usageSnapshot := *usage
 	usageMu.Unlock()
-	metadata := metaFn(MessageMetadataInfo{
-		FinishReason: finishReason,
-		Usage:        &usageSnapshot,
+	// Observer callback: a panic leaves metadata nil and the finish chunk is
+	// still emitted, matching node's swallow-and-continue for metadata.
+	var metadata map[string]any
+	safeObserver(func() {
+		metadata = metaFn(MessageMetadataInfo{
+			FinishReason: finishReason,
+			Usage:        &usageSnapshot,
+		})
 	})
 	if metadata != nil {
 		if c.Fields == nil {

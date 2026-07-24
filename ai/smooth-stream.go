@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ChunkDetector extracts the next chunk from a buffer.
@@ -87,6 +88,14 @@ func (ss *SmoothStream) Transform(ctx context.Context, in_ <-chan engine.StepEve
 	out := make(chan engine.StepEvent, 64)
 	go func() {
 		defer close(out)
+		// The chunk detector may be consumer-supplied; a panic in it surfaces
+		// as an error event (ctx-guarded so it cannot park) before close.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case out <- engine.StepEvent{Type: engine.StepEventError, Error: err}:
+			case <-ctx.Done():
+			}
+		})
 		s := &smoothState{ss: ss, ctx: ctx, out: out}
 		s.run(in_)
 	}()

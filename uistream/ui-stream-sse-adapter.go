@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ToolResult is a public-facing tool result notification emitted during streaming.
@@ -96,6 +97,7 @@ func (a *Adapter) interceptEvents(
 	intercepted := make(chan engine.StepEvent, 64)
 	go func() {
 		defer close(intercepted)
+		defer safego.Recover(nil, recoverToEvent(intercepted))
 		for ev := range ch {
 			if ev.Type == engine.StepEventUsage && ev.Usage != nil {
 				state.mu.Lock()

@@ -1,6 +1,10 @@
 package uistream
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/open-ai-sdk/ai-go/internal/safego"
+)
 
 // StepEndInfo is the argument passed to the OnStepEnd callback.
 type StepEndInfo struct {
@@ -75,6 +79,7 @@ func HandleUIMessageStreamEnd(chunks <-chan Chunk, opts HandleUIMessageStreamEnd
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
+		defer safego.Recover(nil, recoverToChunk(out))
 
 		isAborted := false
 		endCalled := false
@@ -88,11 +93,15 @@ func HandleUIMessageStreamEnd(chunks <-chan Chunk, opts HandleUIMessageStreamEnd
 				return
 			}
 			endCalled = true
-			opts.OnEnd(EndInfo{
-				IsAborted:       isAborted,
-				IsContinuation:  isContinuation(),
-				ResponseMessage: snapshotMessage(state.Message),
-				FinishReason:    state.FinishReason,
+			// Observer callback: a panic here is swallowed so it cannot tear
+			// down the stream (node parity — mergeCallbacks swallows errors).
+			safeObserver(func() {
+				opts.OnEnd(EndInfo{
+					IsAborted:       isAborted,
+					IsContinuation:  isContinuation(),
+					ResponseMessage: snapshotMessage(state.Message),
+					FinishReason:    state.FinishReason,
+				})
 			})
 		}
 
@@ -117,9 +126,11 @@ func HandleUIMessageStreamEnd(chunks <-chan Chunk, opts HandleUIMessageStreamEnd
 			}
 
 			if c.Type == ChunkFinishStep && opts.OnStepEnd != nil {
-				opts.OnStepEnd(StepEndInfo{
-					IsContinuation:  isContinuation(),
-					ResponseMessage: snapshotMessage(state.Message),
+				safeObserver(func() {
+					opts.OnStepEnd(StepEndInfo{
+						IsContinuation:  isContinuation(),
+						ResponseMessage: snapshotMessage(state.Message),
+					})
 				})
 			}
 
@@ -142,6 +153,7 @@ func injectMessageID(chunks <-chan Chunk, messageID string) <-chan Chunk {
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
+		defer safego.Recover(nil, recoverToChunk(out))
 		for c := range chunks {
 			if c.Type == ChunkStart {
 				existing, ok := c.Fields["messageId"].(string)

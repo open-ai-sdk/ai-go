@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -74,6 +75,14 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 	out := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer close(out)
+		// A panic while injecting warnings surfaces as an error event before
+		// close instead of crashing the process.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+			default:
+			}
+		})
 		finishInjected := false
 		for ev := range coreCh {
 			if !finishInjected && ev.Type == ai.StreamEventFinish {

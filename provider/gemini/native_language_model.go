@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -118,6 +119,14 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	out := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer close(out)
+		// A panic while injecting warnings surfaces as an error event
+		// (ctx-guarded) before close instead of crashing the process.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+			case <-ctx.Done():
+			}
+		})
 		finishInjected := false
 		for ev := range raw {
 			if !finishInjected && ev.Type == ai.StreamEventFinish {

@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ImageModel implements ai.ImageModel by submitting a Kie task and polling
@@ -180,6 +181,9 @@ func (m *ImageModel) downloadImages(ctx context.Context, urls []string) ([]ai.Ge
 		wg.Add(1)
 		go func(idx int, url string) {
 			defer wg.Done()
+			// A panic in a single download surfaces as that entry's error
+			// instead of crashing the process; wg.Done still runs.
+			defer safego.Recover(nil, func(err error) { errs[idx] = err })
 			img, err := m.downloadOne(ctx, url)
 			if err != nil {
 				errs[idx] = err

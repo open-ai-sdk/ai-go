@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
@@ -802,6 +803,14 @@ func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-
 	engCh := make(chan engine.StreamEvent, 64)
 	go func() {
 		defer close(engCh)
+		// A panic while adapting events surfaces as an error event before
+		// close instead of crashing the process.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case engCh <- engine.StreamEvent{Type: engine.StreamEventError, Error: err}:
+			default:
+			}
+		})
 		for ev := range aiCh {
 			engCh <- toEngineStreamEvent(ev)
 		}

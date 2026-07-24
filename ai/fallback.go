@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // FallbackModel tries models in order, falling back on transient errors.
@@ -63,6 +65,7 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 		case firstEvent, ok = <-ch:
 		case <-ctx.Done():
 			go func() {
+				defer safego.Recover(nil, nil)
 				for range ch {
 				}
 			}()
@@ -79,6 +82,7 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 				lastErr = firstEvent.Error
 				// Drain remaining events to prevent goroutine leak
 				go func() {
+					defer safego.Recover(nil, nil)
 					for range ch {
 					}
 				}()
@@ -92,12 +96,21 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 		out := make(chan StreamEvent, 64)
 		go func() {
 			defer close(out)
+			// A panic while re-emitting surfaces as an error event (ctx-guarded)
+			// before close rather than crashing the process.
+			defer safego.Recover(nil, func(err error) {
+				select {
+				case out <- StreamEvent{Type: StreamEventError, Error: err}:
+				case <-ctx.Done():
+				}
+			})
 			send := func(ev StreamEvent) bool {
 				select {
 				case out <- ev:
 					return true
 				case <-ctx.Done():
 					go func() {
+						defer safego.Recover(nil, nil)
 						for range ch {
 						}
 					}()

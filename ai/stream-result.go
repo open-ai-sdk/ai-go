@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamResult wraps a streaming response with convenient accessors.
@@ -71,6 +72,24 @@ func (sr *StreamResult) ensureStarted() {
 			defer close(sr.textCh)
 			defer close(sr.eventsCh)
 			defer close(sr.consumeCh)
+			// A panic in the fan-out surfaces as an error event on the
+			// requested channels before they close, so a consumer sees a
+			// failure instead of a cleanly-closed empty stream.
+			defer safego.Recover(nil, func(err error) {
+				errEv := engine.StepEvent{Type: engine.StepEventError, Error: err}
+				if wantEvents {
+					select {
+					case sr.eventsCh <- errEv:
+					default:
+					}
+				}
+				if wantConsume {
+					select {
+					case sr.consumeCh <- errEv:
+					default:
+					}
+				}
+			})
 
 			for ev := range sr.src {
 				if ev.Type == engine.StepEventTextDelta && wantText {
@@ -131,10 +150,12 @@ func (sr *StreamResult) DrainUnused() {
 		sr.mu.Unlock()
 
 		go func() {
+			defer safego.Recover(nil, nil)
 			for range sr.textCh {
 			}
 		}()
 		go func() {
+			defer safego.Recover(nil, nil)
 			for range sr.consumeCh {
 			}
 		}()
@@ -158,14 +179,17 @@ func (sr *StreamResult) ConsumeStream() {
 		sr.mu.Unlock()
 		sr.ensureStarted()
 		go func() {
+			defer safego.Recover(nil, nil)
 			for range sr.textCh {
 			}
 		}()
 		go func() {
+			defer safego.Recover(nil, nil)
 			for range sr.eventsCh {
 			}
 		}()
 		go func() {
+			defer safego.Recover(nil, nil)
 			for range sr.consumeCh {
 			}
 		}()
