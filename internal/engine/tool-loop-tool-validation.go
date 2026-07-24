@@ -9,6 +9,7 @@ import (
 
 type preparedToolCall struct {
 	tc         toolCallState
+	def        ToolDefinition // resolved once here; execute steps reuse it, no re-scan
 	invalidErr error
 }
 
@@ -33,9 +34,10 @@ func prepareToolCalls(
 	stepTools := toolSetForStep(tools, req.Tools)
 	prepared := make([]preparedToolCall, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		fixed, err := validateAndRepairToolCall(ctx, stepTools, repair, req, tc)
+		fixed, def, err := validateAndRepairToolCall(ctx, stepTools, repair, req, tc)
 		prepared = append(prepared, preparedToolCall{
 			tc:         fixed,
+			def:        def,
 			invalidErr: err,
 		})
 	}
@@ -48,10 +50,10 @@ func validateAndRepairToolCall(
 	repair ToolCallRepairFunc,
 	req Request,
 	tc toolCallState,
-) (toolCallState, error) {
-	err := validateToolCall(tools, tc)
+) (toolCallState, ToolDefinition, error) {
+	def, err := validateToolCall(tools, tc)
 	if err == nil || repair == nil {
-		return tc, err
+		return tc, def, err
 	}
 
 	repaired, repairErr := repair(ctx, ToolCallRepairContext{
@@ -68,10 +70,10 @@ func validateAndRepairToolCall(
 		Error: err,
 	})
 	if repairErr != nil {
-		return tc, repairErr
+		return tc, def, repairErr
 	}
 	if repaired == nil {
-		return tc, err
+		return tc, def, err
 	}
 
 	if repaired.ID != "" {
@@ -87,32 +89,40 @@ func validateAndRepairToolCall(
 		tc.thoughtSignature = repaired.ThoughtSignature
 	}
 
-	return tc, validateToolCall(tools, tc)
+	def, err = validateToolCall(tools, tc)
+	return tc, def, err
 }
 
-func validateToolCall(tools *ToolSet, tc toolCallState) error {
+// validateToolCall checks tc against tools and, on success, returns the
+// matched ToolDefinition so callers resolve a tool call's definition exactly
+// once instead of validating and then re-scanning Definitions during
+// execution for ToModelOutput/Timeout. The zero ToolDefinition is returned
+// when tools carries no Definitions at all (any tool name is accepted, same
+// as before Lookup existed).
+func validateToolCall(tools *ToolSet, tc toolCallState) (ToolDefinition, error) {
 	if tools == nil {
-		return &NoSuchToolError{
+		return ToolDefinition{}, &NoSuchToolError{
 			ToolName:       tc.name,
 			AvailableTools: nil,
 		}
 	}
 	if len(tools.Definitions) == 0 {
 		if err := invalidToolArgumentsError(tc.name, tc.args); err != nil {
-			return err
+			return ToolDefinition{}, err
 		}
-		return nil
+		return ToolDefinition{}, nil
 	}
-	if _, ok := findToolDefinition(tools, tc.name); !ok {
-		return &NoSuchToolError{
+	def, ok := tools.Lookup(tc.name)
+	if !ok {
+		return ToolDefinition{}, &NoSuchToolError{
 			ToolName:       tc.name,
 			AvailableTools: toolDefinitionNames(tools),
 		}
 	}
 	if err := invalidToolArgumentsError(tc.name, tc.args); err != nil {
-		return err
+		return ToolDefinition{}, err
 	}
-	return nil
+	return def, nil
 }
 
 func invalidToolArgumentsError(toolName, args string) *InvalidToolArgumentsError {
@@ -144,18 +154,6 @@ func invalidToolCallOutput(tc toolCallState, err error) string {
 	return fmt.Sprintf(`{"error":%q}`, err.Error())
 }
 
-func findToolDefinition(tools *ToolSet, name string) (*ToolDefinition, bool) {
-	if tools == nil {
-		return nil, false
-	}
-	for i := range tools.Definitions {
-		if tools.Definitions[i].Name == name {
-			return &tools.Definitions[i], true
-		}
-	}
-	return nil, false
-}
-
 func toolDefinitionNames(tools *ToolSet) []string {
 	if tools == nil || len(tools.Definitions) == 0 {
 		return nil
@@ -183,7 +181,12 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 	}
 }
 
-func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState) *ToolResult {
+// executeToolCall invokes tools.Executor for a single validated call. def is
+// the ToolDefinition resolved during validation; its Timeout, if set, bounds
+// this call — the default (zero) leaves ctx as the caller's, since agent
+// tools may legitimately run for minutes and an SDK-imposed default would be
+// a silent behavior change.
+func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState, def ToolDefinition) *ToolResult {
 	result := &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args}
 	if tools == nil || tools.Executor == nil {
 		result.Output = fmt.Sprintf(`{"error":"no executor for tool %q"}`, tc.name)
@@ -191,6 +194,11 @@ func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState) *Too
 	}
 	// Inject tool call ID into context so downstream code (e.g. approval managers) can correlate.
 	execCtx := context.WithValue(ctx, toolCallIDCtxKey, tc.id)
+	if def.Timeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(execCtx, def.Timeout)
+		defer cancel()
+	}
 	output, err := tools.Executor.Execute(execCtx, tc.name, tc.args)
 	if err != nil {
 		result.Output = fmt.Sprintf(`{"error":%q}`, err.Error())

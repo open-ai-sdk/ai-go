@@ -469,7 +469,7 @@ func TestParseStructuredOutput_InvalidJSON(t *testing.T) {
 }
 
 func TestValidateToolCall_InvalidArgsIncludesCause(t *testing.T) {
-	err := validateToolCall(&ToolSet{
+	_, err := validateToolCall(&ToolSet{
 		Definitions: []ToolDefinition{{Name: "search"}},
 	}, toolCallState{
 		name: "search",

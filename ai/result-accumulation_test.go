@@ -67,6 +67,9 @@ func TestGenerateText_ResultAccumulationAndFinalStep(t *testing.T) {
 			Definitions: []ai.ToolDefinition{{Name: "add", InputSchema: map[string]any{"type": "object"}}},
 			Executor:    addExec{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); this test exercises
+		// a real two-step loop, so it must opt in explicitly.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
 	})
 	if err != nil {

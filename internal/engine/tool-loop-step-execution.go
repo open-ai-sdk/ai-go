@@ -1,9 +1,10 @@
 package engine
 
 import (
-	"sync"
+	"context"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"golang.org/x/sync/errgroup"
 )
 
 func executeToolCalls(
@@ -37,17 +38,14 @@ func executeToolCalls(
 			ThoughtSignature:  tc.thoughtSignature,
 		})
 
-		result := approvedToolCall(r, tools, tc, approval, approver)
+		result := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
 
 		// Apply ToModelOutput transform for history; event keeps original output.
+		// def was resolved once during validation (prepareToolCalls), so no
+		// second scan of tools.Definitions is needed here.
 		modelOutput := result.Output
-		if tools != nil {
-			for _, def := range tools.Definitions {
-				if def.Name == tc.name && def.ToModelOutput != nil {
-					modelOutput = def.ToModelOutput(result.Output)
-					break
-				}
-			}
+		if preparedCall.def.ToModelOutput != nil {
+			modelOutput = preparedCall.def.ToModelOutput(result.Output)
 		}
 
 		*history = append(*history, buildToolResultMessage(tc.id, tc.name, modelOutput))
@@ -65,7 +63,13 @@ func executeToolCalls(
 	return toolNames, stepToolCalls, stepToolResults
 }
 
-// executeToolCallsParallel processes tool calls concurrently with a semaphore.
+// executeToolCallsParallel processes tool calls concurrently, bounded by
+// maxParallel via errgroup.SetLimit. g.Go always returns nil: node continues
+// sibling tool calls when one fails and reports the failure per-call, so an
+// errgroup first-error-cancels policy would silently change that semantic.
+// Per-call errors travel through results[i].result.Output instead of through
+// g.Wait's return value. errgroup is used here only for concurrency limiting
+// and ctx propagation, not for fail-fast error aggregation.
 func executeToolCallsParallel(
 	r *run,
 	tools *ToolSet,
@@ -79,23 +83,23 @@ func executeToolCallsParallel(
 	}
 
 	type indexedResult struct {
-		idx         int
 		tc          toolCallState
 		result      *ToolResult
 		modelOutput string
 		valid       bool
-		invalidErr  error
 	}
 
 	results := make([]indexedResult, len(prepared))
-	sem := make(chan struct{}, maxParallel)
-	var wg sync.WaitGroup
+
+	g, gctx := errgroup.WithContext(r.ctx)
+	g.SetLimit(maxParallel)
 
 	for i, preparedCall := range prepared {
 		tc := preparedCall.tc
+		def := preparedCall.def
 		if preparedCall.invalidErr != nil {
 			results[i] = indexedResult{
-				idx: i, tc: tc, valid: false, invalidErr: preparedCall.invalidErr,
+				tc: tc, valid: false,
 				result: &ToolResult{
 					ID: tc.id, Name: tc.name, Args: tc.args,
 					Output: invalidToolCallOutput(tc, preparedCall.invalidErr),
@@ -104,7 +108,7 @@ func executeToolCallsParallel(
 			continue
 		}
 
-		// Emit ToolCallReady before execution starts (matches sequential contract)
+		// Emit ToolCallReady before execution starts (matches sequential contract).
 		r.emit(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
@@ -113,39 +117,51 @@ func executeToolCallsParallel(
 			ThoughtSignature:  tc.thoughtSignature,
 		})
 
-		results[i] = indexedResult{idx: i, tc: tc, valid: true}
-		wg.Add(1)
-		go func(idx int, tc toolCallState) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		results[i] = indexedResult{tc: tc, valid: true}
+		idx := i
+
+		// g.Go blocks this loop (not a background goroutine) once maxParallel
+		// calls are already in flight — the queueing happens here, before a
+		// goroutine for this call exists, unlike a semaphore acquired from
+		// inside the goroutine body.
+		g.Go(func() error {
+			// A call still queued when gctx is cancelled must not start real
+			// tool work: check before doing anything else so cancellation
+			// while queued caps how many tool bodies run, not just how many
+			// goroutines are spawned.
+			if gctx.Err() != nil {
+				results[idx].result = &ToolResult{
+					ID: tc.id, Name: tc.name, Args: tc.args,
+					Output: invalidToolCallOutput(tc, gctx.Err()),
+				}
+				results[idx].modelOutput = results[idx].result.Output
+				return nil
+			}
 			// A panic in a tool executor (or ToModelOutput) is contained to this
 			// call: it becomes that tool's error result so sibling tools still
 			// complete and the model sees the failure, rather than crashing the
-			// process. Recover is deferred last so it runs first and populates the
-			// result before wg.Done.
+			// process.
 			defer safego.Recover(r.logger, func(err error) {
 				results[idx].result = &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: invalidToolCallOutput(tc, err)}
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			result := approvedToolCall(r, tools, tc, approval, approver)
+			result := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
 			modelOutput := result.Output
-			if tools != nil {
-				for _, def := range tools.Definitions {
-					if def.Name == tc.name && def.ToModelOutput != nil {
-						modelOutput = def.ToModelOutput(result.Output)
-						break
-					}
-				}
+			if def.ToModelOutput != nil {
+				modelOutput = def.ToModelOutput(result.Output)
 			}
 			results[idx].result = result
 			results[idx].modelOutput = modelOutput
-		}(i, tc)
+			return nil
+		})
 	}
-	wg.Wait()
+	// g.Go bodies always return nil (see doc comment above), so g.Wait's
+	// return is never a real error; it exists only to block until all queued
+	// calls finish.
+	_ = g.Wait()
 
-	// Emit events and build history in original order
+	// Emit events and build history in original order.
 	toolNames = make([]string, 0, len(prepared))
 	for _, res := range results {
 		if !res.valid {
@@ -177,8 +193,10 @@ func executeToolCallsParallel(
 
 func approvedToolCall(
 	r *run,
+	ctx context.Context,
 	tools *ToolSet,
 	tc toolCallState,
+	def ToolDefinition,
 	approval map[string]func(string, string) bool,
 	approver ApprovalResponder,
 ) *ToolResult {
@@ -189,11 +207,11 @@ func approvedToolCall(
 			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
 			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
 		}
-		response, err := approver.RequestApproval(r.ctx, request)
+		response, err := approver.RequestApproval(ctx, request)
 		if err != nil || !response.Approved {
 			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
 			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
 		}
 	}
-	return executeToolCall(r.ctx, tools, tc)
+	return executeToolCall(ctx, tools, tc, def)
 }

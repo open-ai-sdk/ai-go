@@ -15,13 +15,19 @@ type GenerateTextRequest struct {
 	// ToolChoice controls which tool(s) the model may call. Defaults to ToolChoiceAuto.
 	// Ignored when Tools is nil.
 	ToolChoice *ToolChoice
-	// StopWhen is an optional custom stop condition for the tool loop.
+	// StopWhen is a custom stop condition for the tool loop. Nil defaults to
+	// IsStepCount(1) — a single step (node parity: generateText/streamText
+	// default to stopWhen=isStepCount(1)). Tool calls made in that step still
+	// execute; only a follow-up model call is gated. Use IsStepCount(n),
+	// Never(), or a custom StopCondition for a real multi-step loop.
 	StopWhen StopCondition
 	// Output optionally constrains the model's output to a JSON schema or mode.
 	Output *OutputSchema
 	// Settings controls per-request model parameters (temperature, maxTokens, etc.).
 	Settings CallSettings
-	// MaxSteps limits the number of tool-loop iterations. Defaults to 10.
+	// MaxSteps caps the number of tool-loop iterations. Zero means unbounded:
+	// StopWhen (or the model naturally stopping — no tool calls) becomes the
+	// only gate. There is no implicit default step count.
 	MaxSteps int
 	// ProviderOptions carries provider-specific options keyed by provider name.
 	// Example: map[string]any{"openai": map[string]any{"previousResponseId": "r_abc"}}.

@@ -147,6 +147,9 @@ func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 			}},
 			Executor: &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); this test exercises
+		// a real two-step loop, so it must opt in explicitly.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
 		OnStepEnd: func(event ai.StepEndEvent) {
 			stepEvents = append(stepEvents, event)
@@ -210,6 +213,9 @@ func TestGenerateText_RepairToolCall(t *testing.T) {
 			Definitions: []ai.ToolDefinition{{Name: "add"}},
 			Executor:    &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); repairToolCallModel's
+		// second step ("Done") is part of this test's scenario, so opt in.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
 		RepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
 			var noSuchToolErr *ai.NoSuchToolError
@@ -249,6 +255,9 @@ func TestGenerateText_RepairToolCall_PreservesArgsWhenOnlyNameChanges(t *testing
 			Definitions: []ai.ToolDefinition{{Name: "add"}},
 			Executor:    &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); repairToolCallModel's
+		// second step ("Done") is part of this test's scenario, so opt in.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
 		RepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
 			return &ai.ToolCallOutput{Name: "add"}, nil

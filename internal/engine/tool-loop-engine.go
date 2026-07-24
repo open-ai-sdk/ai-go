@@ -7,8 +7,6 @@ import (
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
-const defaultMaxSteps = 10
-
 // Run executes the tool loop and streams StepEvents onto the returned channel.
 // The channel is closed when the run completes or encounters an unrecoverable error.
 func Run(ctx context.Context, params RunParams) <-chan StepEvent {
@@ -28,11 +26,6 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		r.emit(StepEvent{Type: StepEventError, Error: err})
 	}, "phase", "tool-loop")
 
-	maxSteps := params.MaxSteps
-	if maxSteps <= 0 {
-		maxSteps = defaultMaxSteps
-	}
-
 	history := buildInitialHistory(params.Request)
 	var completedSteps []StepResultInfo
 	// lastSR captures the final iteration's streamResult so we can report an
@@ -40,7 +33,11 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// maxSteps (matching ai-sdk-node: honest return, no forced text step).
 	var lastSR streamResult
 
-	for step := 0; step < maxSteps; step++ {
+	// MaxSteps <= 0 means unbounded: node has no maxSteps concept at all, so
+	// StopWhen (or the model naturally stopping — no tool calls) is the only
+	// gate. A caller that sets neither now gets exactly as many steps as
+	// StopWhen allows, not an implicit cap.
+	for step := 0; params.MaxSteps <= 0 || step < params.MaxSteps; step++ {
 		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
 		// cancelled context makes the StepStart send return false and unwinds.
 		if !r.emit(StepEvent{Type: StepEventStepStart, StepNumber: step}) {

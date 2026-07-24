@@ -48,6 +48,10 @@ type toolSetDispatcher struct {
 	executors map[string]func(ctx context.Context, argsJSON string) (string, error)
 }
 
+// Compile-time assertion that toolSetDispatcher satisfies the public
+// ToolExecutor seam it is registered under (ToolSet.Executor).
+var _ ToolExecutor = (*toolSetDispatcher)(nil)
+
 func (d *toolSetDispatcher) Execute(ctx context.Context, name, argsJSON string) (string, error) {
 	fn, ok := d.executors[name]
 	if !ok {

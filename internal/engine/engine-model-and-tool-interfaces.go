@@ -28,26 +28,6 @@ type Model interface {
 	Stream(ctx context.Context, req Request) (<-chan StreamEvent, error)
 }
 
-// ToolExecutor executes a named tool with JSON arguments.
-type ToolExecutor interface {
-	Execute(ctx context.Context, name, argsJSON string) (string, error)
-}
-
-// ToolDefinition describes a tool available to the model.
-type ToolDefinition struct {
-	Name          string
-	Description   string
-	InputSchema   map[string]any
-	ContextSchema map[string]any
-	ToModelOutput func(result string) string
-}
-
-// ToolSet is a collection of tool definitions and an executor.
-type ToolSet struct {
-	Definitions []ToolDefinition
-	Executor    ToolExecutor
-}
-
 // Message is a conversation turn (engine-internal).
 type Message struct {
 	Role    string

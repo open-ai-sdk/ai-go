@@ -179,6 +179,52 @@ func (e myExec) Execute(ctx context.Context, name, args string) (string, error) 
 }
 ```
 
+### Agents
+
+`ai.Agent` binds a model, tools, and step-loop defaults, then delegates each call to
+`GenerateText`/`StreamText` — it never runs a loop of its own. `ai.ToolLoopAgent` is the reference
+implementation; consumers may implement `Agent` themselves (four methods, all in terms of the
+existing public types).
+
+```go
+agent := ai.NewToolLoopAgent(model,
+    ai.WithAgentTools(tools),
+    ai.WithAgentInstructions("You are a helpful assistant."),
+    // Unlike a bare GenerateText call (see "Breaking change" below), an agent
+    // defaults to a real multi-step loop: stopWhen=IsStepCount(20).
+)
+
+result, err := agent.Generate(ctx, ai.WithMessages(ai.UserMessage("Hello!")))
+```
+
+`Generate`/`Stream` accept the same `ai.Option` values as the bare functions; scalar options (model,
+tools, stop condition, ...) override the agent's defaults for that call only, while `OnStepEnd`/
+`OnEnd`/`OnChunk`/`OnError` set at the agent level and at the call level both fire — concurrently,
+with either side's panic swallowed — instead of one replacing the other.
+
+Stream an agent over SSE with the free functions in `uistream` (never methods on the agent, to keep
+`uistream`'s existing one-way dependency on `ai`):
+
+```go
+chunks, err := uistream.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessage("Hello!")))
+
+// Or serve it directly:
+http.Handle("/chat", uistream.AgentHandler(agent))
+```
+
+### Breaking change: tool-loop step count now has no implicit default
+
+`GenerateText`/`StreamText` used to fall back to an implicit 10-step budget whenever neither
+`MaxSteps` nor `StopWhen` was set. That implicit cap is gone: `MaxSteps` now means "unbounded" when
+zero, and `StopWhen` is the only gate, matching `ai-sdk-node` (which has no `maxSteps` concept at
+all). `generateText`/`streamText` default to `StopWhen: IsStepCount(1)` — a single step; a tool call
+in that step still executes, but the loop no longer continues into a follow-up model call unless you
+set a wider `StopWhen` (or use `ai.NewToolLoopAgent`, which defaults to `IsStepCount(20)`).
+
+If your code relied on the old implicit multi-step behavior without setting `StopWhen`, add one
+explicitly — `ai.IsStepCount(n)` or `ai.Never()` (run until the model stops calling tools, bounded
+only by `MaxSteps` if you set one).
+
 ## v7 protocol migration
 
 This release intentionally breaks compatibility with the earlier API: request `System` is now

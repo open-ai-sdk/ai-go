@@ -243,6 +243,15 @@ func erroredEventChannel(err error) <-chan engine.StepEvent {
 // toEngineParams converts a public GenerateTextRequest to engine.RunParams.
 // It also wraps the ai.LanguageModel to satisfy engine.Model.
 func toEngineParams(req GenerateTextRequest) engine.RunParams {
+	if req.StopWhen == nil {
+		// Node parity: generateText/streamText default to stopWhen=isStepCount(1)
+		// (ai-sdk-node generate-text.ts) now that the engine no longer has an
+		// implicit step cap of its own. Tool calls in that single step still
+		// execute; only the loop's continuation into a follow-up model call is
+		// gated. Multi-step tool loops require an explicit StopWhen (or
+		// ToolLoopAgent, which defaults to a 20-step budget instead).
+		req.StopWhen = IsStepCount(1)
+	}
 	engReq, engTools := toEngineRequest(req)
 	stopWhen := toEngineStopWhen(req.StopWhen)
 	engPrepareStep := toEnginePrepareStep(req.PrepareStep)
@@ -308,6 +317,7 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 			InputSchema:   d.InputSchema,
 			ContextSchema: d.ContextSchema,
 			ToModelOutput: d.ToModelOutput,
+			Timeout:       d.Timeout,
 		}
 	}
 	engReq.Tools = defs
@@ -330,6 +340,14 @@ type contextualExecutor struct {
 	toolsContext   ToolsContext
 	runtimeContext RuntimeContext
 }
+
+// Compile-time assertions that contextualExecutor satisfies both the public
+// ToolExecutor seam and the engine-internal mirror it is registered under
+// (engine.ToolSet.Executor) — the same method set, so one value satisfies both.
+var (
+	_ ToolExecutor        = contextualExecutor{}
+	_ engine.ToolExecutor = contextualExecutor{}
+)
 
 type approvalResponder struct{ fn ToolApprovalResponder }
 
@@ -556,6 +574,7 @@ func fromEngineToolSet(ts *engine.ToolSet) *ToolSet {
 			Description:   def.Description,
 			InputSchema:   def.InputSchema,
 			ToModelOutput: def.ToModelOutput,
+			Timeout:       def.Timeout,
 		}
 	}
 	return &ToolSet{
