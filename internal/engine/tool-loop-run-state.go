@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // run carries the per-run context and output channel so that every event send
@@ -15,6 +16,12 @@ type run struct {
 	ctx    context.Context
 	out    chan<- StepEvent
 	logger *slog.Logger
+	// tracer is never nil: runLoop substitutes tracing.NoopTracer{} when the
+	// caller configured none, so every call site can use it unconditionally.
+	tracer tracing.Tracer
+	// traceContent mirrors RunParams.TraceContent — whether spans may carry
+	// prompt/completion/tool-argument content.
+	traceContent bool
 }
 
 // safeObserver invokes an observer callback (one whose return value does not

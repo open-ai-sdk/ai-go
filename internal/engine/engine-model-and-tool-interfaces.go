@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 type ctxKey int
@@ -230,4 +231,12 @@ type RunParams struct {
 	// Logger, when set, receives structured logs (e.g. recovered panics). Nil is
 	// a no-op.
 	Logger *slog.Logger
+	// Tracer, when set, receives spans for the run/step/model-call/tool-call
+	// boundaries (see internal/tracing). Nil falls back to a genuine no-op
+	// that never touches OTel.
+	Tracer tracing.Tracer
+	// TraceContent attaches prompt, completion, and tool-argument content to
+	// spans when true. Default false: spans never carry content, only
+	// metadata (model ID, step number, tool name, usage, finish reason).
+	TraceContent bool
 }

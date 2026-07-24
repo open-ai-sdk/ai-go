@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // emitStructuredOutput makes a final constrained LLM call when an OutputSchema is configured.
@@ -31,8 +33,18 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) {
 	ctx, cancel := context.WithCancel(r.ctx)
 	defer cancel()
 
-	eventCh, err := params.Model.Stream(ctx, req)
+	modelCtx, span := r.tracer.Start(ctx, "ai.model_call",
+		tracing.Attr{Key: "ai.model_id", Value: params.Model.ModelID()},
+		tracing.Attr{Key: "ai.structured_output", Value: true},
+	)
+	defer span.End()
+	if r.traceContent {
+		span.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(msgs)})
+	}
+
+	eventCh, err := params.Model.Stream(modelCtx, req)
 	if err != nil {
+		span.RecordError(err)
 		r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)})
 		return
 	}
@@ -43,8 +55,13 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) {
 			b.WriteString(ev.TextDelta)
 		}
 		if ev.Type == StreamEventError {
+			span.RecordError(ev.Error)
 			return
 		}
+	}
+
+	if r.traceContent {
+		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: b.String()})
 	}
 
 	parsed := parseStructuredOutput(b.String())

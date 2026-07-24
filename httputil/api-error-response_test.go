@@ -1,14 +1,17 @@
 package httputil
 
 import (
+	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/ctxlog"
 )
 
 func makeResp(status int, header http.Header, body string) *http.Response {
@@ -28,7 +31,7 @@ func TestAPIErrorFromResponse_ParsesHeadersAndBody(t *testing.T) {
 	h.Set("X-Request-Id", "req_abc")
 	body := `{"error":{"message":"Rate limit reached","code":"rate_limit_exceeded","type":"requests"}}`
 
-	err := APIErrorFromResponse("openai", makeResp(429, h, body))
+	err := APIErrorFromResponse(context.Background(), "openai", makeResp(429, h, body))
 
 	if err.StatusCode != 429 {
 		t.Errorf("StatusCode = %d, want 429", err.StatusCode)
@@ -54,9 +57,55 @@ func TestAPIErrorFromResponse_DoesNotEmbedRawBody(t *testing.T) {
 	// A body carrying a secret-looking token must not survive into the error text.
 	secret := "sk-live-SECRETTOKEN-should-not-leak"
 	body := `{"error":{"message":"bad","code":"x"},"debug":"` + secret + `"}`
-	err := APIErrorFromResponse("openai", makeResp(400, nil, body))
+	err := APIErrorFromResponse(context.Background(), "openai", makeResp(400, nil, body))
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("raw body leaked into error text: %q", err.Error())
+	}
+}
+
+// recordingHandler is a minimal slog.Handler that captures every record it
+// receives, so a test can assert exactly what — if anything — was logged.
+type recordingHandler struct{ records []slog.Record }
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestAPIErrorFromResponse_LogsDroppedBodyWhenLoggerConfigured(t *testing.T) {
+	secret := "sk-live-SECRETTOKEN-should-not-leak"
+	body := `{"error":{"message":"bad","code":"x"},"debug":"` + secret + `"}`
+
+	rec := &recordingHandler{}
+	ctx := ctxlog.WithLogger(context.Background(), slog.New(rec))
+
+	_ = APIErrorFromResponse(ctx, "openai", makeResp(400, nil, body))
+
+	if len(rec.records) != 1 {
+		t.Fatalf("expected exactly one log record, got %d", len(rec.records))
+	}
+	found := false
+	rec.records[0].Attrs(func(a slog.Attr) bool {
+		if a.Key == "body" && strings.Contains(a.Value.String(), secret) {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Fatal("expected the dropped raw body to reach the injected logger's \"body\" attribute")
+	}
+}
+
+func TestAPIErrorFromResponse_NoLoggerConfigured_NoOutput(t *testing.T) {
+	// The default (no logger attached to ctx) must discard silently — never
+	// touch slog.Default(), never panic on a nil ctx value.
+	body := `{"error":{"message":"bad","code":"x"}}`
+	err := APIErrorFromResponse(context.Background(), "openai", makeResp(400, nil, body))
+	if err == nil {
+		t.Fatal("expected a non-nil *APIError")
 	}
 }
 

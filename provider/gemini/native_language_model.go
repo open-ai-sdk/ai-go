@@ -91,7 +91,7 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	if resp.StatusCode != http.StatusOK {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse("gemini-native", resp)
+		return nil, httputil.APIErrorFromResponse(ctx, "gemini-native", resp)
 	}
 
 	raw := make(chan ai.StreamEvent, 64)

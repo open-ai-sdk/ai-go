@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/ctxlog"
 )
 
 // defaultErrorBodyLimit bounds how much of an error response body is read for
@@ -20,7 +22,13 @@ const defaultErrorBodyLimit = 64 * 1024
 // It parses the provider error code/message from the (bounded) JSON body, the
 // request-ID and Retry-After response headers, then discards the raw body — it is
 // never embedded in the error value. resp.Body is read and closed.
-func APIErrorFromResponse(provider string, resp *http.Response) *aitypes.APIError {
+//
+// The raw body still reaches the caller if they opted into diagnostics: it is
+// logged at debug level via the *slog.Logger attached to ctx (see ctxlog),
+// which is a no-op unless the caller configured a logger (ai.WithLogger).
+// This is the same "off by default, explicit opt-in" policy applied to span
+// content — a security-relevant default, not an incidental one.
+func APIErrorFromResponse(ctx context.Context, provider string, resp *http.Response) *aitypes.APIError {
 	defer resp.Body.Close()
 	e := aitypes.NewAPIError(provider, resp.StatusCode, nil)
 	e.RequestID = firstHeader(resp.Header,
@@ -30,6 +38,8 @@ func APIErrorFromResponse(provider string, resp *http.Response) *aitypes.APIErro
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, defaultErrorBodyLimit))
 	e.Code, e.Message = parseProviderErrorBody(body)
+	ctxlog.FromContext(ctx).DebugContext(ctx, "provider error response",
+		"provider", provider, "status", resp.StatusCode, "body", string(body))
 	return e
 }
 

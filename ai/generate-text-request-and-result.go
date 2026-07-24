@@ -1,6 +1,9 @@
 package ai
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"log/slog"
+)
 
 // GenerateTextRequest is the input to GenerateText and StreamText.
 type GenerateTextRequest struct {
@@ -63,6 +66,16 @@ type GenerateTextRequest struct {
 	ParallelToolExecution bool
 	// MaxParallelTools limits concurrent tool executions. Default: 5.
 	MaxParallelTools int
+	// Logger, when set via WithLogger, receives structured diagnostics
+	// (recovered panics, dropped provider error bodies). Nil — the
+	// default — produces no output at all; the SDK never writes to
+	// slog.Default().
+	Logger *slog.Logger
+	// TraceContent, when set via WithTraceContent(true), attaches prompt,
+	// completion, and tool-argument content to trace spans. Default false:
+	// spans carry only metadata (model ID, step number, tool name, usage,
+	// finish reason), never content.
+	TraceContent bool
 }
 
 // StepOutput holds the result of a single tool-loop step.

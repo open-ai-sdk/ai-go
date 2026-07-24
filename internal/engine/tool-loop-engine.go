@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-ai-sdk/ai-go/internal/ctxlog"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // Run executes the tool loop and streams StepEvents onto the returned channel.
@@ -16,7 +18,33 @@ func Run(ctx context.Context, params RunParams) <-chan StepEvent {
 }
 
 func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
-	r := &run{ctx: ctx, out: out, logger: params.Logger}
+	tracer := params.Tracer
+	if tracer == nil {
+		// No OTel import, no global-provider lookup: a caller that configures
+		// nothing pays nothing for tracing, not even OTel's own no-op path.
+		tracer = tracing.NoopTracer{}
+	}
+	ctx = ctxlog.WithLogger(ctx, params.Logger)
+	ctx, runSpan := tracer.Start(ctx, "ai.run")
+
+	var completedSteps []StepResultInfo
+	// lastSR captures the final iteration's streamResult so we can report an
+	// accurate finish reason when the loop exits with pending tool_calls at
+	// maxSteps (matching ai-sdk-node: honest return, no forced text step), and
+	// so the run span reports the run's terminal state (see the deferred
+	// closure below).
+	var lastSR streamResult
+	// Reports the run's terminal finish reason/usage on the span regardless of
+	// which of the loop's several exit points was taken. This mirrors the
+	// last completed step's outcome rather than a lifetime sum across steps —
+	// the cumulative total remains available to the caller via
+	// GenerateTextResult.Usage in the ai package.
+	defer func() {
+		runSpan.SetAttributes(stepAttrs(lastSR)...)
+		runSpan.End()
+	}()
+
+	r := &run{ctx: ctx, out: out, logger: params.Logger, tracer: tracer, traceContent: params.TraceContent}
 	// close(out) is deferred first so it runs last: on a panic in a control
 	// callback (PrepareStep, StopWhen, ToModelOutput, RepairToolCall, tool
 	// Execute) the error event is emitted before the channel closes, so the
@@ -27,11 +55,6 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	}, "phase", "tool-loop")
 
 	history := buildInitialHistory(params.Request)
-	var completedSteps []StepResultInfo
-	// lastSR captures the final iteration's streamResult so we can report an
-	// accurate finish reason when the loop exits with pending tool_calls at
-	// maxSteps (matching ai-sdk-node: honest return, no forced text step).
-	var lastSR streamResult
 
 	// MaxSteps <= 0 means unbounded: node has no maxSteps concept at all, so
 	// StopWhen (or the model naturally stopping — no tool calls) is the only
@@ -82,27 +105,35 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		// deterministically once the step's events are consumed, without waiting
 		// for the whole run's context to end.
 		stepCtx, cancelStep := context.WithCancel(ctx)
-		eventCh, err := model.Stream(stepCtx, req)
-		if err != nil {
-			cancelStep()
-			r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, err)})
-			return
-		}
+		stepCtx, stepSpan := tracer.Start(stepCtx, "ai.step",
+			tracing.Attr{Key: "ai.step_number", Value: step},
+			tracing.Attr{Key: "ai.model_id", Value: model.ModelID()},
+		)
 
-		acc := newToolCallAccumulator()
-		sr, fatalErr := consumeStream(r, eventCh, acc, params.Callbacks)
+		mc := runStepModelCall(r, tracer, stepCtx, model, req, step, params.Callbacks)
 		// Release the provider: on the normal path it has already closed; on an
 		// early/fatal return, cancelling the child ctx unblocks its ctx-guarded
 		// send and the drain lets its goroutine finish and close the body.
 		cancelStep()
+		if mc.err != nil {
+			stepSpan.RecordError(mc.err)
+			stepSpan.End()
+			r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, mc.err)})
+			return
+		}
+		sr, fatalErr := mc.sr, mc.fatal
+		acc := mc.acc
 		if fatalErr {
-			go drainStreamEvents(eventCh)
+			stepSpan.End()
+			go drainStreamEvents(mc.eventCh)
 			return
 		}
 		lastSR = sr
 		fullText := sr.text
 
 		if !acc.hasToolCalls() {
+			stepSpan.SetAttributes(stepAttrs(sr)...)
+			stepSpan.End()
 			if !r.emit(StepEvent{
 				Type:             StepEventStepEnd,
 				StepNumber:       step,
@@ -155,6 +186,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				r, params.Tools, preparedToolCalls, &history, params.ToolApproval, params.Approver,
 			)
 		}
+
+		stepSpan.SetAttributes(stepAttrs(sr)...)
+		stepSpan.End()
 
 		if !r.emit(StepEvent{
 			Type:             StepEventStepEnd,

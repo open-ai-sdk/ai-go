@@ -37,6 +37,8 @@ func TestGenerateTextRequest_OptionCompleteness(t *testing.T) {
 		"Middlewares":           true, // WithMiddleware
 		"ParallelToolExecution": true, // WithParallelToolExecution
 		"MaxParallelTools":      true, // WithMaxParallelTools
+		"Logger":                true, // WithLogger
+		"TraceContent":          true, // WithTraceContent
 	}
 	// Fields intentionally without a top-level option, with the reason.
 	exempt := map[string]bool{

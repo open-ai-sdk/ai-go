@@ -133,7 +133,7 @@ func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse("openai", resp)
+		return nil, httputil.APIErrorFromResponse(ctx, "openai", resp)
 	}
 	return resp, nil
 }

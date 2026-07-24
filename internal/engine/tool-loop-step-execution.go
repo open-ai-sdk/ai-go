@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -213,5 +214,15 @@ func approvedToolCall(
 			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
 		}
 	}
-	return executeToolCall(ctx, tools, tc, def)
+
+	toolCtx, span := r.tracer.Start(ctx, "ai.tool_call", tracing.Attr{Key: "ai.tool_name", Value: tc.name})
+	defer span.End()
+	if r.traceContent {
+		span.SetAttributes(tracing.Attr{Key: "ai.tool.arguments", Value: tc.args})
+	}
+	result := executeToolCall(toolCtx, tools, tc, def)
+	if r.traceContent {
+		span.SetAttributes(tracing.Attr{Key: "ai.tool.output", Value: result.Output})
+	}
+	return result
 }

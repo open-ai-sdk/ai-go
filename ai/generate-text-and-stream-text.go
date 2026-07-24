@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
@@ -279,6 +280,15 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 		Callbacks:             engCallbacks,
 		ParallelToolExecution: req.ParallelToolExecution,
 		MaxParallelTools:      req.MaxParallelTools,
+		Logger:                req.Logger,
+		// Always bound to the process-global OTel TracerProvider: until the
+		// consumer's application registers a real one, that global provider is
+		// OTel's own no-op, so this costs nothing extra by default (see
+		// internal/tracing.NewTracer). There is no WithTracer option — tracing
+		// backend selection is the application's concern (otel.SetTracerProvider),
+		// not this SDK's.
+		Tracer:       tracing.NewTracer(),
+		TraceContent: req.TraceContent,
 	}
 }
 

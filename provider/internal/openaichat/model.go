@@ -145,7 +145,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 	if resp.StatusCode != http.StatusOK {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse(m.cfg.ProviderName, resp)
+		return nil, httputil.APIErrorFromResponse(ctx, m.cfg.ProviderName, resp)
 	}
 
 	respBody := resp.Body
