@@ -163,7 +163,9 @@ func TestGolden_Error(t *testing.T) {
 	)
 
 	assertContains(t, output, `"type":"error"`)
-	assertContains(t, output, "connection reset")
+	// Error text is redacted by default — the raw error must not reach the UI.
+	assertContains(t, output, "stream error")
+	assertNotContains(t, output, "connection reset")
 	// finish should NOT appear after an error
 	assertNotContains(t, output, `"type":"finish"`)
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -144,18 +143,9 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		return nil, fmt.Errorf("%s: http request: %w", m.cfg.ProviderName, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		respBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"%s: unexpected status %d (failed to read body: %w)",
-				m.cfg.ProviderName, resp.StatusCode, readErr,
-			)
-		}
-		return nil, fmt.Errorf(
-			"%s: unexpected status %d: %s",
-			m.cfg.ProviderName, resp.StatusCode, string(respBody),
-		)
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse(m.cfg.ProviderName, resp)
 	}
 
 	respBody := resp.Body

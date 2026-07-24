@@ -7,6 +7,9 @@ import (
 // Writer writes AI SDK UI message stream chunks directly to an io.Writer.
 // It is transport-agnostic and does not depend on engine.StepEvent.
 // Use it alongside Adapter.Stream, or standalone for custom chunk sequences.
+//
+// Every Write* method returns the underlying marshal/write error so a
+// disconnected client is observable to the caller rather than silently ignored.
 type Writer struct {
 	w io.Writer
 }
@@ -18,30 +21,30 @@ func NewWriter(w io.Writer) *Writer {
 
 // WriteChunk emits a single named chunk with arbitrary key/value fields.
 // The type field is always set to typ.
-func (wr *Writer) WriteChunk(typ string, fields map[string]any) {
-	WriteSSE(wr.w, Chunk{Type: typ, Fields: fields})
+func (wr *Writer) WriteChunk(typ string, fields map[string]any) error {
+	return WriteSSE(wr.w, Chunk{Type: typ, Fields: fields})
 }
 
 // WriteStart emits the stream start chunk with a message ID.
-func (wr *Writer) WriteStart(msgID string) {
-	WriteSSE(wr.w, Chunk{Type: ChunkStart, Fields: map[string]any{"messageId": msgID}})
+func (wr *Writer) WriteStart(msgID string) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkStart, Fields: map[string]any{"messageId": msgID}})
 }
 
 // WriteFinish emits the stream finish chunk followed by the [DONE] terminator.
-func (wr *Writer) WriteFinish() {
-	WriteSSE(wr.w, Chunk{Type: ChunkFinish, Fields: nil})
+func (wr *Writer) WriteFinish() error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkFinish, Fields: nil})
 }
 
 // WriteError emits an error chunk with an error message.
-func (wr *Writer) WriteError(msg string) {
-	WriteSSE(wr.w, Chunk{Type: ChunkError, Fields: map[string]any{"errorText": msg}})
+func (wr *Writer) WriteError(msg string) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkError, Fields: map[string]any{"errorText": msg}})
 }
 
 // WriteData emits a custom data-* chunk.
 // name is appended to "data-" to form the chunk type (e.g. name="plan" → type="data-plan").
 // payload is JSON-serialized under the "data" key.
-func (wr *Writer) WriteData(name string, payload any) {
-	WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{"data": payload}})
+func (wr *Writer) WriteData(name string, payload any) error {
+	return WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{"data": payload}})
 }
 
 // Source is a URL reference emitted as part of a source chunk.
@@ -52,8 +55,8 @@ type Source struct {
 }
 
 // WriteSource emits a source chunk for a single web reference.
-func (wr *Writer) WriteSource(s Source) {
-	WriteSSE(wr.w, Chunk{Type: ChunkSource, Fields: map[string]any{
+func (wr *Writer) WriteSource(s Source) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkSource, Fields: map[string]any{
 		"id":    s.ID,
 		"url":   s.URL,
 		"title": s.Title,
@@ -61,27 +64,27 @@ func (wr *Writer) WriteSource(s Source) {
 }
 
 // WriteSources emits a sources chunk containing multiple references.
-func (wr *Writer) WriteSources(sources []Source) {
-	WriteSSE(wr.w, Chunk{Type: ChunkSources, Fields: map[string]any{"sources": sources}})
+func (wr *Writer) WriteSources(sources []Source) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkSources, Fields: map[string]any{"sources": sources}})
 }
 
 // WriteMessageMetadata emits a message-metadata chunk with arbitrary metadata.
-func (wr *Writer) WriteMessageMetadata(metadata any) {
-	WriteSSE(wr.w, Chunk{Type: ChunkMessageMetadata, Fields: map[string]any{"messageMetadata": metadata}})
+func (wr *Writer) WriteMessageMetadata(metadata any) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkMessageMetadata, Fields: map[string]any{"messageMetadata": metadata}})
 }
 
 // WriteStartWithMetadata emits a start chunk with message ID and optional metadata.
-func (wr *Writer) WriteStartWithMetadata(msgID string, metadata any) {
+func (wr *Writer) WriteStartWithMetadata(msgID string, metadata any) error {
 	fields := map[string]any{"messageId": msgID}
 	if metadata != nil {
 		fields["messageMetadata"] = metadata
 	}
-	WriteSSE(wr.w, Chunk{Type: ChunkStart, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkStart, Fields: fields})
 }
 
 // WriteFinishWithReason emits a finish chunk with a finish reason and optional metadata.
 // WriteSSE automatically appends the [DONE] terminator for ChunkFinish chunks.
-func (wr *Writer) WriteFinishWithReason(finishReason string, metadata any) {
+func (wr *Writer) WriteFinishWithReason(finishReason string, metadata any) error {
 	fields := map[string]any{}
 	if finishReason != "" {
 		fields["finishReason"] = finishReason
@@ -89,37 +92,37 @@ func (wr *Writer) WriteFinishWithReason(finishReason string, metadata any) {
 	if metadata != nil {
 		fields["messageMetadata"] = metadata
 	}
-	WriteSSE(wr.w, Chunk{Type: ChunkFinish, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkFinish, Fields: fields})
 }
 
 // WriteTransientData emits a custom data-* chunk marked as transient (not persisted).
-func (wr *Writer) WriteTransientData(name string, payload any) {
-	WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{
+func (wr *Writer) WriteTransientData(name string, payload any) error {
+	return WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{
 		"data":      payload,
 		"transient": true,
 	}})
 }
 
 // WriteDataWithID emits a custom data-* chunk with an explicit ID for reconciliation.
-func (wr *Writer) WriteDataWithID(name, id string, payload any) {
-	WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{
+func (wr *Writer) WriteDataWithID(name, id string, payload any) error {
+	return WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{
 		"id":   id,
 		"data": payload,
 	}})
 }
 
 // WriteAbort emits an abort chunk signaling stream cancellation.
-func (wr *Writer) WriteAbort(reason string) {
+func (wr *Writer) WriteAbort(reason string) error {
 	fields := map[string]any{}
 	if reason != "" {
 		fields["reason"] = reason
 	}
-	WriteSSE(wr.w, Chunk{Type: ChunkAbort, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkAbort, Fields: fields})
 }
 
 // WriteSourceURL emits a structured source-url chunk.
-func (wr *Writer) WriteSourceURL(sourceID, url, title string) {
-	WriteSSE(wr.w, Chunk{Type: ChunkSourceURL, Fields: map[string]any{
+func (wr *Writer) WriteSourceURL(sourceID, url, title string) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkSourceURL, Fields: map[string]any{
 		"sourceId": sourceID,
 		"url":      url,
 		"title":    title,
@@ -135,7 +138,7 @@ type SourceDocumentOpts struct {
 
 // WriteSourceDocument emits a structured source-document chunk.
 // opts may be nil for backward-compatible callers.
-func (wr *Writer) WriteSourceDocument(sourceID, mediaType, title string, opts *SourceDocumentOpts) {
+func (wr *Writer) WriteSourceDocument(sourceID, mediaType, title string, opts *SourceDocumentOpts) error {
 	fields := map[string]any{
 		"sourceId":  sourceID,
 		"mediaType": mediaType,
@@ -150,7 +153,7 @@ func (wr *Writer) WriteSourceDocument(sourceID, mediaType, title string, opts *S
 		}
 		fields = withProviderMetadata(fields, opts.ProviderMetadata)
 	}
-	WriteSSE(wr.w, Chunk{Type: ChunkSourceDocument, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkSourceDocument, Fields: fields})
 }
 
 // FileChunkOpts carries optional v6 fields for file chunks.
@@ -164,7 +167,7 @@ type FileChunkOpts struct {
 
 // WriteFile emits a file chunk for assistant-provided files.
 // opts may be nil for backward-compatible callers.
-func (wr *Writer) WriteFile(url, mediaType string, opts *FileChunkOpts) {
+func (wr *Writer) WriteFile(url, mediaType string, opts *FileChunkOpts) error {
 	fields := map[string]any{
 		"url":       url,
 		"mediaType": mediaType,
@@ -184,7 +187,7 @@ func (wr *Writer) WriteFile(url, mediaType string, opts *FileChunkOpts) {
 		}
 		fields = withProviderMetadata(fields, opts.ProviderMetadata)
 	}
-	WriteSSE(wr.w, Chunk{Type: ChunkFile, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkFile, Fields: fields})
 }
 
 // ToolChunkOpts carries optional v6 fields for tool-related chunks.
@@ -223,38 +226,38 @@ func applyToolOpts(fields map[string]any, opts *ToolChunkOpts) map[string]any {
 
 // WriteToolInputError emits a tool-input-error chunk when tool argument parsing fails.
 // opts may be nil.
-func (wr *Writer) WriteToolInputError(toolCallID, toolName string, input any, errorText string, opts *ToolChunkOpts) {
+func (wr *Writer) WriteToolInputError(toolCallID, toolName string, input any, errorText string, opts *ToolChunkOpts) error {
 	fields := applyToolOpts(map[string]any{
 		"toolCallId": toolCallID,
 		"toolName":   toolName,
 		"input":      input,
 		"errorText":  errorText,
 	}, opts)
-	WriteSSE(wr.w, Chunk{Type: ChunkToolInputError, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkToolInputError, Fields: fields})
 }
 
 // WriteToolOutputError emits a tool-output-error chunk when tool execution fails.
 // opts may be nil.
-func (wr *Writer) WriteToolOutputError(toolCallID, errorText string, opts *ToolChunkOpts) {
+func (wr *Writer) WriteToolOutputError(toolCallID, errorText string, opts *ToolChunkOpts) error {
 	fields := applyToolOpts(map[string]any{
 		"toolCallId": toolCallID,
 		"errorText":  errorText,
 	}, opts)
-	WriteSSE(wr.w, Chunk{Type: ChunkToolOutputError, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkToolOutputError, Fields: fields})
 }
 
 // WriteToolOutputDenied emits a tool-output-denied chunk when a tool call is rejected.
 // opts may be nil.
-func (wr *Writer) WriteToolOutputDenied(toolCallID string, opts *ToolChunkOpts) {
+func (wr *Writer) WriteToolOutputDenied(toolCallID string, opts *ToolChunkOpts) error {
 	fields := applyToolOpts(map[string]any{
 		"toolCallId": toolCallID,
 	}, opts)
-	WriteSSE(wr.w, Chunk{Type: ChunkToolOutputDenied, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkToolOutputDenied, Fields: fields})
 }
 
 // WriteToolApprovalRequest emits a tool-approval-request chunk for human-in-the-loop flows.
-func (wr *Writer) WriteToolApprovalRequest(approvalID, toolCallID, toolName string, args any) {
-	WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalRequest, Fields: map[string]any{
+func (wr *Writer) WriteToolApprovalRequest(approvalID, toolCallID, toolName string, args any) error {
+	return WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalRequest, Fields: map[string]any{
 		"approvalId": approvalID,
 		"toolCallId": toolCallID,
 		"toolName":   toolName,
@@ -269,7 +272,7 @@ type ApprovalResponseOpts struct {
 	ProviderMetadata map[string]any
 }
 
-func (wr *Writer) WriteToolApprovalResponse(approvalID string, approved bool, opts *ApprovalResponseOpts) {
+func (wr *Writer) WriteToolApprovalResponse(approvalID string, approved bool, opts *ApprovalResponseOpts) error {
 	fields := map[string]any{"approvalId": approvalID, "approved": approved}
 	if opts != nil {
 		if opts.Reason != "" {
@@ -280,11 +283,11 @@ func (wr *Writer) WriteToolApprovalResponse(approvalID string, approved bool, op
 		}
 		fields = withProviderMetadata(fields, opts.ProviderMetadata)
 	}
-	WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalResponse, Fields: fields})
+	return WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalResponse, Fields: fields})
 }
 
-func (wr *Writer) WriteCustom(kind string, data any, providerMetadata map[string]any) {
-	WriteSSE(
+func (wr *Writer) WriteCustom(kind string, data any, providerMetadata map[string]any) error {
+	return WriteSSE(
 		wr.w,
 		Chunk{
 			Type:   ChunkCustom,
@@ -293,8 +296,8 @@ func (wr *Writer) WriteCustom(kind string, data any, providerMetadata map[string
 	)
 }
 
-func (wr *Writer) WriteReasoningFile(url, mediaType string, providerMetadata map[string]any) {
-	WriteSSE(
+func (wr *Writer) WriteReasoningFile(url, mediaType string, providerMetadata map[string]any) error {
+	return WriteSSE(
 		wr.w,
 		Chunk{
 			Type:   ChunkReasoningFile,
@@ -306,6 +309,6 @@ func (wr *Writer) WriteReasoningFile(url, mediaType string, providerMetadata map
 // WriteChunkWithProviderMetadata emits a named chunk with arbitrary fields plus
 // optional provider-specific metadata. When providerMeta is nil, the
 // providerMetadata key is omitted from the output entirely.
-func (wr *Writer) WriteChunkWithProviderMetadata(typ string, fields, providerMeta map[string]any) {
-	WriteSSE(wr.w, Chunk{Type: typ, Fields: withProviderMetadata(fields, providerMeta)})
+func (wr *Writer) WriteChunkWithProviderMetadata(typ string, fields, providerMeta map[string]any) error {
+	return WriteSSE(wr.w, Chunk{Type: typ, Fields: withProviderMetadata(fields, providerMeta)})
 }

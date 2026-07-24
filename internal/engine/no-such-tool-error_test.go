@@ -22,7 +22,7 @@ func TestNoSuchToolError_ListsAvailableTools(t *testing.T) {
 // no tools are available.
 func TestNoSuchToolError_EmptyToolsOmitsList(t *testing.T) {
 	err := &NoSuchToolError{ToolName: "search"}
-	if got := err.Error(); got != "unknown tool search" {
-		t.Errorf("error = %q, want %q", got, "unknown tool search")
+	if got := err.Error(); got != `unknown tool "search"` {
+		t.Errorf("error = %q, want %q", got, `unknown tool "search"`)
 	}
 }

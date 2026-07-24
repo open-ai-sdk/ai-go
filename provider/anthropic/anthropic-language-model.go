@@ -6,13 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
 )
 
 // LanguageModel implements ai.LanguageModel using the Anthropic Messages API.
@@ -68,15 +68,9 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		return nil, fmt.Errorf("anthropic: http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"anthropic: unexpected status %d (failed to read body: %w)",
-				resp.StatusCode, readErr,
-			)
-		}
-		return nil, fmt.Errorf("anthropic: unexpected status %d: %s", resp.StatusCode, string(respBody))
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse("anthropic", resp)
 	}
 
 	ch := make(chan ai.StreamEvent, 64)

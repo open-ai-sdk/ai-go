@@ -1,6 +1,10 @@
 package ai
 
-import "context"
+import (
+	"context"
+
+	"github.com/open-ai-sdk/ai-go/aitypes"
+)
 
 // ToolDefinition describes a callable function tool available to the model.
 type ToolDefinition struct {
@@ -43,31 +47,17 @@ func ToolChoiceSpecific(toolName string) ToolChoice {
 	return ToolChoice{Type: "tool", ToolName: toolName}
 }
 
-// Tool-result content part kinds. Images, audio and documents all travel as a
-// single file part carrying a media type — there is no separate image kind.
+// Tool-result content kinds and the ToolResult/ToolResultContent types are
+// aliases of the shared aitypes package (see ai/types.go).
 const (
-	ToolResultContentTypeText = "text"
-	ToolResultContentTypeFile = "file"
+	ToolResultContentTypeText = aitypes.ToolResultContentTypeText
+	ToolResultContentTypeFile = aitypes.ToolResultContentTypeFile
 )
 
-// ToolResultContent represents a single content part in a tool result.
-type ToolResultContent struct {
-	Type string // ToolResultContentTypeText or ToolResultContentTypeFile
-	Text string // for type="text"
-	Data []byte // for type="file"
-	// MediaType is either a full IANA media type ("image/png") or just the
-	// top-level segment ("image"); providers narrow it as their API requires.
-	MediaType string // for type="file"
-}
-
-// ToolResult holds the output of a single tool invocation.
-type ToolResult struct {
-	ID      string
-	Name    string
-	Args    string
-	Output  string
-	Content []ToolResultContent // optional multi-part content
-}
+type (
+	ToolResultContent = aitypes.ToolResultContent
+	ToolResult        = aitypes.ToolResult
+)
 
 // ToolExecutor executes a named tool with JSON arguments and returns a result string.
 type ToolExecutor interface {

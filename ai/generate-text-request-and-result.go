@@ -46,10 +46,12 @@ type GenerateTextRequest struct {
 	// OnError is called when an error occurs during the run.
 	OnError func(error)
 	// SmoothStream enables smooth text streaming with configurable chunking.
-	// Only used by StreamText; ignored by GenerateText.
+	// Applied by StreamText; GenerateText explicitly disables it so a
+	// non-streaming call pays no per-chunk delay.
 	SmoothStream *SmoothStream
-	// Middlewares holds deferred model middlewares set via WithMiddleware.
-	// Applied after model resolution in Runtime.buildRequest.
+	// Middlewares holds deferred model middlewares set via WithMiddleware or
+	// WithRetry. Applied (and cleared) by StreamText, and earlier by
+	// Runtime.buildRequest on the facade path — both honour them.
 	Middlewares []LanguageModelMiddleware
 	// ParallelToolExecution enables parallel execution of tool calls within a step.
 	ParallelToolExecution bool
@@ -168,6 +170,16 @@ type ChunkEvent struct {
 	ToolCallArgsDelta string
 	StepNumber        int
 	FinishReason      FinishReason
+	// Typed payloads previously dropped by the flattening converter. Each is set
+	// only for the matching Type; consumers no longer lose Source/File/Usage/
+	// ToolResult/metadata data on an OnChunk callback. Note: the slice and map
+	// fields make ChunkEvent non-comparable with ==.
+	Usage            *Usage
+	Source           *Source
+	ToolResult       *ToolResult
+	FileData         []byte
+	FileMediaType    string
+	ProviderMetadata map[string]any
 }
 
 // GeneratedFile holds a file (typically an image) output from the model.

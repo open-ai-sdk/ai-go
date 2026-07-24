@@ -26,18 +26,18 @@ type UIStreamWriter struct {
 }
 
 // WriteData emits a custom data-* chunk.
-func (sw *UIStreamWriter) WriteData(name string, payload any) {
-	sw.writer.WriteData(name, payload)
+func (sw *UIStreamWriter) WriteData(name string, payload any) error {
+	return sw.writer.WriteData(name, payload)
 }
 
 // WriteTransientData emits a transient custom data-* chunk.
-func (sw *UIStreamWriter) WriteTransientData(name string, payload any) {
-	sw.writer.WriteTransientData(name, payload)
+func (sw *UIStreamWriter) WriteTransientData(name string, payload any) error {
+	return sw.writer.WriteTransientData(name, payload)
 }
 
 // WriteSource emits a source chunk.
-func (sw *UIStreamWriter) WriteSource(s Source) {
-	sw.writer.WriteSource(s)
+func (sw *UIStreamWriter) WriteSource(s Source) error {
+	return sw.writer.WriteSource(s)
 }
 
 // Merge pipes chunks from a ToUIMessageStream output into this stream.
@@ -101,7 +101,9 @@ func CreateUIMessageStream(w io.Writer, opts CreateUIStreamOptions, execute func
 		finishReason = sw.lastFinish
 	}
 	if err != nil {
-		errMsg := err.Error()
+		// Redact by default; OnError is the consumer's own code and receives the
+		// full typed error, so it can choose what (if anything) to surface.
+		errMsg := redactStreamError(err)
 		if opts.OnError != nil {
 			if custom := opts.OnError(err); custom != "" {
 				errMsg = custom

@@ -110,7 +110,8 @@ func (m *LanguageModel) GenerateText(ctx context.Context, req ai.LanguageModelRe
 }
 
 // doRequest marshals body, sends POST /responses, and returns the HTTP response.
-// Non-2xx responses are converted to errors with the body included.
+// Non-2xx responses become a typed *APIError; the body is parsed for code/message
+// then discarded, never embedded.
 func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) (*http.Response, error) {
 	body, err := json.Marshal(apiReq)
 	if err != nil {
@@ -130,12 +131,9 @@ func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) 
 		return nil, fmt.Errorf("openai: http request: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		errBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf("openai: unexpected status %d (failed to read body: %w)", resp.StatusCode, readErr)
-		}
-		return nil, fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(errBody))
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse("openai", resp)
 	}
 	return resp, nil
 }

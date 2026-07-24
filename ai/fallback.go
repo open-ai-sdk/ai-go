@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -134,28 +133,10 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 	)
 }
 
-// isFallbackRetryable returns true for errors that warrant trying the next model.
+// isFallbackRetryable reports whether err warrants trying the next model. It
+// shares isRetryable's typed classification (status code + network error type),
+// so falling over to the next provider is never triggered by attacker-echoed
+// message text in a 400 body.
 func isFallbackRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Don't retry on context cancellation
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	s := err.Error()
-	// Transient: rate limit, server errors, timeouts
-	for _, code := range []string{"429", "500", "502", "503", "529"} {
-		if strings.Contains(s, "status "+code) ||
-			strings.Contains(s, "unexpected status "+code) {
-			return true
-		}
-	}
-	if strings.Contains(s, "i/o timeout") ||
-		strings.Contains(s, "connection refused") ||
-		strings.Contains(s, "connection reset") ||
-		strings.Contains(s, "EOF") {
-		return true
-	}
-	return false
+	return isRetryable(err)
 }

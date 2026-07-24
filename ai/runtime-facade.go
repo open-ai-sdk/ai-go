@@ -46,6 +46,21 @@ func WithTopP(p float32) Option {
 	return func(r *GenerateTextRequest) { r.Settings.TopP = &p }
 }
 
+// WithTopK limits next-token candidates to the top K (provider support varies).
+func WithTopK(k int) Option {
+	return func(r *GenerateTextRequest) { r.Settings.TopK = &k }
+}
+
+// WithSeed requests deterministic sampling (provider support varies).
+func WithSeed(seed int) Option {
+	return func(r *GenerateTextRequest) { r.Settings.Seed = &seed }
+}
+
+// WithStopSequences stops generation when any of the given strings is produced.
+func WithStopSequences(seqs ...string) Option {
+	return func(r *GenerateTextRequest) { r.Settings.StopSequences = seqs }
+}
+
 // WithOutput constrains the model output to the given schema.
 func WithOutput(o *OutputSchema) Option {
 	return func(r *GenerateTextRequest) { r.Output = o }
@@ -95,13 +110,43 @@ func WithParallelToolExecution(enabled bool) Option {
 	return func(r *GenerateTextRequest) { r.ParallelToolExecution = enabled }
 }
 
-// WithMaxParallelTools limits the number of concurrent tool executions.
-// Default is 5 when parallel execution is enabled.
+// WithMaxParallelTools limits the number of concurrent tool executions (default
+// 5 when parallel execution is enabled). It sets only MaxParallelTools; enabling
+// parallelism is a separate, explicit choice — pair it with
+// WithParallelToolExecution(true). It no longer silently flips that flag.
 func WithMaxParallelTools(n int) Option {
-	return func(r *GenerateTextRequest) {
-		r.ParallelToolExecution = true
-		r.MaxParallelTools = n
-	}
+	return func(r *GenerateTextRequest) { r.MaxParallelTools = n }
+}
+
+// WithPrepareStep sets a callback invoked before each tool-loop step for
+// per-step configuration overrides.
+func WithPrepareStep(fn PrepareStepFunc) Option {
+	return func(r *GenerateTextRequest) { r.PrepareStep = fn }
+}
+
+// WithActiveTools filters the tool set to only these tool names for the run.
+func WithActiveTools(names ...string) Option {
+	return func(r *GenerateTextRequest) { r.ActiveTools = names }
+}
+
+// WithOnChunk sets the callback invoked for every engine event during streaming.
+func WithOnChunk(fn func(ChunkEvent)) Option {
+	return func(r *GenerateTextRequest) { r.OnChunk = fn }
+}
+
+// WithOnStepEnd sets the callback invoked after each tool-loop step completes.
+func WithOnStepEnd(fn func(StepEndEvent)) Option {
+	return func(r *GenerateTextRequest) { r.OnStepEnd = fn }
+}
+
+// WithOnEnd sets the callback invoked when the entire run completes.
+func WithOnEnd(fn func(EndEvent)) Option {
+	return func(r *GenerateTextRequest) { r.OnEnd = fn }
+}
+
+// WithOnError sets the callback invoked when the run errors.
+func WithOnError(fn func(error)) Option {
+	return func(r *GenerateTextRequest) { r.OnError = fn }
 }
 
 // RuntimeOption configures the Runtime itself.

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -90,17 +89,9 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 		return nil, fmt.Errorf("gemini-native: http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		// Bound the error body: attacker-influenced and only used for a message.
-		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"gemini-native: unexpected status %d (failed to read body: %w)",
-				resp.StatusCode,
-				readErr,
-			)
-		}
-		return nil, fmt.Errorf("gemini-native: unexpected status %d: %s", resp.StatusCode, string(respBody))
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse("gemini-native", resp)
 	}
 
 	raw := make(chan ai.StreamEvent, 64)

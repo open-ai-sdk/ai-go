@@ -3,7 +3,8 @@ package engine
 import (
 	"context"
 	"log/slog"
-	"strings"
+
+	"github.com/open-ai-sdk/ai-go/aitypes"
 )
 
 type ctxKey int
@@ -222,36 +223,13 @@ type ToolCallRepairContext struct {
 // ToolCallRepairFunc attempts to repair an invalid tool call before it is surfaced.
 type ToolCallRepairFunc func(ctx context.Context, input ToolCallRepairContext) (*ToolCallInfo, error)
 
-// NoSuchToolError indicates the model called a tool that is not active.
-type NoSuchToolError struct {
-	ToolName       string
-	AvailableTools []string
-}
-
-func (e *NoSuchToolError) Error() string {
-	if len(e.AvailableTools) == 0 {
-		return "unknown tool " + e.ToolName
-	}
-	return "unknown tool " + e.ToolName + " (available: " + strings.Join(e.AvailableTools, ", ") + ")"
-}
-
-// InvalidToolArgumentsError indicates that the tool call arguments were invalid.
-type InvalidToolArgumentsError struct {
-	ToolName string
-	Args     string
-	Cause    error
-}
-
-func (e *InvalidToolArgumentsError) Error() string {
-	return "invalid arguments for tool " + e.ToolName
-}
-
-func (e *InvalidToolArgumentsError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
+// Tool error types are aliases of the shared aitypes definitions, so a value
+// raised inside the engine loop is the same type the caller matches with
+// errors.As/Is (see aitypes/tool-errors.go).
+type (
+	NoSuchToolError           = aitypes.NoSuchToolError
+	InvalidToolArgumentsError = aitypes.InvalidToolArgumentsError
+)
 
 // RunParams configures a single engine run.
 type RunParams struct {

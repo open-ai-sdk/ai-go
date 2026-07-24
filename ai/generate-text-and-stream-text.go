@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
@@ -11,66 +10,20 @@ import (
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
+//
+// It delegates to the streaming path so the step-event aggregation switch lives
+// in exactly one place — StreamResult.Consume. Smoothing only shapes live-stream
+// timing, so it is disabled here: a non-streaming call must never pay the
+// per-chunk delays SmoothStream would otherwise impose.
 func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextResult, error) {
+	// Surface a pre-flight validation failure as (nil, err) — the same contract
+	// the direct implementation had — before delegating. Mid-stream errors still
+	// return a partial result alongside the error, matching Consume.
 	if err := validateToolsContext(req); err != nil {
 		return nil, err
 	}
-	ch := engine.Run(ctx, toEngineParams(req))
-
-	result := &GenerateTextResult{}
-	var currentStep *StepOutput
-
-	for ev := range ch {
-		switch ev.Type {
-		case engine.StepEventStepStart:
-			currentStep = &StepOutput{}
-
-		case engine.StepEventTextDelta:
-			result.Text += ev.TextDelta
-			if currentStep != nil {
-				currentStep.Text += ev.TextDelta
-			}
-
-		case engine.StepEventReasoningDelta:
-			result.Reasoning += ev.ReasoningDelta
-			if currentStep != nil {
-				currentStep.Reasoning += ev.ReasoningDelta
-			}
-
-		case engine.StepEventToolCallStart:
-			handleToolCallStart(ev, currentStep)
-
-		case engine.StepEventToolCallDelta:
-			handleToolCallDelta(ev, currentStep)
-
-		case engine.StepEventToolCallReady:
-			handleToolCallReady(ev, currentStep)
-
-		case engine.StepEventToolResult:
-			currentStep = handleToolResult(ev, result, currentStep)
-
-		case engine.StepEventUsage:
-			handleUsage(ev, result, currentStep)
-
-		case engine.StepEventSource:
-			handleSource(ev, result, currentStep)
-
-		case engine.StepEventFileDelta:
-			handleFileDelta(ev, result, currentStep)
-
-		case engine.StepEventStepEnd:
-			currentStep = handleStepEnd(ev, result, currentStep, req.Tools)
-
-		case engine.StepEventStructuredOutput:
-			result.StructuredOutput = ev.StructuredOutput
-
-		case engine.StepEventError:
-			return result, ev.Error
-		}
-	}
-
-	result.Response = Response{Messages: ResponseMessagesForSteps(result.Steps, req.Tools)}
-	return result, nil
+	req.SmoothStream = nil
+	return StreamText(ctx, req).Consume()
 }
 
 func validateToolsContext(req GenerateTextRequest) error {
@@ -261,6 +214,14 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 	if err := validateToolsContext(req); err != nil {
 		return NewStreamResultWithTools(erroredEventChannel(err), req.Tools)
+	}
+	// Honour deferred middlewares (WithMiddleware, WithRetry) on the bare path
+	// too, so a directly-built request no longer silently ignores them. The
+	// Runtime facade already applies and clears them, so this only fires when
+	// StreamText/GenerateText are called with a request struct directly.
+	if len(req.Middlewares) > 0 {
+		req.Model = WrapLanguageModel(req.Model, req.Middlewares...)
+		req.Middlewares = nil
 	}
 	ch := engine.Run(ctx, toEngineParams(req))
 	if req.SmoothStream != nil {
@@ -465,7 +426,9 @@ func toEngineRepairToolCall(fn RepairToolCallFunc) engine.ToolCallRepairFunc {
 				ThoughtSignature: input.ToolCall.ThoughtSignature,
 			},
 			Tools: fromEngineToolSet(input.Tools),
-			Error: fromEngineToolCallError(input.Error),
+			// Tool error types are now unified in aitypes, so the engine's typed
+			// error passes straight through — errors.As/Is match end to end.
+			Error: input.Error,
 		}
 		repaired, err := fn(ctx, publicInput)
 		if err != nil {
@@ -688,34 +651,6 @@ func fromEngineStepInfos(steps []engine.StepResultInfo, tools *ToolSet) []StepOu
 	return out
 }
 
-func fromEngineToolCallError(err error) error {
-	var noSuchToolErr *engine.NoSuchToolError
-	if errors.As(err, &noSuchToolErr) {
-		if noSuchToolErr == nil {
-			return nil
-		}
-		available := append([]string(nil), noSuchToolErr.AvailableTools...)
-		return &NoSuchToolError{
-			ToolName:       noSuchToolErr.ToolName,
-			AvailableTools: available,
-		}
-	}
-
-	var invalidArgsErr *engine.InvalidToolArgumentsError
-	if errors.As(err, &invalidArgsErr) {
-		if invalidArgsErr == nil {
-			return nil
-		}
-		return &InvalidToolArgumentsError{
-			ToolName: invalidArgsErr.ToolName,
-			Args:     invalidArgsErr.Args,
-			Cause:    invalidArgsErr.Cause,
-		}
-	}
-
-	return err
-}
-
 func toChunkEvent(ev engine.StepEvent) ChunkEvent {
 	var typ string
 	switch ev.Type {
@@ -757,6 +692,14 @@ func toChunkEvent(ev engine.StepEvent) ChunkEvent {
 		ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		StepNumber:        ev.StepNumber,
 		FinishReason:      FinishReason(ev.FinishReason),
+		// Carry the typed payloads instead of dropping them. These are already
+		// the shared aitypes types (Usage/Source/ToolResult), so no conversion.
+		Usage:            ev.Usage,
+		Source:           ev.Source,
+		ToolResult:       ev.ToolResult,
+		FileData:         ev.FileData,
+		FileMediaType:    ev.FileMediaType,
+		ProviderMetadata: ev.ProviderMetadata,
 	}
 }
 
