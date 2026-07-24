@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamChunk mirrors the OpenAI chat completions SSE chunk structure.
@@ -79,6 +81,17 @@ func DecodeSSEStream(
 ) {
 	defer close(ch)
 	defer body.Close()
+	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
+	// watcher on normal completion.
+	defer httputil.CloseOnCancel(ctx, body)()
+	// Recover is deferred last so it runs first: a panic surfaces as an error
+	// event before the channel closes, instead of crashing the process.
+	defer safego.Recover(nil, func(err error) {
+		select {
+		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+		case <-ctx.Done():
+		}
+	})
 
 	providerName := params.ProviderName
 	if providerName == "" {
@@ -211,8 +224,7 @@ func emitChunkEvents(
 	// Emit sources extracted from this chunk (e.g. Gemini grounding chunks).
 	if sourceExtractor != nil {
 		for _, src := range sourceExtractor(chunk) {
-			s := src // copy for pointer safety
-			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &s}
+			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &src}
 		}
 	}
 

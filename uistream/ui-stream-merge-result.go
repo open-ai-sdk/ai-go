@@ -1,6 +1,8 @@
 package uistream
 
 import (
+	"sync"
+
 	"github.com/open-ai-sdk/ai-go/internal/engine"
 )
 
@@ -81,7 +83,13 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 		argsJSON string
 		output   string
 	}
-	var toolCache map[string]toolData
+	// toolCache is written by the interceptor goroutine below and read by the
+	// main loop, so a mutex guards it — a concurrent map read/write is a fatal
+	// runtime error that recover cannot catch.
+	var (
+		toolCache   map[string]toolData
+		toolCacheMu sync.Mutex
+	)
 	if cfg.toolResultHook != nil {
 		toolCache = make(map[string]toolData)
 		intercepted := make(chan engine.StepEvent, 64)
@@ -90,11 +98,13 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 			for ev := range ch {
 				if ev.Type == engine.StepEventToolResult && ev.ToolResult != nil {
 					tr := ev.ToolResult
+					toolCacheMu.Lock()
 					toolCache[tr.ID] = toolData{
 						toolName: tr.Name,
 						argsJSON: tr.Args,
 						output:   tr.Output,
 					}
+					toolCacheMu.Unlock()
 				}
 				intercepted <- ev
 			}
@@ -135,7 +145,10 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 			if c.Type == ChunkToolOutputAvailable && cfg.toolResultHook != nil {
 				tcID, ok := c.Fields["toolCallId"].(string)
 				if ok {
-					if td, found := toolCache[tcID]; found {
+					toolCacheMu.Lock()
+					td, found := toolCache[tcID]
+					toolCacheMu.Unlock()
+					if found {
 						cfg.toolResultHook(wr, ToolResult{
 							ToolCallID: tcID,
 							ToolName:   td.toolName,

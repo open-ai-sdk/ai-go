@@ -55,7 +55,19 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 
 		// Peek at the first event to detect immediate stream errors.
 		// If the first event is an error and retryable, try the next model.
-		firstEvent, ok := <-ch
+		// Honour caller cancellation while waiting: a primary that stalls after
+		// opening the stream must not pin the caller past its own deadline.
+		var firstEvent StreamEvent
+		var ok bool
+		select {
+		case firstEvent, ok = <-ch:
+		case <-ctx.Done():
+			go func() {
+				for range ch {
+				}
+			}()
+			return nil, ctx.Err()
+		}
 		if !ok {
 			// Channel closed immediately — empty stream, return it.
 			out := make(chan StreamEvent)
@@ -74,13 +86,31 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 			}
 		}
 
-		// Re-emit the first event followed by the rest of the stream.
+		// Re-emit the first event followed by the rest of the stream. Sends are
+		// guarded on ctx so an abandoning consumer cannot park this goroutine;
+		// on early exit the upstream is drained so its body is released.
 		out := make(chan StreamEvent, 64)
 		go func() {
 			defer close(out)
-			out <- firstEvent
+			send := func(ev StreamEvent) bool {
+				select {
+				case out <- ev:
+					return true
+				case <-ctx.Done():
+					go func() {
+						for range ch {
+						}
+					}()
+					return false
+				}
+			}
+			if !send(firstEvent) {
+				return
+			}
 			for ev := range ch {
-				out <- ev
+				if !send(ev) {
+					return
+				}
 			}
 		}()
 		return out, nil

@@ -8,6 +8,12 @@ type LanguageModel interface {
 	ModelID() string
 
 	// Stream starts a streaming chat completion and returns a channel of StreamEvents.
+	//
+	// Context contract: Stream must stop producing and close its channel when ctx
+	// is cancelled, releasing any underlying resources (e.g. the HTTP response
+	// body). Every send on the returned channel must select on ctx.Done() so a
+	// stalled consumer cannot park the producer. Callers that stop reading before
+	// the channel closes must cancel ctx; they are not required to drain.
 	Stream(ctx context.Context, req LanguageModelRequest) (<-chan StreamEvent, error)
 }
 

@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // SSE event types from Anthropic's streaming API.
@@ -87,9 +90,21 @@ func decodeSSEStream(
 ) {
 	defer close(out)
 	defer body.Close()
+	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
+	// watcher on normal completion.
+	defer httputil.CloseOnCancel(ctx, body)()
+	// Recover is deferred last so it runs first: a panic surfaces as an error
+	// event before the channel closes, instead of crashing the process.
+	defer safego.Recover(nil, func(err error) {
+		select {
+		case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+		case <-ctx.Done():
+		}
+	})
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	// bufio.Reader has no per-line size cap, so a single data: line larger than
+	// a Scanner's token limit (e.g. a base64 image) no longer kills the stream.
+	reader := bufio.NewReader(body)
 
 	send := func(ev ai.StreamEvent) bool {
 		select {
@@ -103,41 +118,37 @@ func decodeSSEStream(
 	var eventType string
 	blocks := make(map[int]*blockState)
 
-	for scanner.Scan() {
+	for {
 		if ctx.Err() != nil {
+			send(ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()})
+			return
+		}
+
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
 			send(ai.StreamEvent{
 				Type:  ai.StreamEventError,
-				Error: ctx.Err(),
+				Error: fmt.Errorf("anthropic: read stream: %w", err),
 			})
 			return
 		}
 
-		line := scanner.Text()
-		if line == "" {
+		line = strings.TrimRight(line, "\r\n")
+		switch {
+		case line == "":
 			eventType = ""
-			continue
-		}
-
-		if strings.HasPrefix(line, "event: ") {
+		case strings.HasPrefix(line, "event: "):
 			eventType = strings.TrimPrefix(line, "event: ")
-			continue
+		case strings.HasPrefix(line, "data: "):
+			data := strings.TrimPrefix(line, "data: ")
+			if !dispatchSSEEvent(eventType, data, blocks, send, encodeWarnings) {
+				return
+			}
 		}
 
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-
-		if !dispatchSSEEvent(eventType, data, blocks, send, encodeWarnings) {
+		if errors.Is(err, io.EOF) {
 			return
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		send(ai.StreamEvent{
-			Type:  ai.StreamEventError,
-			Error: fmt.Errorf("anthropic: read stream: %w", err),
-		})
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
 )
 
 const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -41,7 +42,9 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 	return &NativeLanguageModel{
 		modelID: modelID,
 		cfg:     cfg,
-		client:  &http.Client{Timeout: timeout},
+		// Streaming path: no client-wide timeout (it would cap the whole SSE
+		// exchange); cfg.Timeout becomes a response-header deadline instead.
+		client: httputil.NewStreamingClient(timeout),
 	}
 }
 
@@ -99,27 +102,35 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 		return nil, fmt.Errorf("gemini-native: unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
+	raw := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer resp.Body.Close()
-		decodeNativeSSEStream(ctx, resp.Body, ch)
+		decodeNativeSSEStream(ctx, resp.Body, raw)
 	}()
 
 	if len(warnings) == 0 {
-		return ch, nil
+		return httputil.GuardStream(ctx, raw), nil
 	}
 
-	// Wrap channel to inject warnings into the first finish event.
+	// Wrap the channel to inject warnings into the first finish event. Sends are
+	// ctx-guarded and the upstream is drained on cancel, matching the Stream
+	// context contract.
 	out := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer close(out)
 		finishInjected := false
-		for ev := range ch {
+		for ev := range raw {
 			if !finishInjected && ev.Type == ai.StreamEventFinish {
 				ev.Warnings = append(warnings, ev.Warnings...)
 				finishInjected = true
 			}
-			out <- ev
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				for range raw {
+				}
+				return
+			}
 		}
 	}()
 	return out, nil

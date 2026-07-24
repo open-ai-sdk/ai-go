@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -47,7 +48,9 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 		apiKey:       cfg.APIKey,
 		baseURL:      base,
 		chunkTimeout: cfg.ChunkTimeout,
-		client:       &http.Client{Timeout: timeout},
+		// Streaming path: no client-wide timeout (it would cap the whole SSE
+		// exchange); cfg.Timeout becomes a response-header deadline instead.
+		client: httputil.NewStreamingClient(timeout),
 	}
 }
 
@@ -73,13 +76,15 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		body = openaichat.NewTimeoutReader(resp.Body, m.chunkTimeout)
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
+	raw := make(chan ai.StreamEvent, 64)
 	go func() {
 		// Encoding warnings are merged onto the response.completed finish event
 		// inside the decoder so callers see them in GenerateTextResult.Warnings.
-		decodeResponsesSSEStream(ctx, body, ch, warnings...)
+		decodeResponsesSSEStream(ctx, body, raw, warnings...)
 	}()
-	return ch, nil
+	// GuardStream honours the Stream context contract: sends are ctx-guarded and
+	// the decoder is drained on cancel so its body is released.
+	return httputil.GuardStream(ctx, raw), nil
 }
 
 // GenerateText sends a non-streaming Responses API request and returns the

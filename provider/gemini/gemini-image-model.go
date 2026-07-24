@@ -38,7 +38,9 @@ func NewImageModel(modelID string, cfg Config) *ImageModel {
 	return &ImageModel{
 		modelID: modelID,
 		cfg:     cfg,
-		client:  &http.Client{Timeout: timeout},
+		// One-shot request/response (not a stream), so a client-wide timeout is
+		// safe here — it bounds the whole image call rather than capping a stream.
+		client: &http.Client{Timeout: timeout},
 	}
 }
 

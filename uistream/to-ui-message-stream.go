@@ -1,6 +1,8 @@
 package uistream
 
 import (
+	"sync"
+
 	"github.com/open-ai-sdk/ai-go/internal/engine"
 )
 
@@ -64,10 +66,15 @@ func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <
 	needIntercept := !opts.SendReasoning || !opts.SendSources || opts.MessageMetadata != nil
 
 	filteredCh := eventCh
-	var totalUsage UsageInfo
+	// totalUsage is written by the interceptor goroutine and read when the finish
+	// chunk is emitted by a different goroutine; a mutex guards it.
+	var (
+		totalUsage UsageInfo
+		usageMu    sync.Mutex
+	)
 
 	if needIntercept {
-		filteredCh = interceptEvents(eventCh, opts, &totalUsage)
+		filteredCh = interceptEvents(eventCh, opts, &totalUsage, &usageMu)
 	}
 
 	producer := NewChunkProducer(msgID)
@@ -83,7 +90,7 @@ func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <
 	}
 
 	// Wrap to attach metadata and/or filter lifecycle chunks.
-	return wrapChunksWithMetadata(cs.Chunks, opts, sendStart, sendFinish, &totalUsage)
+	return wrapChunksWithMetadata(cs.Chunks, opts, sendStart, sendFinish, &totalUsage, &usageMu)
 }
 
 // interceptEvents filters and tracks usage from the raw engine event stream.
@@ -92,6 +99,7 @@ func interceptEvents(
 	eventCh <-chan engine.StepEvent,
 	opts ToUIStreamOptions,
 	totalUsage *UsageInfo,
+	usageMu *sync.Mutex,
 ) <-chan engine.StepEvent {
 	intercepted := make(chan engine.StepEvent, 64)
 
@@ -100,6 +108,7 @@ func interceptEvents(
 		for ev := range eventCh {
 			// Track usage for metadata.
 			if ev.Type == engine.StepEventUsage && ev.Usage != nil {
+				usageMu.Lock()
 				totalUsage.InputTokens += ev.Usage.InputTokens
 				totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
 				totalUsage.OutputTokens += ev.Usage.OutputTokens
@@ -108,6 +117,7 @@ func interceptEvents(
 				totalUsage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
 				totalUsage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
 				totalUsage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
+				usageMu.Unlock()
 			}
 			// Filter reasoning events.
 			if !opts.SendReasoning && ev.Type == engine.StepEventReasoningDelta {
@@ -130,6 +140,7 @@ func wrapChunksWithMetadata(
 	opts ToUIStreamOptions,
 	sendStart, sendFinish bool,
 	totalUsage *UsageInfo,
+	usageMu *sync.Mutex,
 ) <-chan Chunk {
 	out := make(chan Chunk, 64)
 	go func() {
@@ -143,7 +154,7 @@ func wrapChunksWithMetadata(
 				continue
 			}
 			if c.Type == ChunkFinish && opts.MessageMetadata != nil {
-				c = attachMessageMetadata(c, opts.MessageMetadata, lastFinishReason, totalUsage)
+				c = attachMessageMetadata(c, opts.MessageMetadata, lastFinishReason, totalUsage, usageMu)
 			}
 			if c.Type == ChunkFinish {
 				if fr, ok := c.Fields["finishReason"].(string); ok {
@@ -162,13 +173,19 @@ func attachMessageMetadata(
 	metaFn func(MessageMetadataInfo) map[string]any,
 	finishReason string,
 	usage *UsageInfo,
+	usageMu *sync.Mutex,
 ) Chunk {
 	if fr, ok := c.Fields["finishReason"].(string); ok && fr != "" {
 		finishReason = fr
 	}
+	// Snapshot usage under the lock so the callback never reads the shared value
+	// while the interceptor goroutine is still accumulating.
+	usageMu.Lock()
+	usageSnapshot := *usage
+	usageMu.Unlock()
 	metadata := metaFn(MessageMetadataInfo{
 		FinishReason: finishReason,
-		Usage:        usage,
+		Usage:        &usageSnapshot,
 	})
 	if metadata != nil {
 		if c.Fields == nil {

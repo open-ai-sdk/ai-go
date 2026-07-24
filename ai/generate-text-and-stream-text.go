@@ -288,8 +288,7 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 	engCallbacks := toEngineLifecycleCallbacks(req)
 	approval := make(map[string]func(string, string) bool, len(req.ToolApproval))
 	for name, policy := range req.ToolApproval {
-		p := policy
-		approval[name] = func(tool, args string) bool { return p(tool, json.RawMessage(args)) == ApprovalRequired }
+		approval[name] = func(tool, args string) bool { return policy(tool, json.RawMessage(args)) == ApprovalRequired }
 	}
 	var approver engine.ApprovalResponder
 	if req.ToolApprovalResponder != nil {

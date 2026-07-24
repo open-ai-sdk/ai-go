@@ -71,7 +71,9 @@ func newFileClient(apiKey, baseURL string) *fileClient {
 	return &fileClient{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		// One-shot file upload (not a stream), so a client-wide timeout is safe
+		// here — it bounds the whole upload rather than capping a stream.
+		client: &http.Client{Timeout: 120 * time.Second},
 	}
 }
 

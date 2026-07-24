@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // responsesChunk represents a single SSE event from the OpenAI Responses API stream.
@@ -92,13 +95,25 @@ func decodeResponsesSSEStream(
 ) {
 	defer close(ch)
 	defer body.Close()
+	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
+	// watcher on normal completion.
+	defer httputil.CloseOnCancel(ctx, body)()
+	// Recover is deferred last so it runs first: a panic surfaces as an error
+	// event before the channel closes, instead of crashing the process.
+	defer safego.Recover(nil, func(err error) {
+		select {
+		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+		case <-ctx.Done():
+		}
+	})
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// bufio.Reader has no per-line size cap, so a single data: line larger than
+	// a Scanner's token limit (e.g. a base64 image) no longer kills the stream.
+	reader := bufio.NewReader(body)
 
 	state := &streamState{callsByItemID: make(map[string]*pendingCall)}
 
-	for scanner.Scan() {
+	for {
 		select {
 		case <-ctx.Done():
 			ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()}
@@ -106,33 +121,36 @@ func decodeResponsesSSEStream(
 		default:
 		}
 
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			return
-		}
-
-		var chunk responsesChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
 			ch <- ai.StreamEvent{
 				Type:  ai.StreamEventError,
-				Error: fmt.Errorf("openai: unmarshal responses chunk: %w", err),
+				Error: fmt.Errorf("openai: read stream: %w", err),
 			}
 			return
 		}
 
-		if done := dispatchChunk(chunk, state, ch, encodingWarnings); done {
-			return
+		line = strings.TrimRight(line, "\r\n")
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				return
+			}
+			var chunk responsesChunk
+			if jsonErr := json.Unmarshal([]byte(data), &chunk); jsonErr != nil {
+				ch <- ai.StreamEvent{
+					Type:  ai.StreamEventError,
+					Error: fmt.Errorf("openai: unmarshal responses chunk: %w", jsonErr),
+				}
+				return
+			}
+			if done := dispatchChunk(chunk, state, ch, encodingWarnings); done {
+				return
+			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		ch <- ai.StreamEvent{
-			Type:  ai.StreamEventError,
-			Error: fmt.Errorf("openai: read stream: %w", err),
+		if errors.Is(err, io.EOF) {
+			return
 		}
 	}
 }

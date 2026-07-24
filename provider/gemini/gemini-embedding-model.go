@@ -31,7 +31,9 @@ func NewEmbeddingModel(modelID string, cfg Config) *EmbeddingModel {
 		modelID:              modelID,
 		apiKey:               cfg.APIKey,
 		outputDimensionality: cfg.OutputDimensionality,
-		client:               &http.Client{Timeout: timeout},
+		// One-shot request/response (not a stream), so a client-wide timeout is
+		// safe here — it bounds the whole embed call rather than capping a stream.
+		client: &http.Client{Timeout: timeout},
 	}
 }
 

@@ -447,7 +447,6 @@ func MergeChunks(sources ...<-chan Chunk) <-chan Chunk {
 
 	remaining := make(chan struct{}, len(sources))
 	for _, src := range sources {
-		src := src
 		go func() {
 			for c := range src {
 				out <- c

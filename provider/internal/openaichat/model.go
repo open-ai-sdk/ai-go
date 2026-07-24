@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
 )
 
 // ModelConfig holds all configuration for the shared chat completions LanguageModel.
@@ -68,7 +69,9 @@ func NewLanguageModel(cfg ModelConfig) *LanguageModel {
 		if timeout == 0 {
 			timeout = 120 * time.Second
 		}
-		client = &http.Client{Timeout: timeout}
+		// Streaming path: no client-wide timeout (it would cap the whole SSE
+		// exchange); cfg.Timeout becomes a response-header deadline instead.
+		client = httputil.NewStreamingClient(timeout)
 	}
 	return &LanguageModel{
 		cfg:    cfg,
@@ -160,13 +163,15 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		respBody = NewTimeoutReader(resp.Body, m.cfg.ChunkTimeout)
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
-	go DecodeSSEStream(ctx, respBody, ch, SSEDecodeParams{
+	raw := make(chan ai.StreamEvent, 64)
+	go DecodeSSEStream(ctx, respBody, raw, SSEDecodeParams{
 		ProviderName:      m.cfg.ProviderName,
 		MetadataExtractor: m.cfg.MetadataExtractor,
 		EncodeWarnings:    encodeWarnings,
 	})
-	return ch, nil
+	// GuardStream honours the Stream context contract: sends are ctx-guarded and
+	// the decoder is drained on cancel so its body is released.
+	return httputil.GuardStream(ctx, raw), nil
 }
 
 // structToMap marshals v to JSON and unmarshals into a map[string]any.

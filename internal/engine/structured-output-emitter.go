@@ -8,7 +8,7 @@ import (
 )
 
 // emitStructuredOutput makes a final constrained LLM call when an OutputSchema is configured.
-func emitStructuredOutput(ctx context.Context, out chan<- StepEvent, params RunParams, history []Message) {
+func emitStructuredOutput(r *run, params RunParams, history []Message) {
 	if params.Request.Output == nil || params.Request.Output.Type == "text" {
 		return
 	}
@@ -26,9 +26,14 @@ func emitStructuredOutput(ctx context.Context, out chan<- StepEvent, params RunP
 		Settings: params.Request.Settings,
 	}
 
+	// Bind the structured-output call to a child context so it is released when
+	// this function returns (including an early return on consumer cancellation).
+	ctx, cancel := context.WithCancel(r.ctx)
+	defer cancel()
+
 	eventCh, err := params.Model.Stream(ctx, req)
 	if err != nil {
-		out <- StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)}
+		r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)})
 		return
 	}
 
@@ -44,7 +49,7 @@ func emitStructuredOutput(ctx context.Context, out chan<- StepEvent, params RunP
 
 	parsed := parseStructuredOutput(b.String())
 	if parsed != nil {
-		out <- StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed}
+		r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
 	}
 }
 

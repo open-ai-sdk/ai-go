@@ -2,10 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"sync"
+
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 const defaultMaxSteps = 10
@@ -19,7 +18,15 @@ func Run(ctx context.Context, params RunParams) <-chan StepEvent {
 }
 
 func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
+	r := &run{ctx: ctx, out: out, logger: params.Logger}
+	// close(out) is deferred first so it runs last: on a panic in a control
+	// callback (PrepareStep, StopWhen, ToModelOutput, RepairToolCall, tool
+	// Execute) the error event is emitted before the channel closes, so the
+	// consumer sees a *PanicError instead of a cleanly closed empty stream.
 	defer close(out)
+	defer safego.Recover(r.logger, func(err error) {
+		r.emit(StepEvent{Type: StepEventError, Error: err})
+	}, "phase", "tool-loop")
 
 	maxSteps := params.MaxSteps
 	if maxSteps <= 0 {
@@ -34,12 +41,11 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	var lastSR streamResult
 
 	for step := 0; step < maxSteps; step++ {
-		if ctx.Err() != nil {
-			out <- StepEvent{Type: StepEventError, Error: ctx.Err()}
+		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
+		// cancelled context makes the StepStart send return false and unwinds.
+		if !r.emit(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
 			return
 		}
-
-		out <- StepEvent{Type: StepEventStepStart, StepNumber: step}
 
 		model := params.Model
 		req := params.Request
@@ -75,31 +81,42 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			}
 		}
 
-		eventCh, err := model.Stream(ctx, req)
+		// Each step gets a child context so its provider stream can be released
+		// deterministically once the step's events are consumed, without waiting
+		// for the whole run's context to end.
+		stepCtx, cancelStep := context.WithCancel(ctx)
+		eventCh, err := model.Stream(stepCtx, req)
 		if err != nil {
-			out <- StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, err)}
+			cancelStep()
+			r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, err)})
 			return
 		}
 
 		acc := newToolCallAccumulator()
-		sr, fatalErr := consumeStream(eventCh, out, acc, params.Callbacks)
+		sr, fatalErr := consumeStream(r, eventCh, acc, params.Callbacks)
+		// Release the provider: on the normal path it has already closed; on an
+		// early/fatal return, cancelling the child ctx unblocks its ctx-guarded
+		// send and the drain lets its goroutine finish and close the body.
+		cancelStep()
 		if fatalErr {
+			go drainStreamEvents(eventCh)
 			return
 		}
 		lastSR = sr
 		fullText := sr.text
 
 		if !acc.hasToolCalls() {
-			stepEndEv := StepEvent{
+			if !r.emit(StepEvent{
 				Type:             StepEventStepEnd,
 				StepNumber:       step,
 				FinishReason:     sr.finish,
 				RawFinishReason:  sr.rawFinish,
 				ProviderMetadata: sr.providerMeta,
 				Warnings:         sr.warnings,
+			}) {
+				return
 			}
-			out <- stepEndEv
-			emitOnStepEnd(params.Callbacks, step, nil, nil, sr)
+			r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
 			completedSteps = append(completedSteps, StepResultInfo{
 				StepNumber:       step,
 				Text:             fullText,
@@ -110,9 +127,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				ProviderMetadata: sr.providerMeta,
 				Warnings:         sr.warnings,
 			})
-			emitStructuredOutput(ctx, out, params, history)
-			emitOnEnd(params.Callbacks, completedSteps, sr)
-			out <- StepEvent{Type: StepEventDone}
+			emitStructuredOutput(r, params, history)
+			r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
+			r.emit(StepEvent{Type: StepEventDone})
 			return
 		}
 
@@ -128,8 +145,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		var stepToolResults []ToolResult
 		if params.ParallelToolExecution {
 			toolNames, stepToolCalls, stepToolResults = executeToolCallsParallel(
-				ctx,
-				out,
+				r,
 				params.Tools,
 				preparedToolCalls,
 				&history,
@@ -139,19 +155,21 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			)
 		} else {
 			toolNames, stepToolCalls, stepToolResults = executeToolCalls(
-				ctx, out, params.Tools, preparedToolCalls, &history, params.ToolApproval, params.Approver,
+				r, params.Tools, preparedToolCalls, &history, params.ToolApproval, params.Approver,
 			)
 		}
 
-		out <- StepEvent{
+		if !r.emit(StepEvent{
 			Type:             StepEventStepEnd,
 			StepNumber:       step,
 			FinishReason:     sr.finish,
 			RawFinishReason:  sr.rawFinish,
 			ProviderMetadata: sr.providerMeta,
 			Warnings:         sr.warnings,
+		}) {
+			return
 		}
-		emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr)
+		r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr) })
 
 		completedSteps = append(completedSteps, StepResultInfo{
 			StepNumber:       step,
@@ -171,9 +189,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		if params.StopWhen != nil {
 			stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
 			if params.StopWhen(step+1, stopResult) {
-				emitStructuredOutput(ctx, out, params, history)
-				emitOnEnd(params.Callbacks, completedSteps, sr)
-				out <- StepEvent{Type: StepEventDone}
+				emitStructuredOutput(r, params, history)
+				r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
+				r.emit(StepEvent{Type: StepEventDone})
 				return
 			}
 		}
@@ -186,668 +204,14 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
 	// Matches ai-sdk-node semantics (see packages/ai generate-text.ts:1008).
-	emitStructuredOutput(ctx, out, params, history)
-	emitOnEnd(params.Callbacks, completedSteps, lastSR)
-	out <- StepEvent{Type: StepEventDone}
+	emitStructuredOutput(r, params, history)
+	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
+	r.emit(StepEvent{Type: StepEventDone})
 }
 
-// streamResult holds accumulated metadata from consuming a model stream.
-type streamResult struct {
-	text         string
-	reasoning    string
-	finish       FinishReason
-	rawFinish    string
-	providerMeta map[string]any
-	warnings     []Warning
-	usage        *Usage
-}
-
-// consumeStream reads all events from a model stream, forwards them to the step
-// event channel, and accumulates tool calls via acc (may be nil for text-only calls).
-// Returns the accumulated result and true if a fatal error was emitted.
-func consumeStream(
-	eventCh <-chan StreamEvent,
-	out chan<- StepEvent,
-	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
-) (streamResult, bool) {
-	var sr streamResult
-	for ev := range eventCh {
-		if fatal := applyStreamEvent(ev, &sr, acc, out, cb); fatal {
-			return sr, true
-		}
+// drainStreamEvents consumes any remaining events from an abandoned provider
+// stream so its decoder goroutine can finish and close the HTTP response body.
+func drainStreamEvents(ch <-chan StreamEvent) {
+	for range ch {
 	}
-	return sr, false
-}
-
-// applyStreamEvent dispatches a single StreamEvent: updates sr in-place,
-// forwards StepEvents to out, and fires lifecycle callbacks. Returns true
-// if the event was a fatal StreamEventError.
-func applyStreamEvent(
-	ev StreamEvent,
-	sr *streamResult,
-	acc *toolCallAccumulator,
-	out chan<- StepEvent,
-	cb *LifecycleCallbacks,
-) bool {
-	emitChunk := func(stepEv StepEvent) {
-		out <- stepEv
-		if cb != nil && cb.OnChunk != nil {
-			cb.OnChunk(stepEv)
-		}
-	}
-	switch ev.Type {
-	case StreamEventTextDelta:
-		sr.text += ev.TextDelta
-		emitChunk(StepEvent{Type: StepEventTextDelta, TextDelta: ev.TextDelta})
-
-	case StreamEventReasoningDelta:
-		sr.reasoning += ev.TextDelta
-		emitChunk(StepEvent{
-			Type:             StepEventReasoningDelta,
-			ReasoningDelta:   ev.TextDelta,
-			ThoughtSignature: ev.ThoughtSignature,
-		})
-
-	case StreamEventToolCallDelta:
-		handleToolCallDelta(ev, acc, out, cb)
-
-	case StreamEventUsage:
-		// Providers may report usage across several events within one step
-		// (e.g. Anthropic emits input/cache tokens up front and the final
-		// output count later). Merge non-zero fields so no partial update
-		// clobbers a previously reported count.
-		sr.usage = mergeUsage(sr.usage, ev.Usage)
-		emitChunk(StepEvent{Type: StepEventUsage, Usage: sr.usage})
-
-	case StreamEventSource:
-		if ev.Source != nil {
-			emitChunk(StepEvent{Type: StepEventSource, Source: ev.Source})
-		}
-
-	case StreamEventFileDelta:
-		emitChunk(StepEvent{
-			Type:          StepEventFileDelta,
-			FileData:      ev.FileData,
-			FileMediaType: ev.FileMediaType,
-		})
-
-	case StreamEventFinish:
-		sr.finish = ev.FinishReason
-		sr.rawFinish = ev.RawFinishReason
-		sr.providerMeta = ev.ProviderMetadata
-		if len(ev.Warnings) > 0 {
-			sr.warnings = append(sr.warnings, ev.Warnings...)
-		}
-
-	case StreamEventError:
-		out <- StepEvent{Type: StepEventError, Error: ev.Error}
-		if cb != nil && cb.OnError != nil {
-			cb.OnError(ev.Error)
-		}
-		return true
-	}
-	return false
-}
-
-// handleToolCallDelta handles a StreamEventToolCallDelta event by forwarding
-// either a tool-call-start or a tool-call-delta StepEvent to out and the
-// optional chunk callback. It is a no-op when acc is nil.
-func handleToolCallDelta(
-	ev StreamEvent,
-	acc *toolCallAccumulator,
-	out chan<- StepEvent,
-	cb *LifecycleCallbacks,
-) {
-	if acc == nil {
-		return
-	}
-	isNew := acc.add(ev)
-	if isNew {
-		stepEv := StepEvent{
-			Type:              StepEventToolCallStart,
-			ToolCallIndex:     ev.ToolCallIndex,
-			ToolCallID:        ev.ToolCallID,
-			ToolCallName:      ev.ToolCallName,
-			ToolCallArgsDelta: ev.ToolCallArgsDelta,
-			ThoughtSignature:  ev.ThoughtSignature,
-		}
-		out <- stepEv
-		if cb != nil && cb.OnChunk != nil {
-			cb.OnChunk(stepEv)
-		}
-	} else if ev.ToolCallArgsDelta != "" {
-		stepEv := StepEvent{
-			Type:              StepEventToolCallDelta,
-			ToolCallIndex:     ev.ToolCallIndex,
-			ToolCallID:        ev.ToolCallID,
-			ToolCallArgsDelta: ev.ToolCallArgsDelta,
-		}
-		out <- stepEv
-		if cb != nil && cb.OnChunk != nil {
-			cb.OnChunk(stepEv)
-		}
-	}
-}
-
-// executeToolCalls processes a batch of completed tool calls: validates JSON args,
-// emits StepEventToolCallInvalid for invalid args (with error result for model retry),
-// then fires events and runs executors for valid calls.
-func executeToolCalls(
-	ctx context.Context,
-	out chan<- StepEvent,
-	tools *ToolSet,
-	prepared []preparedToolCall,
-	history *[]Message,
-	approval map[string]func(string, string) bool, approver ApprovalResponder,
-) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult) {
-	toolNames = make([]string, 0, len(prepared))
-	for _, preparedCall := range prepared {
-		tc := preparedCall.tc
-		if preparedCall.invalidErr != nil {
-			out <- StepEvent{
-				Type:              StepEventToolCallInvalid,
-				ToolCallID:        tc.id,
-				ToolCallName:      tc.name,
-				ToolCallArgsDelta: tc.args,
-			}
-			errOutput := invalidToolCallOutput(tc, preparedCall.invalidErr)
-			*history = append(*history, buildToolResultMessage(tc.id, tc.name, errOutput))
-			toolNames = append(toolNames, tc.name)
-			continue
-		}
-
-		out <- StepEvent{
-			Type:              StepEventToolCallReady,
-			ToolCallID:        tc.id,
-			ToolCallName:      tc.name,
-			ToolCallArgsDelta: tc.args,
-			ThoughtSignature:  tc.thoughtSignature,
-		}
-
-		result := approvedToolCall(ctx, out, tools, tc, approval, approver)
-
-		// Apply ToModelOutput transform for history; event keeps original output.
-		modelOutput := result.Output
-		if tools != nil {
-			for _, def := range tools.Definitions {
-				if def.Name == tc.name && def.ToModelOutput != nil {
-					modelOutput = def.ToModelOutput(result.Output)
-					break
-				}
-			}
-		}
-
-		*history = append(*history, buildToolResultMessage(tc.id, tc.name, modelOutput))
-		out <- StepEvent{Type: StepEventToolResult, ToolResult: result}
-		toolNames = append(toolNames, tc.name)
-		stepToolCalls = append(stepToolCalls, ToolCallInfo{
-			ID:               tc.id,
-			Name:             tc.name,
-			Args:             tc.args,
-			ArgsSet:          true,
-			ThoughtSignature: tc.thoughtSignature,
-		})
-		stepToolResults = append(stepToolResults, *result)
-	}
-	return toolNames, stepToolCalls, stepToolResults
-}
-
-// executeToolCallsParallel processes tool calls concurrently with a semaphore.
-func executeToolCallsParallel(
-	ctx context.Context,
-	out chan<- StepEvent,
-	tools *ToolSet,
-	prepared []preparedToolCall,
-	history *[]Message,
-	maxParallel int,
-	approval map[string]func(string, string) bool, approver ApprovalResponder,
-) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult) {
-	if maxParallel <= 0 {
-		maxParallel = 5
-	}
-
-	type indexedResult struct {
-		idx         int
-		tc          toolCallState
-		result      *ToolResult
-		modelOutput string
-		valid       bool
-		invalidErr  error
-	}
-
-	results := make([]indexedResult, len(prepared))
-	sem := make(chan struct{}, maxParallel)
-	var wg sync.WaitGroup
-
-	for i, preparedCall := range prepared {
-		tc := preparedCall.tc
-		if preparedCall.invalidErr != nil {
-			results[i] = indexedResult{
-				idx: i, tc: tc, valid: false, invalidErr: preparedCall.invalidErr,
-				result: &ToolResult{
-					ID: tc.id, Name: tc.name, Args: tc.args,
-					Output: invalidToolCallOutput(tc, preparedCall.invalidErr),
-				},
-			}
-			continue
-		}
-
-		// Emit ToolCallReady before execution starts (matches sequential contract)
-		out <- StepEvent{
-			Type:              StepEventToolCallReady,
-			ToolCallID:        tc.id,
-			ToolCallName:      tc.name,
-			ToolCallArgsDelta: tc.args,
-			ThoughtSignature:  tc.thoughtSignature,
-		}
-
-		results[i] = indexedResult{idx: i, tc: tc, valid: true}
-		wg.Add(1)
-		go func(idx int, tc toolCallState) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			result := approvedToolCall(ctx, out, tools, tc, approval, approver)
-			modelOutput := result.Output
-			if tools != nil {
-				for _, def := range tools.Definitions {
-					if def.Name == tc.name && def.ToModelOutput != nil {
-						modelOutput = def.ToModelOutput(result.Output)
-						break
-					}
-				}
-			}
-			results[idx].result = result
-			results[idx].modelOutput = modelOutput
-		}(i, tc)
-	}
-	wg.Wait()
-
-	// Emit events and build history in original order
-	toolNames = make([]string, 0, len(prepared))
-	for _, r := range results {
-		if !r.valid {
-			out <- StepEvent{
-				Type:              StepEventToolCallInvalid,
-				ToolCallID:        r.tc.id,
-				ToolCallName:      r.tc.name,
-				ToolCallArgsDelta: r.tc.args,
-			}
-			*history = append(*history, buildToolResultMessage(r.tc.id, r.tc.name, r.result.Output))
-			toolNames = append(toolNames, r.tc.name)
-			continue
-		}
-
-		out <- StepEvent{Type: StepEventToolResult, ToolResult: r.result}
-		*history = append(*history, buildToolResultMessage(r.tc.id, r.tc.name, r.modelOutput))
-		toolNames = append(toolNames, r.tc.name)
-		stepToolCalls = append(stepToolCalls, ToolCallInfo{
-			ID:               r.tc.id,
-			Name:             r.tc.name,
-			Args:             r.tc.args,
-			ArgsSet:          true,
-			ThoughtSignature: r.tc.thoughtSignature,
-		})
-		stepToolResults = append(stepToolResults, *r.result)
-	}
-	return toolNames, stepToolCalls, stepToolResults
-}
-
-func approvedToolCall(
-	ctx context.Context,
-	out chan<- StepEvent,
-	tools *ToolSet,
-	tc toolCallState,
-	approval map[string]func(string, string) bool,
-	approver ApprovalResponder,
-) *ToolResult {
-	if policy := approval[tc.name]; policy != nil && policy(tc.name, tc.args) {
-		request := ApprovalRequest{ApprovalID: tc.id, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
-		out <- StepEvent{Type: StepEventToolApprovalRequest, ToolCallID: tc.id, ToolCallName: tc.name, ToolCallArgsDelta: tc.args}
-		if approver == nil {
-			out <- StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id}
-			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
-		}
-		response, err := approver.RequestApproval(ctx, request)
-		if err != nil || !response.Approved {
-			out <- StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id}
-			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
-		}
-	}
-	return executeToolCall(ctx, tools, tc)
-}
-
-type preparedToolCall struct {
-	tc         toolCallState
-	invalidErr error
-}
-
-func preparedToolCallStates(prepared []preparedToolCall) []toolCallState {
-	if len(prepared) == 0 {
-		return nil
-	}
-	states := make([]toolCallState, 0, len(prepared))
-	for _, preparedCall := range prepared {
-		states = append(states, preparedCall.tc)
-	}
-	return states
-}
-
-func prepareToolCalls(
-	ctx context.Context,
-	tools *ToolSet,
-	repair ToolCallRepairFunc,
-	req Request,
-	toolCalls []toolCallState,
-) []preparedToolCall {
-	stepTools := toolSetForStep(tools, req.Tools)
-	prepared := make([]preparedToolCall, 0, len(toolCalls))
-	for _, tc := range toolCalls {
-		fixed, err := validateAndRepairToolCall(ctx, stepTools, repair, req, tc)
-		prepared = append(prepared, preparedToolCall{
-			tc:         fixed,
-			invalidErr: err,
-		})
-	}
-	return prepared
-}
-
-func validateAndRepairToolCall(
-	ctx context.Context,
-	tools *ToolSet,
-	repair ToolCallRepairFunc,
-	req Request,
-	tc toolCallState,
-) (toolCallState, error) {
-	err := validateToolCall(tools, tc)
-	if err == nil || repair == nil {
-		return tc, err
-	}
-
-	repaired, repairErr := repair(ctx, ToolCallRepairContext{
-		Instructions: req.Instructions,
-		Messages:     req.Messages,
-		ToolCall: ToolCallInfo{
-			ID:               tc.id,
-			Name:             tc.name,
-			Args:             tc.args,
-			ArgsSet:          true,
-			ThoughtSignature: tc.thoughtSignature,
-		},
-		Tools: tools,
-		Error: err,
-	})
-	if repairErr != nil {
-		return tc, repairErr
-	}
-	if repaired == nil {
-		return tc, err
-	}
-
-	if repaired.ID != "" {
-		tc.id = repaired.ID
-	}
-	if repaired.Name != "" {
-		tc.name = repaired.Name
-	}
-	if repaired.ArgsSet {
-		tc.args = repaired.Args
-	}
-	if repaired.ThoughtSignature != "" {
-		tc.thoughtSignature = repaired.ThoughtSignature
-	}
-
-	return tc, validateToolCall(tools, tc)
-}
-
-func validateToolCall(tools *ToolSet, tc toolCallState) error {
-	if tools == nil {
-		return &NoSuchToolError{
-			ToolName:       tc.name,
-			AvailableTools: nil,
-		}
-	}
-	if len(tools.Definitions) == 0 {
-		if err := invalidToolArgumentsError(tc.name, tc.args); err != nil {
-			return err
-		}
-		return nil
-	}
-	if _, ok := findToolDefinition(tools, tc.name); !ok {
-		return &NoSuchToolError{
-			ToolName:       tc.name,
-			AvailableTools: toolDefinitionNames(tools),
-		}
-	}
-	if err := invalidToolArgumentsError(tc.name, tc.args); err != nil {
-		return err
-	}
-	return nil
-}
-
-func invalidToolArgumentsError(toolName, args string) *InvalidToolArgumentsError {
-	if args == "" {
-		return nil
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(args), &decoded); err != nil {
-		return &InvalidToolArgumentsError{
-			ToolName: toolName,
-			Args:     args,
-			Cause:    err,
-		}
-	}
-	return nil
-}
-
-func invalidToolCallOutput(tc toolCallState, err error) string {
-	var noSuchToolErr *NoSuchToolError
-	if errors.As(err, &noSuchToolErr) {
-		return fmt.Sprintf(`{"error":%q}`, fmt.Sprintf("unknown tool %q", noSuchToolErr.ToolName))
-	}
-
-	var invalidArgsErr *InvalidToolArgumentsError
-	if errors.As(err, &invalidArgsErr) {
-		return fmt.Sprintf(`{"error":%q}`, fmt.Sprintf("invalid JSON arguments for tool %q", invalidArgsErr.ToolName))
-	}
-
-	return fmt.Sprintf(`{"error":%q}`, err.Error())
-}
-
-func findToolDefinition(tools *ToolSet, name string) (*ToolDefinition, bool) {
-	if tools == nil {
-		return nil, false
-	}
-	for i := range tools.Definitions {
-		if tools.Definitions[i].Name == name {
-			return &tools.Definitions[i], true
-		}
-	}
-	return nil, false
-}
-
-func toolDefinitionNames(tools *ToolSet) []string {
-	if tools == nil || len(tools.Definitions) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(tools.Definitions))
-	for _, def := range tools.Definitions {
-		names = append(names, def.Name)
-	}
-	return names
-}
-
-func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
-	if tools == nil {
-		return nil
-	}
-	if len(tools.Definitions) == 0 {
-		return &ToolSet{Executor: tools.Executor}
-	}
-	if len(activeDefs) == 0 {
-		return nil
-	}
-	return &ToolSet{
-		Definitions: activeDefs,
-		Executor:    tools.Executor,
-	}
-}
-
-func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState) *ToolResult {
-	result := &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args}
-	if tools == nil || tools.Executor == nil {
-		result.Output = fmt.Sprintf(`{"error":"no executor for tool %q"}`, tc.name)
-		return result
-	}
-	// Inject tool call ID into context so downstream code (e.g. approval managers) can correlate.
-	execCtx := context.WithValue(ctx, toolCallIDCtxKey, tc.id)
-	output, err := tools.Executor.Execute(execCtx, tc.name, tc.args)
-	if err != nil {
-		result.Output = fmt.Sprintf(`{"error":%q}`, err.Error())
-	} else {
-		result.Output = output
-	}
-	return result
-}
-
-func buildInitialHistory(req Request) []Message {
-	msgs := make([]Message, 0, len(req.Messages)+1)
-	if req.Instructions != "" {
-		msgs = append(msgs, Message{Role: "system", Content: []ContentPart{{Type: "text", Text: req.Instructions}}})
-	}
-	msgs = append(msgs, req.Messages...)
-	return msgs
-}
-
-func buildAssistantToolCallMessage(text, reasoning string, calls []toolCallState) Message {
-	parts := make([]ContentPart, 0, 2+len(calls))
-	if reasoning != "" {
-		parts = append(parts, ContentPart{Type: "reasoning", Text: reasoning})
-	}
-	if text != "" {
-		parts = append(parts, ContentPart{Type: "text", Text: text})
-	}
-	for _, tc := range calls {
-		parts = append(parts, ContentPart{
-			Type:             "tool_call",
-			ToolCallID:       tc.id,
-			ToolCallName:     tc.name,
-			ToolCallArgs:     tc.args,
-			ThoughtSignature: tc.thoughtSignature,
-		})
-	}
-	return Message{Role: "assistant", Content: parts}
-}
-
-func buildToolResultMessage(toolCallID, toolName, output string) Message {
-	return Message{
-		Role: "tool",
-		Content: []ContentPart{{
-			Type:             "tool_result",
-			ToolResultID:     toolCallID,
-			ToolResultName:   toolName,
-			ToolResultOutput: output,
-		}},
-	}
-}
-
-func mergeProviderOptions(base, override map[string]any) map[string]any {
-	if base == nil {
-		return override
-	}
-	merged := make(map[string]any, len(base)+len(override))
-	for k, v := range base {
-		merged[k] = v
-	}
-	for k, v := range override {
-		merged[k] = v
-	}
-	return merged
-}
-
-func filterTools(tools []ToolDefinition, active []string) []ToolDefinition {
-	if len(active) == 0 {
-		return nil
-	}
-	set := make(map[string]bool, len(active))
-	for _, name := range active {
-		set[name] = true
-	}
-	var filtered []ToolDefinition
-	for _, t := range tools {
-		if set[t.Name] {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
-func emitOnStepEnd(
-	cb *LifecycleCallbacks,
-	step int,
-	toolCalls []ToolCallInfo,
-	toolResults []ToolResult,
-	sr streamResult,
-) {
-	if cb == nil || cb.OnStepEnd == nil {
-		return
-	}
-	cb.OnStepEnd(StepEndEvent{
-		StepNumber:       step,
-		Text:             sr.text,
-		Reasoning:        sr.reasoning,
-		ToolCalls:        toolCalls,
-		ToolResults:      toolResults,
-		FinishReason:     sr.finish,
-		Usage:            sr.usage,
-		ProviderMetadata: sr.providerMeta,
-		Warnings:         sr.warnings,
-	})
-}
-
-func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) {
-	if cb == nil || cb.OnEnd == nil {
-		return
-	}
-	var totalText, totalReasoning string
-	var totalUsage Usage
-	var lastFinish FinishReason
-	var lastMeta map[string]any
-	for _, s := range steps {
-		totalText += s.Text
-		totalReasoning += s.Reasoning
-		lastFinish = s.FinishReason
-		if s.Usage != nil {
-			totalUsage.InputTokens += s.Usage.InputTokens
-			totalUsage.InputTokenDetails.NoCacheTokens += s.Usage.InputTokenDetails.NoCacheTokens
-			totalUsage.OutputTokens += s.Usage.OutputTokens
-			totalUsage.OutputTokenDetails.TextTokens += s.Usage.OutputTokenDetails.TextTokens
-			totalUsage.TotalTokens += s.Usage.TotalTokens
-			totalUsage.OutputTokenDetails.ReasoningTokens += s.Usage.OutputTokenDetails.ReasoningTokens
-			totalUsage.InputTokenDetails.CacheReadTokens += s.Usage.InputTokenDetails.CacheReadTokens
-			totalUsage.InputTokenDetails.CacheWriteTokens += s.Usage.InputTokenDetails.CacheWriteTokens
-			if s.Usage.Raw != nil {
-				totalUsage.Raw = s.Usage.Raw
-			}
-		}
-		if s.ProviderMetadata != nil {
-			lastMeta = s.ProviderMetadata
-		}
-	}
-	if sr.finish != "" {
-		lastFinish = sr.finish
-	}
-	if sr.providerMeta != nil {
-		lastMeta = sr.providerMeta
-	}
-	cb.OnEnd(EndEvent{
-		Text:             totalText,
-		Reasoning:        totalReasoning,
-		Steps:            steps,
-		Usage:            totalUsage,
-		FinishReason:     lastFinish,
-		ProviderMetadata: lastMeta,
-	})
 }

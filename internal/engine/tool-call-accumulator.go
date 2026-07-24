@@ -2,7 +2,7 @@ package engine
 
 import (
 	"encoding/json"
-	"sort"
+	"slices"
 )
 
 // toolCallState accumulates streaming argument fragments for a single tool call.
@@ -61,7 +61,7 @@ func (a *toolCallAccumulator) completed() []toolCallState {
 	for idx := range a.states {
 		indices = append(indices, idx)
 	}
-	sort.Ints(indices)
+	slices.Sort(indices)
 	out := make([]toolCallState, 0, len(a.states))
 	for _, idx := range indices {
 		out = append(out, *a.states[idx])

@@ -1,6 +1,10 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"log/slog"
+	"strings"
+)
 
 type ctxKey int
 
@@ -228,7 +232,7 @@ func (e *NoSuchToolError) Error() string {
 	if len(e.AvailableTools) == 0 {
 		return "unknown tool " + e.ToolName
 	}
-	return "unknown tool " + e.ToolName
+	return "unknown tool " + e.ToolName + " (available: " + strings.Join(e.AvailableTools, ", ") + ")"
 }
 
 // InvalidToolArgumentsError indicates that the tool call arguments were invalid.
@@ -265,4 +269,7 @@ type RunParams struct {
 	ParallelToolExecution bool
 	// MaxParallelTools limits concurrent tool executions. Default: 5.
 	MaxParallelTools int
+	// Logger, when set, receives structured logs (e.g. recovered panics). Nil is
+	// a no-op.
+	Logger *slog.Logger
 }
