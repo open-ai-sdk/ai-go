@@ -54,7 +54,7 @@ func TestUploadFile_Success(t *testing.T) {
 		Filename: "report.pdf",
 		Purpose:  FilePurposeUserData,
 		Data:     []byte("fake pdf content"),
-		MimeType: "application/pdf",
+		MediaType: "application/pdf",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -167,7 +167,7 @@ func TestUploadFile_DefaultMimeType(t *testing.T) {
 		Filename: "data.bin",
 		Purpose:  FilePurposeBatch,
 		Data:     []byte("data"),
-		// MimeType intentionally omitted to test default.
+		// MediaType intentionally omitted to test default.
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -117,6 +117,10 @@ func (cp *ChunkProducer) translateEvent(ev engine.StepEvent) ([]Chunk, string) {
 		return cp.chunksToolCallReady(ev), ""
 	case engine.StepEventToolResult:
 		return cp.chunksToolResult(ev), ""
+	case engine.StepEventToolApprovalRequest:
+		return []Chunk{{Type: ChunkToolApprovalRequest, Fields: map[string]any{"approvalId": ev.ToolCallID, "toolCallId": ev.ToolCallID, "toolName": ev.ToolCallName, "args": ev.ToolCallArgsDelta}}}, ""
+	case engine.StepEventToolOutputDenied:
+		return []Chunk{{Type: ChunkToolOutputDenied, Fields: map[string]any{"toolCallId": ev.ToolCallID}}}, ""
 	case engine.StepEventToolCallInvalid:
 		return cp.chunksToolCallInvalid(ev), ""
 	case engine.StepEventSource:

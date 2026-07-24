@@ -218,7 +218,7 @@ func (m *ImageModel) downloadOne(ctx context.Context, url string) (ai.GeneratedI
 	}
 	return ai.GeneratedImage{
 		Data:     data,
-		MimeType: resp.Header.Get("Content-Type"),
+		MediaType: resp.Header.Get("Content-Type"),
 	}, nil
 }
 

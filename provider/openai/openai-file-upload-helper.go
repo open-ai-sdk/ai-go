@@ -51,9 +51,9 @@ type UploadFileRequest struct {
 	Purpose FilePurpose
 	// Data is the raw file content to upload.
 	Data []byte
-	// MimeType is the MIME type of the file (e.g. "application/pdf").
+	// MediaType is the MIME type of the file (e.g. "application/pdf").
 	// Defaults to "application/octet-stream" when empty.
-	MimeType string
+	MediaType string
 }
 
 // fileClient performs file upload operations against the OpenAI Files API.
@@ -94,7 +94,7 @@ func (fc *fileClient) upload(ctx context.Context, req UploadFileRequest) (*Uploa
 		return nil, fmt.Errorf("openai: upload file: data is empty")
 	}
 
-	mimeType := req.MimeType
+	mimeType := req.MediaType
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}

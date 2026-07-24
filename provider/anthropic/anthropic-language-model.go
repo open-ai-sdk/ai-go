@@ -227,7 +227,7 @@ func encodeContentPart(part ai.ContentPart) *contentBlock {
 	switch part.Type {
 	case ai.ContentPartTypeText:
 		return &contentBlock{Type: "text", Text: part.Text}
-	case ai.ContentPartTypeImageURL:
+	case ai.ContentPartTypeFile:
 		if len(part.Data) == 0 {
 			return nil
 		}
@@ -235,7 +235,7 @@ func encodeContentPart(part ai.ContentPart) *contentBlock {
 			Type: "image",
 			Source: &imageSource{
 				Type:      "base64",
-				MediaType: part.MimeType,
+				MediaType: part.MediaType,
 				Data:      base64.StdEncoding.EncodeToString(part.Data),
 			},
 		}

@@ -56,12 +56,9 @@ type ContentPart struct {
 	// text / reasoning
 	Text string
 
-	// image_url
-	ImageURL string
-
 	// file
-	FileURL  string
-	MimeType string
+	FileURL   string
+	MediaType string
 
 	// Shared multimodal fields (image_url and file parts).
 	Data     []byte // Inline binary content.
@@ -97,6 +94,8 @@ type Request struct {
 	Output          *OutputSchema
 	Settings        CallSettings
 	ProviderOptions map[string]any
+	ToolsContext    map[string]any
+	RuntimeContext  map[string]any
 }
 
 // OutputSchema describes the desired JSON structure for a structured output call.
@@ -127,8 +126,10 @@ type StepResult struct {
 
 // PrepareStepContext provides information about the current step for the PrepareStep callback.
 type PrepareStepContext struct {
-	StepNumber int
-	Steps      []StepResultInfo
+	StepNumber     int
+	Steps          []StepResultInfo
+	ToolsContext   map[string]any
+	RuntimeContext map[string]any
 }
 
 // StepResultInfo holds information about a completed step for PrepareStep evaluation.
@@ -186,7 +187,7 @@ type EndEvent struct {
 	Text             string
 	Reasoning        string
 	Steps            []StepResultInfo
-	TotalUsage       Usage
+	Usage            Usage
 	FinishReason     FinishReason
 	ProviderMetadata map[string]any
 }
@@ -255,6 +256,8 @@ type RunParams struct {
 	MaxSteps       int
 	PrepareStep    PrepareStepFunc
 	RepairToolCall ToolCallRepairFunc
+	ToolApproval   map[string]func(string, string) bool
+	Approver       ApprovalResponder
 	Callbacks      *LifecycleCallbacks
 	// ParallelToolExecution enables parallel tool execution.
 	ParallelToolExecution bool

@@ -40,8 +40,8 @@ data: [DONE]
 			textDeltas++
 		case ai.StreamEventUsage:
 			usageCount++
-			if e.Usage.PromptTokens != 10 {
-				t.Errorf("expected 10 prompt tokens, got %d", e.Usage.PromptTokens)
+			if e.Usage.InputTokens != 10 {
+				t.Errorf("expected 10 prompt tokens, got %d", e.Usage.InputTokens)
 			}
 		case ai.StreamEventFinish:
 			finishCount++

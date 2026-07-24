@@ -36,13 +36,13 @@ type nativePart struct {
 }
 
 type nativeInlineData struct {
-	MimeType string `json:"mimeType"`
-	Data     string `json:"data"`
+	MediaType string `json:"mimeType"`
+	Data      string `json:"data"`
 }
 
 type nativeFileData struct {
-	MimeType string `json:"mimeType"`
-	FileUri  string `json:"fileUri"`
+	MediaType string `json:"mimeType"`
+	FileUri   string `json:"fileUri"`
 }
 
 type nativeFuncCall struct {
@@ -172,10 +172,12 @@ func encodeUserParts(parts []ai.ContentPart) []nativePart {
 		switch p.Type {
 		case ai.ContentPartTypeText:
 			out = append(out, nativePart{Text: p.Text})
-		case ai.ContentPartTypeImageURL:
-			out = append(out, encodeImagePart(p))
 		case ai.ContentPartTypeFile:
-			out = append(out, encodeFilePart(p))
+			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
+				out = append(out, encodeImagePart(p))
+			} else {
+				out = append(out, encodeFilePart(p))
+			}
 		}
 	}
 	return out
@@ -205,10 +207,12 @@ func encodeAssistantParts(parts []ai.ContentPart) []nativePart {
 				np.ThoughtSignature = p.ThoughtSignature
 			}
 			out = append(out, np)
-		case ai.ContentPartTypeImageURL:
-			out = append(out, encodeImagePart(p))
 		case ai.ContentPartTypeFile:
-			out = append(out, encodeFilePart(p))
+			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
+				out = append(out, encodeImagePart(p))
+			} else {
+				out = append(out, encodeFilePart(p))
+			}
 		}
 	}
 	return out
@@ -239,12 +243,12 @@ func encodeImagePart(p ai.ContentPart) nativePart {
 	if len(p.Data) > 0 {
 		return nativePart{
 			InlineData: &nativeInlineData{
-				MimeType: p.MimeType,
-				Data:     base64.StdEncoding.EncodeToString(p.Data),
+				MediaType: p.MediaType,
+				Data:      base64.StdEncoding.EncodeToString(p.Data),
 			},
 		}
 	}
-	return encodeMediaFromURL(p.ImageURL, p.MimeType)
+	return encodeMediaFromURL(p.FileURL, p.MediaType)
 }
 
 // encodeMediaFromURL converts a URL (possibly data: URI) to an inlineData or fileData part.
@@ -252,14 +256,14 @@ func encodeMediaFromURL(url, mimeType string) nativePart {
 	if strings.HasPrefix(url, "data:") {
 		mime, data, ok := parseDataURI(url)
 		if ok {
-			return nativePart{InlineData: &nativeInlineData{MimeType: mime, Data: data}}
+			return nativePart{InlineData: &nativeInlineData{MediaType: mime, Data: data}}
 		}
 	}
 	m := mimeType
 	if m == "" {
 		m = guessMimeTypeFromURL(url)
 	}
-	return nativePart{FileData: &nativeFileData{MimeType: m, FileUri: url}}
+	return nativePart{FileData: &nativeFileData{MediaType: m, FileUri: url}}
 }
 
 // encodeFilePart encodes a file ContentPart as inlineData or fileData.
@@ -267,22 +271,22 @@ func encodeFilePart(p ai.ContentPart) nativePart {
 	if len(p.Data) > 0 {
 		return nativePart{
 			InlineData: &nativeInlineData{
-				MimeType: p.MimeType,
-				Data:     base64.StdEncoding.EncodeToString(p.Data),
+				MediaType: p.MediaType,
+				Data:      base64.StdEncoding.EncodeToString(p.Data),
 			},
 		}
 	}
 	if strings.HasPrefix(p.FileURL, "data:") {
 		mime, data, ok := parseDataURI(p.FileURL)
 		if ok {
-			return nativePart{InlineData: &nativeInlineData{MimeType: mime, Data: data}}
+			return nativePart{InlineData: &nativeInlineData{MediaType: mime, Data: data}}
 		}
 	}
-	m := p.MimeType
+	m := p.MediaType
 	if m == "" {
 		m = guessMimeTypeFromURL(p.FileURL)
 	}
-	return nativePart{FileData: &nativeFileData{MimeType: m, FileUri: p.FileURL}}
+	return nativePart{FileData: &nativeFileData{MediaType: m, FileUri: p.FileURL}}
 }
 
 // buildGenerationConfig constructs the generationConfig from settings, provider options, and output schema.

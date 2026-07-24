@@ -189,10 +189,10 @@ func TestToUIMessageStream_MessageMetadata(t *testing.T) {
 		engine.StepEvent{Type: engine.StepEventStepStart},
 		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
 		engine.StepEvent{Type: engine.StepEventUsage, Usage: &engine.Usage{
-			PromptTokens:     10,
-			CompletionTokens: 5,
-			TotalTokens:      15,
-			ReasoningTokens:  3,
+			InputTokens:        10,
+			OutputTokens:       5,
+			TotalTokens:        15,
+			OutputTokenDetails: engine.OutputTokenDetails{ReasoningTokens: 3},
 		}},
 		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
 		engine.StepEvent{Type: engine.StepEventDone},
@@ -229,11 +229,11 @@ func TestToUIMessageStream_MessageMetadata(t *testing.T) {
 	if capturedInfo.FinishReason != "stop" {
 		t.Errorf("expected FinishReason=stop, got %q", capturedInfo.FinishReason)
 	}
-	if capturedInfo.Usage.PromptTokens != 10 {
-		t.Errorf("expected PromptTokens=10, got %d", capturedInfo.Usage.PromptTokens)
+	if capturedInfo.Usage.InputTokens != 10 {
+		t.Errorf("expected PromptTokens=10, got %d", capturedInfo.Usage.InputTokens)
 	}
-	if capturedInfo.Usage.ReasoningTokens != 3 {
-		t.Errorf("expected ReasoningTokens=3, got %d", capturedInfo.Usage.ReasoningTokens)
+	if capturedInfo.Usage.OutputTokenDetails.ReasoningTokens != 3 {
+		t.Errorf("expected ReasoningTokens=3, got %d", capturedInfo.Usage.OutputTokenDetails.ReasoningTokens)
 	}
 }
 

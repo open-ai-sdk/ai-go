@@ -205,9 +205,9 @@ func handleResponseCompleted(
 	}
 	if u := chunk.Response.Usage; u != nil {
 		ch <- ai.StreamEvent{Type: ai.StreamEventUsage, Usage: &ai.Usage{
-			PromptTokens:     u.InputTokens,
-			CompletionTokens: u.OutputTokens,
-			TotalTokens:      u.TotalTokens,
+			InputTokens:  u.InputTokens,
+			OutputTokens: u.OutputTokens,
+			TotalTokens:  u.TotalTokens,
 		}}
 	}
 	ch <- ai.StreamEvent{

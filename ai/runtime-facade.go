@@ -61,6 +61,17 @@ func WithProviderOptions(opts map[string]any) Option {
 	return func(r *GenerateTextRequest) { r.ProviderOptions = opts }
 }
 
+func WithToolsContext(contexts ToolsContext) Option {
+	return func(r *GenerateTextRequest) { r.ToolsContext = contexts }
+}
+func WithRuntimeContext(context RuntimeContext) Option {
+	return func(r *GenerateTextRequest) { r.RuntimeContext = context }
+}
+
+func WithToolApproval(approval map[string]ToolApprovalFunc) Option {
+	return func(r *GenerateTextRequest) { r.ToolApproval = approval }
+}
+
 // WithModel overrides the model for this single call, ignoring the Runtime default.
 func WithModel(m LanguageModel) Option {
 	return func(r *GenerateTextRequest) { r.Model = m }

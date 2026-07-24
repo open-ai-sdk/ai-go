@@ -172,10 +172,8 @@ func handleMessageStart(
 		return send(ai.StreamEvent{
 			Type: ai.StreamEventUsage,
 			Usage: &ai.Usage{
-				PromptTokens:     u.InputTokens,
-				CompletionTokens: u.OutputTokens,
-				CacheReadTokens:  u.CacheReadInputTokens,
-				CacheWriteTokens: u.CacheCreationInputTokens,
+				InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+				InputTokenDetails: ai.InputTokenDetails{CacheReadTokens: u.CacheReadInputTokens, CacheWriteTokens: u.CacheCreationInputTokens},
 			},
 		})
 	}
@@ -253,10 +251,8 @@ func handleMessageDelta(
 	// Emit usage before finish so consumers don't miss the final token count.
 	if msg.Usage.OutputTokens > 0 {
 		if !send(ai.StreamEvent{
-			Type: ai.StreamEventUsage,
-			Usage: &ai.Usage{
-				CompletionTokens: msg.Usage.OutputTokens,
-			},
+			Type:  ai.StreamEventUsage,
+			Usage: &ai.Usage{OutputTokens: msg.Usage.OutputTokens},
 		}) {
 			return false
 		}

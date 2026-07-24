@@ -38,13 +38,15 @@ type MessageMetadataInfo struct {
 
 // UsageInfo holds token count info for metadata callbacks.
 type UsageInfo struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	ReasoningTokens  int
-	CacheReadTokens  int
-	CacheWriteTokens int
+	InputTokens        int
+	InputTokenDetails  InputTokenDetails
+	OutputTokens       int
+	OutputTokenDetails OutputTokenDetails
+	TotalTokens        int
 }
+
+type InputTokenDetails struct{ NoCacheTokens, CacheReadTokens, CacheWriteTokens int }
+type OutputTokenDetails struct{ TextTokens, ReasoningTokens int }
 
 // ToUIMessageStream converts events from a StreamEventer into a channel of typed Chunks.
 // It bridges StreamResult.Stream() → UI protocol chunks with configurable options.
@@ -96,12 +98,14 @@ func interceptEvents(
 		for ev := range eventCh {
 			// Track usage for metadata.
 			if ev.Type == engine.StepEventUsage && ev.Usage != nil {
-				totalUsage.PromptTokens += ev.Usage.PromptTokens
-				totalUsage.CompletionTokens += ev.Usage.CompletionTokens
+				totalUsage.InputTokens += ev.Usage.InputTokens
+				totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
+				totalUsage.OutputTokens += ev.Usage.OutputTokens
+				totalUsage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
 				totalUsage.TotalTokens += ev.Usage.TotalTokens
-				totalUsage.ReasoningTokens += ev.Usage.ReasoningTokens
-				totalUsage.CacheReadTokens += ev.Usage.CacheReadTokens
-				totalUsage.CacheWriteTokens += ev.Usage.CacheWriteTokens
+				totalUsage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
+				totalUsage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
+				totalUsage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
 			}
 			// Filter reasoning events.
 			if !opts.SendReasoning && ev.Type == engine.StepEventReasoningDelta {

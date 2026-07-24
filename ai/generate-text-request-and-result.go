@@ -32,7 +32,11 @@ type GenerateTextRequest struct {
 	// before they are surfaced as invalid.
 	RepairToolCall RepairToolCallFunc
 	// ActiveTools filters the tool set to only these tool names. Nil means all tools.
-	ActiveTools []string
+	ActiveTools           []string
+	ToolsContext          ToolsContext
+	RuntimeContext        RuntimeContext
+	ToolApproval          map[string]ToolApprovalFunc
+	ToolApprovalResponder ToolApprovalResponder
 	// OnStepEnd is called after each step completes.
 	OnStepEnd func(StepEndEvent)
 	// OnEnd is called when the entire run completes.
@@ -81,11 +85,13 @@ type ToolCallOutput struct {
 
 // GenerateTextResult holds the full output of a GenerateText call.
 type GenerateTextResult struct {
-	Text             string
-	Reasoning        string
-	Steps            []StepOutput
+	Text      string
+	Reasoning string
+	Steps     []StepOutput
+	// FinalStep contains the complete final-step output. It is zero when no step completed.
+	FinalStep        StepOutput
 	ToolResults      []ToolResult
-	TotalUsage       Usage
+	Usage            Usage
 	FinishReason     FinishReason
 	RawFinishReason  string
 	ProviderMetadata map[string]any
@@ -100,8 +106,10 @@ type GenerateTextResult struct {
 
 // PrepareStepContext provides information about the current step for the PrepareStep callback.
 type PrepareStepContext struct {
-	StepNumber int
-	Steps      []PrepareStepInfo
+	StepNumber     int
+	Steps          []PrepareStepInfo
+	ToolsContext   ToolsContext
+	RuntimeContext RuntimeContext
 }
 
 // PrepareStepInfo holds information about a completed step for PrepareStep evaluation.
@@ -144,7 +152,7 @@ type EndEvent struct {
 	Text             string
 	Reasoning        string
 	Steps            []StepOutput
-	TotalUsage       Usage
+	Usage            Usage
 	FinishReason     FinishReason
 	ProviderMetadata map[string]any
 	Response         Response
@@ -166,6 +174,6 @@ type ChunkEvent struct {
 type GeneratedFile struct {
 	// Data is the raw file bytes.
 	Data []byte
-	// MimeType is the MIME type of the file (e.g. "image/png").
-	MimeType string
+	// MediaType is the MIME type of the file (e.g. "image/png").
+	MediaType string
 }

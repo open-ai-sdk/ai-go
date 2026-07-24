@@ -190,6 +190,8 @@ func (wr *Writer) WriteFile(url, mediaType string, opts *FileChunkOpts) {
 // ToolChunkOpts carries optional v6 fields for tool-related chunks.
 type ToolChunkOpts struct {
 	ProviderExecuted *bool
+	ProviderMetadata map[string]any
+	ToolMetadata     map[string]any
 	Dynamic          *bool
 	Title            string
 	Preliminary      *bool // only meaningful on tool-output-available
@@ -202,6 +204,10 @@ func applyToolOpts(fields map[string]any, opts *ToolChunkOpts) map[string]any {
 	}
 	if opts.ProviderExecuted != nil {
 		fields["providerExecuted"] = *opts.ProviderExecuted
+	}
+	fields = withProviderMetadata(fields, opts.ProviderMetadata)
+	if opts.ToolMetadata != nil {
+		fields["toolMetadata"] = opts.ToolMetadata
 	}
 	if opts.Dynamic != nil {
 		fields["dynamic"] = *opts.Dynamic
@@ -254,6 +260,35 @@ func (wr *Writer) WriteToolApprovalRequest(approvalID, toolCallID, toolName stri
 		"toolName":   toolName,
 		"args":       args,
 	}})
+}
+
+// ApprovalResponseOpts carries optional approval-response protocol fields.
+type ApprovalResponseOpts struct {
+	Reason           string
+	ProviderExecuted *bool
+	ProviderMetadata map[string]any
+}
+
+func (wr *Writer) WriteToolApprovalResponse(approvalID string, approved bool, opts *ApprovalResponseOpts) {
+	fields := map[string]any{"approvalId": approvalID, "approved": approved}
+	if opts != nil {
+		if opts.Reason != "" {
+			fields["reason"] = opts.Reason
+		}
+		if opts.ProviderExecuted != nil {
+			fields["providerExecuted"] = *opts.ProviderExecuted
+		}
+		fields = withProviderMetadata(fields, opts.ProviderMetadata)
+	}
+	WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalResponse, Fields: fields})
+}
+
+func (wr *Writer) WriteCustom(kind string, data any, providerMetadata map[string]any) {
+	WriteSSE(wr.w, Chunk{Type: ChunkCustom, Fields: withProviderMetadata(map[string]any{"kind": kind, "data": data}, providerMetadata)})
+}
+
+func (wr *Writer) WriteReasoningFile(url, mediaType string, providerMetadata map[string]any) {
+	WriteSSE(wr.w, Chunk{Type: ChunkReasoningFile, Fields: withProviderMetadata(map[string]any{"url": url, "mediaType": mediaType}, providerMetadata)})
 }
 
 // WriteChunkWithProviderMetadata emits a named chunk with arbitrary fields plus

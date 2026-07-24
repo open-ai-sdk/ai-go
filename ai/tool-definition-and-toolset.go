@@ -46,7 +46,7 @@ type ToolResultContent struct {
 	Type     string // "text" or "image"
 	Text     string // for type="text"
 	Data     []byte // for type="image"
-	MimeType string // for type="image"
+	MediaType string // for type="image"
 }
 
 // ToolResult holds the output of a single tool invocation.

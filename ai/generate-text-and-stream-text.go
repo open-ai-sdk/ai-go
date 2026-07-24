@@ -138,20 +138,22 @@ func handleUsage(ev engine.StepEvent, result *GenerateTextResult, step *StepOutp
 	if ev.Usage == nil {
 		return
 	}
-	result.TotalUsage.PromptTokens += ev.Usage.PromptTokens
-	result.TotalUsage.CompletionTokens += ev.Usage.CompletionTokens
-	result.TotalUsage.TotalTokens += ev.Usage.TotalTokens
-	result.TotalUsage.ReasoningTokens += ev.Usage.ReasoningTokens
-	result.TotalUsage.CacheReadTokens += ev.Usage.CacheReadTokens
-	result.TotalUsage.CacheWriteTokens += ev.Usage.CacheWriteTokens
+	result.Usage.InputTokens += ev.Usage.InputTokens
+	result.Usage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
+	result.Usage.OutputTokens += ev.Usage.OutputTokens
+	result.Usage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
+	result.Usage.TotalTokens += ev.Usage.TotalTokens
+	result.Usage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
+	result.Usage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
+	result.Usage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
+	if ev.Usage.Raw != nil {
+		result.Usage.Raw = ev.Usage.Raw
+	}
 	if step != nil {
 		step.Usage = Usage{
-			PromptTokens:     ev.Usage.PromptTokens,
-			CompletionTokens: ev.Usage.CompletionTokens,
-			TotalTokens:      ev.Usage.TotalTokens,
-			ReasoningTokens:  ev.Usage.ReasoningTokens,
-			CacheReadTokens:  ev.Usage.CacheReadTokens,
-			CacheWriteTokens: ev.Usage.CacheWriteTokens,
+			InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens, TotalTokens: ev.Usage.TotalTokens,
+			InputTokenDetails:  InputTokenDetails{NoCacheTokens: ev.Usage.InputTokenDetails.NoCacheTokens, CacheReadTokens: ev.Usage.InputTokenDetails.CacheReadTokens, CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens},
+			OutputTokenDetails: OutputTokenDetails{TextTokens: ev.Usage.OutputTokenDetails.TextTokens, ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens},
 		}
 	}
 }
@@ -178,8 +180,8 @@ func handleFileDelta(ev engine.StepEvent, result *GenerateTextResult, step *Step
 		return
 	}
 	f := GeneratedFile{
-		Data:     ev.FileData,
-		MimeType: ev.FileMimeType,
+		Data:      ev.FileData,
+		MediaType: ev.FileMimeType,
 	}
 	result.Files = append(result.Files, f)
 	if step != nil {
@@ -197,6 +199,9 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 	step.Warnings = fromEngineWarnings(ev.Warnings)
 	step.Response = Response{Messages: ResponseMessagesForStep(*step, tools)}
 	result.Steps = append(result.Steps, *step)
+	result.FinalStep = *step
+	result.Text = step.Text
+	result.Reasoning = step.Reasoning
 	result.FinishReason = FinishReason(ev.FinishReason)
 	result.RawFinishReason = ev.RawFinishReason
 	result.ProviderMetadata = ev.ProviderMetadata
@@ -224,6 +229,15 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 	engPrepareStep := toEnginePrepareStep(req.PrepareStep)
 	repairToolCall := toEngineRepairToolCall(req.RepairToolCall)
 	engCallbacks := toEngineLifecycleCallbacks(req)
+	approval := make(map[string]func(string, string) bool, len(req.ToolApproval))
+	for name, policy := range req.ToolApproval {
+		p := policy
+		approval[name] = func(tool, args string) bool { return p(tool, json.RawMessage(args)) == ApprovalRequired }
+	}
+	var approver engine.ApprovalResponder
+	if req.ToolApprovalResponder != nil {
+		approver = approvalResponder{fn: req.ToolApprovalResponder}
+	}
 
 	return engine.RunParams{
 		Model:                 &engineModelAdapter{req.Model},
@@ -233,6 +247,8 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 		MaxSteps:              req.MaxSteps,
 		PrepareStep:           engPrepareStep,
 		RepairToolCall:        repairToolCall,
+		ToolApproval:          approval,
+		Approver:              approver,
 		Callbacks:             engCallbacks,
 		ParallelToolExecution: req.ParallelToolExecution,
 		MaxParallelTools:      req.MaxParallelTools,
@@ -244,6 +260,8 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 		Instructions:    req.Instructions,
 		Messages:        toEngineMessages(req.Messages),
 		ProviderOptions: req.ProviderOptions,
+		ToolsContext:    req.ToolsContext,
+		RuntimeContext:  req.RuntimeContext,
 		Settings: engine.CallSettings{
 			Temperature:   req.Settings.Temperature,
 			MaxTokens:     req.Settings.MaxTokens,
@@ -280,8 +298,25 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 
 	return engReq, &engine.ToolSet{
 		Definitions: defs,
-		Executor:    req.Tools.Executor,
+		Executor:    contextualExecutor{executor: req.Tools.Executor, toolsContext: req.ToolsContext, runtimeContext: req.RuntimeContext},
 	}
+}
+
+type contextualExecutor struct {
+	executor       ToolExecutor
+	toolsContext   ToolsContext
+	runtimeContext RuntimeContext
+}
+
+type approvalResponder struct{ fn ToolApprovalResponder }
+
+func (r approvalResponder) RequestApproval(ctx context.Context, request engine.ApprovalRequest) (engine.ApprovalResponse, error) {
+	response, err := r.fn(ctx, ToolApprovalRequest{ApprovalID: request.ApprovalID, ToolCallID: request.ToolCallID, ToolName: request.ToolName, Args: json.RawMessage(request.Args)})
+	return engine.ApprovalResponse{ApprovalID: response.ApprovalID, Approved: response.Approved, Reason: response.Reason}, err
+}
+
+func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
+	return e.executor.Execute(withToolContexts(ctx, e.toolsContext[name], e.runtimeContext), name, args)
 }
 
 func toEngineStopWhen(stopWhen StopCondition) engine.StopCondition {
@@ -302,7 +337,7 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 		return nil
 	}
 	return func(ectx engine.PrepareStepContext) *engine.PrepareStepResult {
-		aiCtx := PrepareStepContext{StepNumber: ectx.StepNumber}
+		aiCtx := PrepareStepContext{StepNumber: ectx.StepNumber, ToolsContext: ectx.ToolsContext, RuntimeContext: ectx.RuntimeContext}
 		for _, s := range ectx.Steps {
 			aiCtx.Steps = append(aiCtx.Steps, PrepareStepInfo{
 				StepNumber:   s.StepNumber,
@@ -417,7 +452,7 @@ func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallba
 				Text:             ev.Text,
 				Reasoning:        ev.Reasoning,
 				Steps:            steps,
-				TotalUsage:       fromEngineUsage(ev.TotalUsage),
+				Usage:            fromEngineUsage(ev.Usage),
 				FinishReason:     FinishReason(ev.FinishReason),
 				ProviderMetadata: ev.ProviderMetadata,
 			}
@@ -506,7 +541,7 @@ func fromEngineToolResultContent(cs []engine.ToolResultContent) []ToolResultCont
 	}
 	out := make([]ToolResultContent, len(cs))
 	for i, c := range cs {
-		out[i] = ToolResultContent{Type: c.Type, Text: c.Text, Data: c.Data, MimeType: c.MimeType}
+		out[i] = ToolResultContent{Type: c.Type, Text: c.Text, Data: c.Data, MediaType: c.MediaType}
 	}
 	return out
 }
@@ -516,23 +551,17 @@ func fromEngineUsagePtr(u *engine.Usage) *Usage {
 		return nil
 	}
 	return &Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
+		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens,
+		InputTokenDetails:  InputTokenDetails{NoCacheTokens: u.InputTokenDetails.NoCacheTokens, CacheReadTokens: u.InputTokenDetails.CacheReadTokens, CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens},
+		OutputTokenDetails: OutputTokenDetails{TextTokens: u.OutputTokenDetails.TextTokens, ReasoningTokens: u.OutputTokenDetails.ReasoningTokens},
 	}
 }
 
 func fromEngineUsage(u engine.Usage) Usage {
 	return Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
+		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens,
+		InputTokenDetails:  InputTokenDetails{NoCacheTokens: u.InputTokenDetails.NoCacheTokens, CacheReadTokens: u.InputTokenDetails.CacheReadTokens, CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens},
+		OutputTokenDetails: OutputTokenDetails{TextTokens: u.OutputTokenDetails.TextTokens, ReasoningTokens: u.OutputTokenDetails.ReasoningTokens},
 	}
 }
 
@@ -700,12 +729,9 @@ func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
 	}
 	if ev.Usage != nil {
 		e.Usage = &engine.Usage{
-			PromptTokens:     ev.Usage.PromptTokens,
-			CompletionTokens: ev.Usage.CompletionTokens,
-			TotalTokens:      ev.Usage.TotalTokens,
-			ReasoningTokens:  ev.Usage.ReasoningTokens,
-			CacheReadTokens:  ev.Usage.CacheReadTokens,
-			CacheWriteTokens: ev.Usage.CacheWriteTokens,
+			InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens, TotalTokens: ev.Usage.TotalTokens,
+			InputTokenDetails:  engine.InputTokenDetails{NoCacheTokens: ev.Usage.InputTokenDetails.NoCacheTokens, CacheReadTokens: ev.Usage.InputTokenDetails.CacheReadTokens, CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens},
+			OutputTokenDetails: engine.OutputTokenDetails{TextTokens: ev.Usage.OutputTokenDetails.TextTokens, ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens},
 		}
 	}
 	if len(ev.Warnings) > 0 {
@@ -742,9 +768,8 @@ func toEngineContentParts(parts []ContentPart) []engine.ContentPart {
 	for i, p := range parts {
 		ep := engine.ContentPart{
 			Type:             string(p.Type),
-			ImageURL:         p.ImageURL,
 			FileURL:          p.FileURL,
-			MimeType:         p.MimeType,
+			MediaType:        p.MediaType,
 			Data:             p.Data,
 			FileID:           p.FileID,
 			Filename:         p.Filename,
@@ -796,9 +821,8 @@ func fromEngineContentParts(parts []engine.ContentPart) []ContentPart {
 	for i, p := range parts {
 		cp := ContentPart{
 			Type:             ContentPartType(p.Type),
-			ImageURL:         p.ImageURL,
 			FileURL:          p.FileURL,
-			MimeType:         p.MimeType,
+			MediaType:        p.MediaType,
 			Data:             p.Data,
 			FileID:           p.FileID,
 			Filename:         p.Filename,

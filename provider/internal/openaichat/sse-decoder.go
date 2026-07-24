@@ -156,10 +156,10 @@ func emitChunkEvents(
 		ch <- ai.StreamEvent{
 			Type: ai.StreamEventUsage,
 			Usage: &ai.Usage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
-				TotalTokens:      chunk.Usage.TotalTokens,
-				ReasoningTokens:  chunk.Usage.ThoughtsTokenCount,
+				InputTokens:        chunk.Usage.PromptTokens,
+				OutputTokens:       chunk.Usage.CompletionTokens,
+				TotalTokens:        chunk.Usage.TotalTokens,
+				OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: chunk.Usage.ThoughtsTokenCount},
 			},
 		}
 	}

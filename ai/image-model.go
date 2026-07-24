@@ -40,8 +40,8 @@ type GenerateImageRequest struct {
 type ImageInput struct {
 	// Data holds inline binary image data.
 	Data []byte
-	// MimeType is the MIME type of the image (e.g. "image/png").
-	MimeType string
+	// MediaType is the MIME type of the image (e.g. "image/png").
+	MediaType string
 	// URL is a URL reference to the image.
 	URL string
 }
@@ -60,8 +60,8 @@ type GenerateImageResult struct {
 type GeneratedImage struct {
 	// Data is the raw image bytes.
 	Data []byte
-	// MimeType is the MIME type of the image (e.g. "image/png").
-	MimeType string
+	// MediaType is the MIME type of the image (e.g. "image/png").
+	MediaType string
 }
 
 // Base64 returns the base64-encoded image data.

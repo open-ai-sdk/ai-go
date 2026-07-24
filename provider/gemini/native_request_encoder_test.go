@@ -180,7 +180,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		req := ai.LanguageModelRequest{
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{
-					{Type: ai.ContentPartTypeImageURL, ImageURL: "https://example.com/photo.jpg"},
+					{Type: ai.ContentPartTypeFile, FileURL: "https://example.com/photo.jpg"},
 				}},
 			},
 		}
@@ -190,14 +190,14 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].FileData)
 		assertEqual(t, parts[0].FileData.FileUri, "https://example.com/photo.jpg")
-		assertEqual(t, parts[0].FileData.MimeType, "image/jpeg")
+		assertEqual(t, parts[0].FileData.MediaType, "image/jpeg")
 	})
 
 	t.Run("image data URI as inline data", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{
-					{Type: ai.ContentPartTypeImageURL, ImageURL: "data:image/png;base64,iVBOR"},
+					{Type: ai.ContentPartTypeFile, FileURL: "data:image/png;base64,iVBOR"},
 				}},
 			},
 		}
@@ -206,7 +206,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		parts := nr.Contents[0].Parts
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].InlineData)
-		assertEqual(t, parts[0].InlineData.MimeType, "image/png")
+		assertEqual(t, parts[0].InlineData.MediaType, "image/png")
 		assertEqual(t, parts[0].InlineData.Data, "iVBOR")
 	})
 
@@ -223,7 +223,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		parts := nr.Contents[0].Parts
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].InlineData)
-		assertEqual(t, parts[0].InlineData.MimeType, "image/png")
+		assertEqual(t, parts[0].InlineData.MediaType, "image/png")
 		assertEqual(t, parts[0].InlineData.Data, "UE5HIGRhdGE=") // base64("PNG data")
 		assertNilPtr(t, parts[0].FileData)
 	})
@@ -241,7 +241,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		parts := nr.Contents[0].Parts
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].InlineData)
-		assertEqual(t, parts[0].InlineData.MimeType, "application/pdf")
+		assertEqual(t, parts[0].InlineData.MediaType, "application/pdf")
 		assertEqual(t, parts[0].InlineData.Data, "UERGIGNvbnRlbnQ=")
 	})
 
@@ -259,7 +259,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].FileData)
 		assertEqual(t, parts[0].FileData.FileUri, "https://storage.googleapis.com/bucket/file.pdf")
-		assertEqual(t, parts[0].FileData.MimeType, "application/pdf")
+		assertEqual(t, parts[0].FileData.MediaType, "application/pdf")
 	})
 
 	t.Run("generation config mapping", func(t *testing.T) {

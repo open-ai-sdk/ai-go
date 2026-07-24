@@ -32,7 +32,7 @@ func (m *responseMessageModel) Stream(
 		}
 		ch <- ai.StreamEvent{
 			Type:  ai.StreamEventUsage,
-			Usage: &ai.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3},
+			Usage: &ai.Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3},
 		}
 		ch <- ai.StreamEvent{
 			Type:         ai.StreamEventFinish,
@@ -43,7 +43,7 @@ func (m *responseMessageModel) Stream(
 		ch <- ai.StreamEvent{Type: ai.StreamEventTextDelta, TextDelta: "The answer is 3."}
 		ch <- ai.StreamEvent{
 			Type:  ai.StreamEventUsage,
-			Usage: &ai.Usage{PromptTokens: 4, CompletionTokens: 5, TotalTokens: 9},
+			Usage: &ai.Usage{InputTokens: 4, OutputTokens: 5, TotalTokens: 9},
 		}
 		ch <- ai.StreamEvent{
 			Type:         ai.StreamEventFinish,
@@ -193,8 +193,8 @@ func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 	if stepEvents[1].Reasoning != "I used a calculator." {
 		t.Fatalf("expected reasoning on step finish, got %q", stepEvents[1].Reasoning)
 	}
-	if endEvent.TotalUsage.TotalTokens != 12 {
-		t.Fatalf("expected total usage across steps, got %d", endEvent.TotalUsage.TotalTokens)
+	if endEvent.Usage.TotalTokens != 12 {
+		t.Fatalf("expected total usage across steps, got %d", endEvent.Usage.TotalTokens)
 	}
 	if len(endEvent.Response.Messages) != 3 {
 		t.Fatalf("expected finish response messages, got %d", len(endEvent.Response.Messages))

@@ -117,12 +117,12 @@ func (m *ImageModel) buildRequest(req ai.GenerateImageRequest) nativeRequest {
 		if len(img.Data) > 0 {
 			parts = append(parts, nativePart{
 				InlineData: &nativeInlineData{
-					MimeType: img.MimeType,
+					MediaType: img.MediaType,
 					Data:     base64.StdEncoding.EncodeToString(img.Data),
 				},
 			})
 		} else if img.URL != "" {
-			parts = append(parts, encodeMediaFromURL(img.URL, img.MimeType))
+			parts = append(parts, encodeMediaFromURL(img.URL, img.MediaType))
 		}
 	}
 
@@ -171,7 +171,7 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 				}
 				result.Images = append(result.Images, ai.GeneratedImage{
 					Data:     decoded,
-					MimeType: part.InlineData.MimeType,
+					MediaType: part.InlineData.MediaType,
 				})
 			}
 		}
@@ -179,9 +179,9 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 
 	if resp.UsageMetadata != nil {
 		result.Usage = &ai.Usage{
-			PromptTokens:     resp.UsageMetadata.PromptTokenCount,
-			CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:      resp.UsageMetadata.TotalTokenCount,
+			InputTokens:  resp.UsageMetadata.PromptTokenCount,
+			OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:  resp.UsageMetadata.TotalTokenCount,
 		}
 	}
 

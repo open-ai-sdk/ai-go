@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
 )
@@ -203,33 +204,29 @@ func encodeUserMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 		case ai.ContentPartTypeText:
 			parts = append(parts, inputPart{Type: "input_text", Text: p.Text})
 
-		case ai.ContentPartTypeImageURL:
-			switch {
-			case p.FileID != "":
-				parts = append(parts, inputPart{Type: "input_image", FileID: p.FileID})
-			case len(p.Data) > 0:
-				mimeType := p.MimeType
-				if mimeType == "" {
-					mimeType = "image/png"
-				}
-				dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(p.Data)
-				parts = append(parts, inputPart{Type: "input_image", ImageURL: dataURI})
-			default:
-				parts = append(parts, inputPart{Type: "input_image", ImageURL: p.ImageURL})
-			}
-
 		case ai.ContentPartTypeFile:
-			switch {
-			case p.FileID != "":
-				parts = append(parts, inputPart{Type: "input_file", FileID: p.FileID, Filename: p.Filename})
-			case len(p.Data) > 0:
-				mimeType := p.MimeType
-				if mimeType == "" {
-					mimeType = "application/octet-stream"
+			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
+				switch {
+				case p.FileID != "":
+					parts = append(parts, inputPart{Type: "input_image", FileID: p.FileID})
+				case len(p.Data) > 0:
+					mediaType := p.MediaType
+					if mediaType == "" {
+						mediaType = "image/png"
+					}
+					parts = append(parts, inputPart{Type: "input_image", ImageURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data)})
+				default:
+					parts = append(parts, inputPart{Type: "input_image", ImageURL: p.FileURL})
 				}
-				dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(p.Data)
-				parts = append(parts, inputPart{Type: "input_file", FileURL: dataURI, Filename: p.Filename})
-			default:
+			} else if p.FileID != "" {
+				parts = append(parts, inputPart{Type: "input_file", FileID: p.FileID, Filename: p.Filename})
+			} else if len(p.Data) > 0 {
+				mediaType := p.MediaType
+				if mediaType == "" {
+					mediaType = "application/octet-stream"
+				}
+				parts = append(parts, inputPart{Type: "input_file", FileURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data), Filename: p.Filename})
+			} else {
 				parts = append(parts, inputPart{Type: "input_file", FileURL: p.FileURL, Filename: p.Filename})
 			}
 

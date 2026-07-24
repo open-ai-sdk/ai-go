@@ -19,11 +19,11 @@ func TestTextPart(t *testing.T) {
 
 func TestImageURLPart(t *testing.T) {
 	p := ImageURLPart("https://example.com/img.png")
-	if p.Type != ContentPartTypeImageURL {
+	if p.Type != ContentPartTypeFile {
 		t.Errorf("expected image_url type, got %s", p.Type)
 	}
-	if p.ImageURL != "https://example.com/img.png" {
-		t.Errorf("unexpected ImageURL: %s", p.ImageURL)
+	if p.FileURL != "https://example.com/img.png" {
+		t.Errorf("unexpected FileURL: %s", p.FileURL)
 	}
 }
 
@@ -35,8 +35,8 @@ func TestFilePart(t *testing.T) {
 	if p.FileURL != "https://example.com/doc.pdf" {
 		t.Errorf("unexpected FileURL: %s", p.FileURL)
 	}
-	if p.MimeType != "application/pdf" {
-		t.Errorf("unexpected MimeType: %s", p.MimeType)
+	if p.MediaType != "application/pdf" {
+		t.Errorf("unexpected MediaType: %s", p.MediaType)
 	}
 }
 
@@ -90,20 +90,20 @@ func TestToolResultPart(t *testing.T) {
 func TestImageDataPart(t *testing.T) {
 	data := []byte{0x89, 0x50, 0x4e, 0x47}
 	p := ImageDataPart(data, "image/png")
-	if p.Type != ContentPartTypeImage {
+	if p.Type != ContentPartTypeFile {
 		t.Errorf("expected image_url type, got %s", p.Type)
 	}
 	if string(p.Data) != string(data) {
 		t.Errorf("unexpected Data: %v", p.Data)
 	}
-	if p.MimeType != "image/png" {
-		t.Errorf("unexpected MimeType: %s", p.MimeType)
+	if p.MediaType != "image/png" {
+		t.Errorf("unexpected MediaType: %s", p.MediaType)
 	}
 }
 
 func TestImageFileIDPart(t *testing.T) {
 	p := ImageFileIDPart("file-abc123")
-	if p.Type != ContentPartTypeImage {
+	if p.Type != ContentPartTypeFile {
 		t.Errorf("expected image_url type, got %s", p.Type)
 	}
 	if p.FileID != "file-abc123" {
@@ -120,8 +120,8 @@ func TestFileDataPart(t *testing.T) {
 	if string(p.Data) != string(data) {
 		t.Errorf("unexpected Data: %v", p.Data)
 	}
-	if p.MimeType != "application/pdf" {
-		t.Errorf("unexpected MimeType: %s", p.MimeType)
+	if p.MediaType != "application/pdf" {
+		t.Errorf("unexpected MediaType: %s", p.MediaType)
 	}
 	if p.Filename != "report.pdf" {
 		t.Errorf("unexpected Filename: %s", p.Filename)
@@ -136,14 +136,14 @@ func TestFileIDPart(t *testing.T) {
 	if p.FileID != "file-xyz" {
 		t.Errorf("unexpected FileID: %s", p.FileID)
 	}
-	if p.MimeType != "application/pdf" {
-		t.Errorf("unexpected MimeType: %s", p.MimeType)
+	if p.MediaType != "application/pdf" {
+		t.Errorf("unexpected MediaType: %s", p.MediaType)
 	}
 }
 
 func TestContentPartTypeImageAlias(t *testing.T) {
-	if ContentPartTypeImage != ContentPartTypeImageURL {
-		t.Errorf("ContentPartTypeImage should equal ContentPartTypeImageURL")
+	if ContentPartTypeFile != ContentPartTypeFile {
+		t.Errorf("ContentPartTypeFile should equal ContentPartTypeFile")
 	}
 }
 
@@ -153,21 +153,21 @@ func TestContentPartRoundTrip_ImageData(t *testing.T) {
 	data := []byte{0x89, 0x50, 0x4e, 0x47}
 	parts := []ContentPart{ImageDataPart(data, "image/png")}
 	rt := fromEngineContentParts(toEngineContentParts(parts))
-	if rt[0].Type != ContentPartTypeImage {
+	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected image_url type, got %s", rt[0].Type)
 	}
 	if string(rt[0].Data) != string(data) {
 		t.Errorf("unexpected Data after round-trip: %v", rt[0].Data)
 	}
-	if rt[0].MimeType != "image/png" {
-		t.Errorf("unexpected MimeType: %s", rt[0].MimeType)
+	if rt[0].MediaType != "image/png" {
+		t.Errorf("unexpected MediaType: %s", rt[0].MediaType)
 	}
 }
 
 func TestContentPartRoundTrip_ImageFileID(t *testing.T) {
 	parts := []ContentPart{ImageFileIDPart("file-abc123")}
 	rt := fromEngineContentParts(toEngineContentParts(parts))
-	if rt[0].Type != ContentPartTypeImage {
+	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected image_url type, got %s", rt[0].Type)
 	}
 	if rt[0].FileID != "file-abc123" {
@@ -185,8 +185,8 @@ func TestContentPartRoundTrip_FileData(t *testing.T) {
 	if string(rt[0].Data) != string(data) {
 		t.Errorf("unexpected Data after round-trip: %v", rt[0].Data)
 	}
-	if rt[0].MimeType != "application/pdf" {
-		t.Errorf("unexpected MimeType: %s", rt[0].MimeType)
+	if rt[0].MediaType != "application/pdf" {
+		t.Errorf("unexpected MediaType: %s", rt[0].MediaType)
 	}
 	if rt[0].Filename != "report.pdf" {
 		t.Errorf("unexpected Filename: %s", rt[0].Filename)
@@ -202,8 +202,8 @@ func TestContentPartRoundTrip_FileID(t *testing.T) {
 	if rt[0].FileID != "file-xyz" {
 		t.Errorf("unexpected FileID: %s", rt[0].FileID)
 	}
-	if rt[0].MimeType != "application/pdf" {
-		t.Errorf("unexpected MimeType: %s", rt[0].MimeType)
+	if rt[0].MediaType != "application/pdf" {
+		t.Errorf("unexpected MediaType: %s", rt[0].MediaType)
 	}
 }
 
@@ -248,7 +248,7 @@ func TestContentPartRoundTrip_Text(t *testing.T) {
 func TestContentPartRoundTrip_ImageURL(t *testing.T) {
 	parts := []ContentPart{ImageURLPart("data:image/png;base64,abc")}
 	rt := fromEngineContentParts(toEngineContentParts(parts))
-	if rt[0].Type != ContentPartTypeImageURL || rt[0].ImageURL != "data:image/png;base64,abc" {
+	if rt[0].Type != ContentPartTypeFile || rt[0].FileURL != "data:image/png;base64,abc" {
 		t.Errorf("imageURL part round-trip failed: %+v", rt[0])
 	}
 }
@@ -262,8 +262,8 @@ func TestContentPartRoundTrip_File(t *testing.T) {
 	if rt[0].FileURL != "https://cdn.example.com/doc.pdf" {
 		t.Errorf("unexpected FileURL: %s", rt[0].FileURL)
 	}
-	if rt[0].MimeType != "application/pdf" {
-		t.Errorf("unexpected MimeType: %s", rt[0].MimeType)
+	if rt[0].MediaType != "application/pdf" {
+		t.Errorf("unexpected MediaType: %s", rt[0].MediaType)
 	}
 }
 

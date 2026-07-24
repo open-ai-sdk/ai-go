@@ -99,12 +99,14 @@ func (a *Adapter) interceptEvents(
 		for ev := range ch {
 			if ev.Type == engine.StepEventUsage && ev.Usage != nil {
 				state.mu.Lock()
-				state.totalUsage.PromptTokens += ev.Usage.PromptTokens
-				state.totalUsage.CompletionTokens += ev.Usage.CompletionTokens
+				state.totalUsage.InputTokens += ev.Usage.InputTokens
+				state.totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
+				state.totalUsage.OutputTokens += ev.Usage.OutputTokens
+				state.totalUsage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
 				state.totalUsage.TotalTokens += ev.Usage.TotalTokens
-				state.totalUsage.ReasoningTokens += ev.Usage.ReasoningTokens
-				state.totalUsage.CacheReadTokens += ev.Usage.CacheReadTokens
-				state.totalUsage.CacheWriteTokens += ev.Usage.CacheWriteTokens
+				state.totalUsage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
+				state.totalUsage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
+				state.totalUsage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
 				state.mu.Unlock()
 			}
 			if state.toolCache != nil && ev.Type == engine.StepEventToolResult && ev.ToolResult != nil {
@@ -165,14 +167,7 @@ func usageMetadata(u UsageInfo) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"usage": map[string]any{
-			"promptTokens":     u.PromptTokens,
-			"completionTokens": u.CompletionTokens,
-			"totalTokens":      u.TotalTokens,
-			"reasoningTokens":  u.ReasoningTokens,
-			"cacheReadTokens":  u.CacheReadTokens,
-			"cacheWriteTokens": u.CacheWriteTokens,
-		},
+		"usage": map[string]any{"inputTokens": u.InputTokens, "inputTokenDetails": map[string]any{"noCacheTokens": u.InputTokenDetails.NoCacheTokens, "cacheReadTokens": u.InputTokenDetails.CacheReadTokens, "cacheWriteTokens": u.InputTokenDetails.CacheWriteTokens}, "outputTokens": u.OutputTokens, "outputTokenDetails": map[string]any{"textTokens": u.OutputTokenDetails.TextTokens, "reasoningTokens": u.OutputTokenDetails.ReasoningTokens}, "totalTokens": u.TotalTokens},
 	}
 }
 

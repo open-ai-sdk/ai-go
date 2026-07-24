@@ -75,5 +75,5 @@ type ContentPart struct {
 	Type     string `json:"type"`               // "text", "image", "resource"
 	Text     string `json:"text,omitempty"`     // for type "text"
 	Data     string `json:"data,omitempty"`     // for type "image" (base64)
-	MimeType string `json:"mimeType,omitempty"` // for type "image"
+	MediaType string `json:"mimeType,omitempty"` // for type "image"
 }

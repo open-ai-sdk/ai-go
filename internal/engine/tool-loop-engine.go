@@ -51,8 +51,10 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 
 		if params.PrepareStep != nil {
 			psResult := params.PrepareStep(PrepareStepContext{
-				StepNumber: step,
-				Steps:      completedSteps,
+				StepNumber:     step,
+				Steps:          completedSteps,
+				ToolsContext:   req.ToolsContext,
+				RuntimeContext: req.RuntimeContext,
 			})
 			if psResult != nil {
 				if psResult.Model != nil {
@@ -126,11 +128,11 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		var stepToolResults []ToolResult
 		if params.ParallelToolExecution {
 			toolNames, stepToolCalls, stepToolResults = executeToolCallsParallel(
-				ctx, out, params.Tools, preparedToolCalls, &history, params.MaxParallelTools,
+				ctx, out, params.Tools, preparedToolCalls, &history, params.MaxParallelTools, params.ToolApproval, params.Approver,
 			)
 		} else {
 			toolNames, stepToolCalls, stepToolResults = executeToolCalls(
-				ctx, out, params.Tools, preparedToolCalls, &history,
+				ctx, out, params.Tools, preparedToolCalls, &history, params.ToolApproval, params.Approver,
 			)
 		}
 
@@ -326,6 +328,7 @@ func executeToolCalls(
 	tools *ToolSet,
 	prepared []preparedToolCall,
 	history *[]Message,
+	approval map[string]func(string, string) bool, approver ApprovalResponder,
 ) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult) {
 	toolNames = make([]string, 0, len(prepared))
 	for _, preparedCall := range prepared {
@@ -351,7 +354,7 @@ func executeToolCalls(
 			ThoughtSignature:  tc.thoughtSignature,
 		}
 
-		result := executeToolCall(ctx, tools, tc)
+		result := approvedToolCall(ctx, out, tools, tc, approval, approver)
 
 		// Apply ToModelOutput transform for history; event keeps original output.
 		modelOutput := result.Output
@@ -387,6 +390,7 @@ func executeToolCallsParallel(
 	prepared []preparedToolCall,
 	history *[]Message,
 	maxParallel int,
+	approval map[string]func(string, string) bool, approver ApprovalResponder,
 ) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult) {
 	if maxParallel <= 0 {
 		maxParallel = 5
@@ -434,7 +438,7 @@ func executeToolCallsParallel(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			result := executeToolCall(ctx, tools, tc)
+			result := approvedToolCall(ctx, out, tools, tc, approval, approver)
 			modelOutput := result.Output
 			if tools != nil {
 				for _, def := range tools.Definitions {
@@ -478,6 +482,23 @@ func executeToolCallsParallel(
 		stepToolResults = append(stepToolResults, *r.result)
 	}
 	return toolNames, stepToolCalls, stepToolResults
+}
+
+func approvedToolCall(ctx context.Context, out chan<- StepEvent, tools *ToolSet, tc toolCallState, approval map[string]func(string, string) bool, approver ApprovalResponder) *ToolResult {
+	if policy := approval[tc.name]; policy != nil && policy(tc.name, tc.args) {
+		request := ApprovalRequest{ApprovalID: tc.id, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
+		out <- StepEvent{Type: StepEventToolApprovalRequest, ToolCallID: tc.id, ToolCallName: tc.name, ToolCallArgsDelta: tc.args}
+		if approver == nil {
+			out <- StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id}
+			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
+		}
+		response, err := approver.RequestApproval(ctx, request)
+		if err != nil || !response.Approved {
+			out <- StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id}
+			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
+		}
+	}
+	return executeToolCall(ctx, tools, tc)
 }
 
 type preparedToolCall struct {
@@ -781,12 +802,17 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 		totalReasoning += s.Reasoning
 		lastFinish = s.FinishReason
 		if s.Usage != nil {
-			totalUsage.PromptTokens += s.Usage.PromptTokens
-			totalUsage.CompletionTokens += s.Usage.CompletionTokens
+			totalUsage.InputTokens += s.Usage.InputTokens
+			totalUsage.InputTokenDetails.NoCacheTokens += s.Usage.InputTokenDetails.NoCacheTokens
+			totalUsage.OutputTokens += s.Usage.OutputTokens
+			totalUsage.OutputTokenDetails.TextTokens += s.Usage.OutputTokenDetails.TextTokens
 			totalUsage.TotalTokens += s.Usage.TotalTokens
-			totalUsage.ReasoningTokens += s.Usage.ReasoningTokens
-			totalUsage.CacheReadTokens += s.Usage.CacheReadTokens
-			totalUsage.CacheWriteTokens += s.Usage.CacheWriteTokens
+			totalUsage.OutputTokenDetails.ReasoningTokens += s.Usage.OutputTokenDetails.ReasoningTokens
+			totalUsage.InputTokenDetails.CacheReadTokens += s.Usage.InputTokenDetails.CacheReadTokens
+			totalUsage.InputTokenDetails.CacheWriteTokens += s.Usage.InputTokenDetails.CacheWriteTokens
+			if s.Usage.Raw != nil {
+				totalUsage.Raw = s.Usage.Raw
+			}
 		}
 		if s.ProviderMetadata != nil {
 			lastMeta = s.ProviderMetadata
@@ -802,7 +828,7 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 		Text:             totalText,
 		Reasoning:        totalReasoning,
 		Steps:            steps,
-		TotalUsage:       totalUsage,
+		Usage:            totalUsage,
 		FinishReason:     lastFinish,
 		ProviderMetadata: lastMeta,
 	})

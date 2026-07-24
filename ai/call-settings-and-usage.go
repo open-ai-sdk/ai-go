@@ -20,13 +20,23 @@ type CallSettings struct {
 
 // Usage holds token counts for a completion.
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	// ReasoningTokens is the number of tokens used for reasoning/thinking (e.g. Gemini thoughtsTokenCount).
-	ReasoningTokens  int
+	InputTokens        int
+	InputTokenDetails  InputTokenDetails
+	OutputTokens       int
+	OutputTokenDetails OutputTokenDetails
+	TotalTokens        int
+	Raw                map[string]any
+}
+
+type InputTokenDetails struct {
+	NoCacheTokens    int
 	CacheReadTokens  int
 	CacheWriteTokens int
+}
+
+type OutputTokenDetails struct {
+	TextTokens      int
+	ReasoningTokens int
 }
 
 // FinishReason indicates why the model stopped generating.

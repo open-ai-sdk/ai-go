@@ -14,6 +14,8 @@ const (
 	StepEventToolCallDelta // subsequent argument fragment
 	StepEventToolCallReady // tool call complete, about to execute
 	StepEventToolResult    // tool execution result
+	StepEventToolApprovalRequest
+	StepEventToolOutputDenied
 	StepEventUsage
 	StepEventStepStart
 	StepEventStepEnd
@@ -86,21 +88,31 @@ const (
 
 // Usage holds token counts for a completion step.
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	// ReasoningTokens is the number of tokens used for reasoning/thinking (e.g. Gemini thoughtsTokenCount).
-	ReasoningTokens  int
+	InputTokens        int
+	InputTokenDetails  InputTokenDetails
+	OutputTokens       int
+	OutputTokenDetails OutputTokenDetails
+	TotalTokens        int
+	Raw                map[string]any
+}
+
+type InputTokenDetails struct {
+	NoCacheTokens    int
 	CacheReadTokens  int
 	CacheWriteTokens int
 }
 
+type OutputTokenDetails struct {
+	TextTokens      int
+	ReasoningTokens int
+}
+
 // ToolResultContent represents a single content part in a tool result.
 type ToolResultContent struct {
-	Type     string // "text" or "image"
-	Text     string // for type="text"
-	Data     []byte // for type="image"
-	MimeType string // for type="image"
+	Type      string // "text" or "image"
+	Text      string // for type="text"
+	Data      []byte // for type="image"
+	MediaType string // for type="image"
 }
 
 // ToolResult holds the output of a single tool invocation.

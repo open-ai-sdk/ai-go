@@ -210,7 +210,7 @@ func emitNativeChunkEvents(
 						ch <- ai.StreamEvent{
 							Type:         ai.StreamEventFileDelta,
 							FileData:     decoded,
-							FileMimeType: part.InlineData.MimeType,
+							FileMimeType: part.InlineData.MediaType,
 						}
 					}
 				}
@@ -222,10 +222,10 @@ func emitNativeChunkEvents(
 			ch <- ai.StreamEvent{
 				Type: ai.StreamEventUsage,
 				Usage: &ai.Usage{
-					PromptTokens:     chunk.UsageMetadata.PromptTokenCount,
-					CompletionTokens: chunk.UsageMetadata.CandidatesTokenCount,
-					TotalTokens:      chunk.UsageMetadata.TotalTokenCount,
-					ReasoningTokens:  chunk.UsageMetadata.ThoughtsTokenCount,
+					InputTokens:        chunk.UsageMetadata.PromptTokenCount,
+					OutputTokens:       chunk.UsageMetadata.CandidatesTokenCount,
+					TotalTokens:        chunk.UsageMetadata.TotalTokenCount,
+					OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: chunk.UsageMetadata.ThoughtsTokenCount},
 				},
 			}
 		}
@@ -253,10 +253,10 @@ func emitNativeChunkEvents(
 		ch <- ai.StreamEvent{
 			Type: ai.StreamEventUsage,
 			Usage: &ai.Usage{
-				PromptTokens:     chunk.UsageMetadata.PromptTokenCount,
-				CompletionTokens: chunk.UsageMetadata.CandidatesTokenCount,
-				TotalTokens:      chunk.UsageMetadata.TotalTokenCount,
-				ReasoningTokens:  chunk.UsageMetadata.ThoughtsTokenCount,
+				InputTokens:        chunk.UsageMetadata.PromptTokenCount,
+				OutputTokens:       chunk.UsageMetadata.CandidatesTokenCount,
+				TotalTokens:        chunk.UsageMetadata.TotalTokenCount,
+				OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: chunk.UsageMetadata.ThoughtsTokenCount},
 			},
 		}
 	}

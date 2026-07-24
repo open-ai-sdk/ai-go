@@ -44,8 +44,8 @@ data: {"type":"response.completed","response":{"id":"resp_1","status":"completed
 			textDeltas++
 		case ai.StreamEventUsage:
 			usageCount++
-			if e.Usage.PromptTokens != 5 {
-				t.Errorf("expected 5 input tokens, got %d", e.Usage.PromptTokens)
+			if e.Usage.InputTokens != 5 {
+				t.Errorf("expected 5 input tokens, got %d", e.Usage.InputTokens)
 			}
 		case ai.StreamEventFinish:
 			finishCount++
@@ -447,8 +447,8 @@ func TestDecodeNonStream_TextResponse(t *testing.T) {
 	if result.Text != "Hello, world!" {
 		t.Errorf("expected Text=Hello, world!, got %q", result.Text)
 	}
-	if result.TotalUsage.PromptTokens != 10 {
-		t.Errorf("expected 10 prompt tokens, got %d", result.TotalUsage.PromptTokens)
+	if result.Usage.InputTokens != 10 {
+		t.Errorf("expected 10 prompt tokens, got %d", result.Usage.InputTokens)
 	}
 	if result.FinishReason != ai.FinishReasonStop {
 		t.Errorf("expected FinishReasonStop, got %q", result.FinishReason)

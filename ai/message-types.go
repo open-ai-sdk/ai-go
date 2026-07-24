@@ -19,8 +19,6 @@ type ContentPartType string
 const (
 	// ContentPartTypeText is a plain-text part.
 	ContentPartTypeText ContentPartType = "text"
-	// ContentPartTypeImageURL is an image referenced by URL or data URI.
-	ContentPartTypeImageURL ContentPartType = "image_url"
 	// ContentPartTypeFile is a file referenced by URL or data URI.
 	ContentPartTypeFile ContentPartType = "file"
 	// ContentPartTypeToolCall is a model-issued tool call (assistant turn only).
@@ -33,10 +31,6 @@ const (
 	ContentPartTypeReasoning ContentPartType = "reasoning"
 )
 
-// ContentPartTypeImage is an alias for ContentPartTypeImageURL.
-// New code should prefer ContentPartTypeImage; both values are identical.
-const ContentPartTypeImage = ContentPartTypeImageURL
-
 // ContentPart is a single part of a message (text, image, file, tool call/result, or reasoning).
 // Only the fields matching the active Type are populated; all others are zero.
 type ContentPart struct {
@@ -46,19 +40,16 @@ type ContentPart struct {
 	// Text is set when Type == ContentPartTypeText.
 	Text string
 
-	// ImageURL is set when Type == ContentPartTypeImageURL (supports data: URLs).
-	ImageURL string
-
 	// FileURL is the URL or data URI when Type == ContentPartTypeFile.
 	FileURL string
-	// MimeType is the MIME type for image or file parts.
-	MimeType string
+	// MediaType is the MIME type for image or file parts.
+	MediaType string
 
 	// Data holds inline binary content for image or file parts.
-	// Exactly one of ImageURL/FileURL, Data, or FileID should be set per part.
+	// Exactly one of FileURL, Data, or FileID should be set per part.
 	Data []byte
 	// FileID is a provider-specific file identifier (e.g. OpenAI "file-abc123").
-	// Exactly one of ImageURL/FileURL, Data, or FileID should be set per part.
+	// Exactly one of FileURL, Data, or FileID should be set per part.
 	FileID string
 	// Filename is the original filename for file parts (optional, used with Data or FileID).
 	Filename string
@@ -90,12 +81,12 @@ func TextPart(text string) ContentPart {
 
 // ImageURLPart constructs an image ContentPart from a URL or data URI.
 func ImageURLPart(url string) ContentPart {
-	return ContentPart{Type: ContentPartTypeImageURL, ImageURL: url}
+	return ContentPart{Type: ContentPartTypeFile, FileURL: url}
 }
 
 // FilePart constructs a file ContentPart from a URL or data URI.
 func FilePart(url, mimeType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MimeType: mimeType}
+	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MediaType: mimeType}
 }
 
 // ImageDataPart constructs an image ContentPart from inline binary data.
@@ -108,7 +99,7 @@ func FilePart(url, mimeType string) ContentPart {
 //	data, _ := os.ReadFile("screenshot.png")
 //	part := ai.ImageDataPart(data, "image/png")
 func ImageDataPart(data []byte, mimeType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeImage, Data: data, MimeType: mimeType}
+	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mimeType}
 }
 
 // ImageFileIDPart constructs an image ContentPart referencing a provider-hosted file.
@@ -120,7 +111,7 @@ func ImageDataPart(data []byte, mimeType string) ContentPart {
 //
 //	part := ai.ImageFileIDPart("file-abc123")
 func ImageFileIDPart(fileID string) ContentPart {
-	return ContentPart{Type: ContentPartTypeImage, FileID: fileID}
+	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MediaType: "image"}
 }
 
 // FileDataPart constructs a file ContentPart from inline binary data.
@@ -133,7 +124,7 @@ func ImageFileIDPart(fileID string) ContentPart {
 //	data, _ := os.ReadFile("report.pdf")
 //	part := ai.FileDataPart(data, "application/pdf", "report.pdf")
 func FileDataPart(data []byte, mimeType, filename string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, Data: data, MimeType: mimeType, Filename: filename}
+	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mimeType, Filename: filename}
 }
 
 // FileIDPart constructs a file ContentPart referencing a provider-hosted file.
@@ -145,7 +136,7 @@ func FileDataPart(data []byte, mimeType, filename string) ContentPart {
 //
 //	part := ai.FileIDPart("file-xyz", "application/pdf")
 func FileIDPart(fileID, mimeType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MimeType: mimeType}
+	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MediaType: mimeType}
 }
 
 // ReasoningPart constructs a reasoning ContentPart for history replay.

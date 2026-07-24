@@ -58,16 +58,16 @@ func (ct *CostTracker) Steps() []StepCost {
 
 // CalculateCost computes USD cost from usage and pricing.
 func CalculateCost(model string, usage Usage, price ModelPrice) StepCost {
-	promptCost := float64(usage.PromptTokens) * price.PromptPer1M / 1_000_000
-	completionCost := float64(usage.CompletionTokens) * price.CompletionPer1M / 1_000_000
-	cacheReadCost := float64(usage.CacheReadTokens) * price.CacheReadPer1M / 1_000_000
-	cacheWriteCost := float64(usage.CacheWriteTokens) * price.CacheWritePer1M / 1_000_000
+	promptCost := float64(usage.InputTokens) * price.PromptPer1M / 1_000_000
+	completionCost := float64(usage.OutputTokens) * price.CompletionPer1M / 1_000_000
+	cacheReadCost := float64(usage.InputTokenDetails.CacheReadTokens) * price.CacheReadPer1M / 1_000_000
+	cacheWriteCost := float64(usage.InputTokenDetails.CacheWriteTokens) * price.CacheWritePer1M / 1_000_000
 	return StepCost{
 		Model:            model,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		CacheReadTokens:  usage.CacheReadTokens,
-		CacheWriteTokens: usage.CacheWriteTokens,
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		CacheReadTokens:  usage.InputTokenDetails.CacheReadTokens,
+		CacheWriteTokens: usage.InputTokenDetails.CacheWriteTokens,
 		CostUSD:          promptCost + completionCost + cacheReadCost + cacheWriteCost,
 	}
 }

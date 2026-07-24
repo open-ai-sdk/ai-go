@@ -225,7 +225,7 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 			engine.StepEvent{Type: engine.StepEventStepStart},
 			engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
 			engine.StepEvent{Type: engine.StepEventUsage, Usage: &engine.Usage{
-				PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15,
+				InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
 			}},
 			engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
 			engine.StepEvent{Type: engine.StepEventDone},

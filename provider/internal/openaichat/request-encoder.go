@@ -3,6 +3,7 @@ package openaichat
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
 )
@@ -155,41 +156,32 @@ func encodeContentMessage(m ai.Message) (map[string]any, error) {
 		switch part.Type {
 		case ai.ContentPartTypeText:
 			parts = append(parts, map[string]any{"type": "text", "text": part.Text})
-		case ai.ContentPartTypeImageURL:
-			var imageURL string
-			switch {
-			case len(part.Data) > 0:
-				mimeType := part.MimeType
-				if mimeType == "" {
-					mimeType = "image/png"
-				}
-				imageURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
-			default:
-				imageURL = part.ImageURL
-			}
-			parts = append(parts, map[string]any{
-				"type":      "image_url",
-				"image_url": map[string]string{"url": imageURL},
-			})
 		case ai.ContentPartTypeFile:
-			// Chat completions API does not support file IDs or binary uploads natively.
-			// Encode inline data as a data: URI stub or fall back to URL text.
-			switch {
-			case len(part.Data) > 0:
-				mimeType := part.MimeType
-				if mimeType == "" {
-					mimeType = "application/octet-stream"
+			if strings.HasPrefix(part.MediaType, "image/") || part.MediaType == "image" {
+				var imageURL string
+				switch {
+				case len(part.Data) > 0:
+					mediaType := part.MediaType
+					if mediaType == "" {
+						mediaType = "image/png"
+					}
+					imageURL = "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+				default:
+					imageURL = part.FileURL
 				}
-				dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
-				parts = append(parts, map[string]any{
-					"type": "text",
-					"text": fmt.Sprintf("[file: %s]", dataURI),
-				})
-			default:
-				parts = append(parts, map[string]any{
-					"type": "text",
-					"text": fmt.Sprintf("[file url: %s]", part.FileURL),
-				})
+				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": imageURL}})
+			} else {
+				switch {
+				case len(part.Data) > 0:
+					mediaType := part.MediaType
+					if mediaType == "" {
+						mediaType = "application/octet-stream"
+					}
+					dataURI := "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+					parts = append(parts, map[string]any{"type": "text", "text": fmt.Sprintf("[file: %s]", dataURI)})
+				default:
+					parts = append(parts, map[string]any{"type": "text", "text": fmt.Sprintf("[file url: %s]", part.FileURL)})
+				}
 			}
 		case ai.ContentPartTypeToolCall:
 			call := map[string]any{
