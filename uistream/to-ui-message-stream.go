@@ -45,8 +45,10 @@ type UsageInfo struct {
 	TotalTokens        int
 }
 
-type InputTokenDetails struct{ NoCacheTokens, CacheReadTokens, CacheWriteTokens int }
-type OutputTokenDetails struct{ TextTokens, ReasoningTokens int }
+type (
+	InputTokenDetails  struct{ NoCacheTokens, CacheReadTokens, CacheWriteTokens int }
+	OutputTokenDetails struct{ TextTokens, ReasoningTokens int }
+)
 
 // ToUIMessageStream converts events from a StreamEventer into a channel of typed Chunks.
 // It bridges StreamResult.Stream() → UI protocol chunks with configurable options.

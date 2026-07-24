@@ -128,7 +128,14 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		var stepToolResults []ToolResult
 		if params.ParallelToolExecution {
 			toolNames, stepToolCalls, stepToolResults = executeToolCallsParallel(
-				ctx, out, params.Tools, preparedToolCalls, &history, params.MaxParallelTools, params.ToolApproval, params.Approver,
+				ctx,
+				out,
+				params.Tools,
+				preparedToolCalls,
+				&history,
+				params.MaxParallelTools,
+				params.ToolApproval,
+				params.Approver,
 			)
 		} else {
 			toolNames, stepToolCalls, stepToolResults = executeToolCalls(
@@ -484,7 +491,14 @@ func executeToolCallsParallel(
 	return toolNames, stepToolCalls, stepToolResults
 }
 
-func approvedToolCall(ctx context.Context, out chan<- StepEvent, tools *ToolSet, tc toolCallState, approval map[string]func(string, string) bool, approver ApprovalResponder) *ToolResult {
+func approvedToolCall(
+	ctx context.Context,
+	out chan<- StepEvent,
+	tools *ToolSet,
+	tc toolCallState,
+	approval map[string]func(string, string) bool,
+	approver ApprovalResponder,
+) *ToolResult {
 	if policy := approval[tc.name]; policy != nil && policy(tc.name, tc.args) {
 		request := ApprovalRequest{ApprovalID: tc.id, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
 		out <- StepEvent{Type: StepEventToolApprovalRequest, ToolCallID: tc.id, ToolCallName: tc.name, ToolCallArgsDelta: tc.args}

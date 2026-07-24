@@ -163,47 +163,10 @@ func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 		case ai.ContentPartTypeText:
 			parts = append(parts, map[string]any{"type": "text", "text": part.Text})
 		case ai.ContentPartTypeFile:
-			// Chat-completions has no file-reference form: a provider file ID can be
-			// sent neither as an image_url nor as a file part. Warn rather than emit
-			// an empty URL, which the API would reject with an opaque 400.
-			if part.FileID != "" && len(part.Data) == 0 && part.FileURL == "" {
-				warnings = append(warnings, ai.Warning{
-					Type:    "unsupported-setting",
-					Setting: "fileID",
-					Message: fmt.Sprintf(
-						"chat completions cannot reference provider file IDs; dropping file part %q",
-						part.FileID,
-					),
-				})
-				continue
-			}
-			if strings.HasPrefix(part.MediaType, "image/") || part.MediaType == "image" {
-				var imageURL string
-				switch {
-				case len(part.Data) > 0:
-					// A bare "image" segment carries no subtype, so fall back to PNG:
-					// a data URI requires a full type and PNG decodes the widest range.
-					mediaType := part.MediaType
-					if mediaType == "" || mediaType == "image" {
-						mediaType = "image/png"
-					}
-					imageURL = "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
-				default:
-					imageURL = part.FileURL
-				}
-				parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": imageURL}})
-			} else {
-				switch {
-				case len(part.Data) > 0:
-					mediaType := part.MediaType
-					if mediaType == "" {
-						mediaType = "application/octet-stream"
-					}
-					dataURI := "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
-					parts = append(parts, map[string]any{"type": "text", "text": fmt.Sprintf("[file: %s]", dataURI)})
-				default:
-					parts = append(parts, map[string]any{"type": "text", "text": fmt.Sprintf("[file url: %s]", part.FileURL)})
-				}
+			encoded, w := encodeFilePart(part)
+			warnings = append(warnings, w...)
+			if encoded != nil {
+				parts = append(parts, encoded)
 			}
 		case ai.ContentPartTypeToolCall:
 			call := map[string]any{
@@ -238,6 +201,50 @@ func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 		msg["tool_calls"] = toolCalls
 	}
 	return msg, warnings, nil
+}
+
+// encodeFilePart maps a file content part onto a chat-completions content part.
+// Images become image_url parts; anything else is inlined as a text description
+// because the chat-completions schema has no generic file part. A nil result
+// means the part was dropped and the returned warnings explain why.
+func encodeFilePart(part ai.ContentPart) (map[string]any, []ai.Warning) {
+	// Chat-completions has no file-reference form: a provider file ID can be sent
+	// neither as an image_url nor as a file part. Warn rather than emit an empty
+	// URL, which the API would reject with an opaque 400.
+	if part.FileID != "" && len(part.Data) == 0 && part.FileURL == "" {
+		return nil, []ai.Warning{{
+			Type:    "unsupported-setting",
+			Setting: "fileID",
+			Message: fmt.Sprintf(
+				"chat completions cannot reference provider file IDs; dropping file part %q",
+				part.FileID,
+			),
+		}}
+	}
+
+	if strings.HasPrefix(part.MediaType, "image/") || part.MediaType == "image" {
+		imageURL := part.FileURL
+		if len(part.Data) > 0 {
+			// A bare "image" segment carries no subtype, so fall back to PNG: a data
+			// URI requires a full type and PNG decodes the widest range.
+			mediaType := part.MediaType
+			if mediaType == "" || mediaType == "image" {
+				mediaType = "image/png"
+			}
+			imageURL = "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+		}
+		return map[string]any{"type": "image_url", "image_url": map[string]string{"url": imageURL}}, nil
+	}
+
+	if len(part.Data) > 0 {
+		mediaType := part.MediaType
+		if mediaType == "" {
+			mediaType = "application/octet-stream"
+		}
+		dataURI := "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+		return map[string]any{"type": "text", "text": fmt.Sprintf("[file: %s]", dataURI)}, nil
+	}
+	return map[string]any{"type": "text", "text": fmt.Sprintf("[file url: %s]", part.FileURL)}, nil
 }
 
 func encodeToolResultMessage(m ai.Message) (map[string]any, error) {

@@ -214,7 +214,13 @@ func encodeUserMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 					if mediaType == "" {
 						mediaType = "image/png"
 					}
-					parts = append(parts, inputPart{Type: "input_image", ImageURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data)})
+					parts = append(
+						parts,
+						inputPart{
+							Type:     "input_image",
+							ImageURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data),
+						},
+					)
 				default:
 					parts = append(parts, inputPart{Type: "input_image", ImageURL: p.FileURL})
 				}
@@ -225,7 +231,14 @@ func encodeUserMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 				if mediaType == "" {
 					mediaType = "application/octet-stream"
 				}
-				parts = append(parts, inputPart{Type: "input_file", FileURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data), Filename: p.Filename})
+				parts = append(
+					parts,
+					inputPart{
+						Type:     "input_file",
+						FileURL:  "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data),
+						Filename: p.Filename,
+					},
+				)
 			} else {
 				parts = append(parts, inputPart{Type: "input_file", FileURL: p.FileURL, Filename: p.Filename})
 			}

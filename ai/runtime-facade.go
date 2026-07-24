@@ -64,6 +64,7 @@ func WithProviderOptions(opts map[string]any) Option {
 func WithToolsContext(contexts ToolsContext) Option {
 	return func(r *GenerateTextRequest) { r.ToolsContext = contexts }
 }
+
 func WithRuntimeContext(context RuntimeContext) Option {
 	return func(r *GenerateTextRequest) { r.RuntimeContext = context }
 }

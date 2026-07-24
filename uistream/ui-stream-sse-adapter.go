@@ -167,7 +167,20 @@ func usageMetadata(u UsageInfo) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"usage": map[string]any{"inputTokens": u.InputTokens, "inputTokenDetails": map[string]any{"noCacheTokens": u.InputTokenDetails.NoCacheTokens, "cacheReadTokens": u.InputTokenDetails.CacheReadTokens, "cacheWriteTokens": u.InputTokenDetails.CacheWriteTokens}, "outputTokens": u.OutputTokens, "outputTokenDetails": map[string]any{"textTokens": u.OutputTokenDetails.TextTokens, "reasoningTokens": u.OutputTokenDetails.ReasoningTokens}, "totalTokens": u.TotalTokens},
+		"usage": map[string]any{
+			"inputTokens": u.InputTokens,
+			"inputTokenDetails": map[string]any{
+				"noCacheTokens":    u.InputTokenDetails.NoCacheTokens,
+				"cacheReadTokens":  u.InputTokenDetails.CacheReadTokens,
+				"cacheWriteTokens": u.InputTokenDetails.CacheWriteTokens,
+			},
+			"outputTokens": u.OutputTokens,
+			"outputTokenDetails": map[string]any{
+				"textTokens":      u.OutputTokenDetails.TextTokens,
+				"reasoningTokens": u.OutputTokenDetails.ReasoningTokens,
+			},
+			"totalTokens": u.TotalTokens,
+		},
 	}
 }
 

@@ -186,9 +186,18 @@ func handleUsage(ev engine.StepEvent, result *GenerateTextResult, step *StepOutp
 	}
 	if step != nil {
 		step.Usage = Usage{
-			InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens, TotalTokens: ev.Usage.TotalTokens,
-			InputTokenDetails:  InputTokenDetails{NoCacheTokens: ev.Usage.InputTokenDetails.NoCacheTokens, CacheReadTokens: ev.Usage.InputTokenDetails.CacheReadTokens, CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens},
-			OutputTokenDetails: OutputTokenDetails{TextTokens: ev.Usage.OutputTokenDetails.TextTokens, ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens},
+			InputTokens:  ev.Usage.InputTokens,
+			OutputTokens: ev.Usage.OutputTokens,
+			TotalTokens:  ev.Usage.TotalTokens,
+			InputTokenDetails: InputTokenDetails{
+				NoCacheTokens:    ev.Usage.InputTokenDetails.NoCacheTokens,
+				CacheReadTokens:  ev.Usage.InputTokenDetails.CacheReadTokens,
+				CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens,
+			},
+			OutputTokenDetails: OutputTokenDetails{
+				TextTokens:      ev.Usage.OutputTokenDetails.TextTokens,
+				ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens,
+			},
 		}
 	}
 }
@@ -334,7 +343,11 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 
 	return engReq, &engine.ToolSet{
 		Definitions: defs,
-		Executor:    contextualExecutor{executor: req.Tools.Executor, toolsContext: req.ToolsContext, runtimeContext: req.RuntimeContext},
+		Executor: contextualExecutor{
+			executor:       req.Tools.Executor,
+			toolsContext:   req.ToolsContext,
+			runtimeContext: req.RuntimeContext,
+		},
 	}
 }
 
@@ -346,9 +359,24 @@ type contextualExecutor struct {
 
 type approvalResponder struct{ fn ToolApprovalResponder }
 
-func (r approvalResponder) RequestApproval(ctx context.Context, request engine.ApprovalRequest) (engine.ApprovalResponse, error) {
-	response, err := r.fn(ctx, ToolApprovalRequest{ApprovalID: request.ApprovalID, ToolCallID: request.ToolCallID, ToolName: request.ToolName, Args: json.RawMessage(request.Args)})
-	return engine.ApprovalResponse{ApprovalID: response.ApprovalID, Approved: response.Approved, Reason: response.Reason}, err
+func (r approvalResponder) RequestApproval(
+	ctx context.Context,
+	request engine.ApprovalRequest,
+) (engine.ApprovalResponse, error) {
+	response, err := r.fn(
+		ctx,
+		ToolApprovalRequest{
+			ApprovalID: request.ApprovalID,
+			ToolCallID: request.ToolCallID,
+			ToolName:   request.ToolName,
+			Args:       json.RawMessage(request.Args),
+		},
+	)
+	return engine.ApprovalResponse{
+		ApprovalID: response.ApprovalID,
+		Approved:   response.Approved,
+		Reason:     response.Reason,
+	}, err
 }
 
 func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
@@ -373,7 +401,11 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 		return nil
 	}
 	return func(ectx engine.PrepareStepContext) *engine.PrepareStepResult {
-		aiCtx := PrepareStepContext{StepNumber: ectx.StepNumber, ToolsContext: ectx.ToolsContext, RuntimeContext: ectx.RuntimeContext}
+		aiCtx := PrepareStepContext{
+			StepNumber:     ectx.StepNumber,
+			ToolsContext:   ectx.ToolsContext,
+			RuntimeContext: ectx.RuntimeContext,
+		}
 		for _, s := range ectx.Steps {
 			aiCtx.Steps = append(aiCtx.Steps, PrepareStepInfo{
 				StepNumber:   s.StepNumber,
@@ -587,17 +619,35 @@ func fromEngineUsagePtr(u *engine.Usage) *Usage {
 		return nil
 	}
 	return &Usage{
-		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens,
-		InputTokenDetails:  InputTokenDetails{NoCacheTokens: u.InputTokenDetails.NoCacheTokens, CacheReadTokens: u.InputTokenDetails.CacheReadTokens, CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens},
-		OutputTokenDetails: OutputTokenDetails{TextTokens: u.OutputTokenDetails.TextTokens, ReasoningTokens: u.OutputTokenDetails.ReasoningTokens},
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+		InputTokenDetails: InputTokenDetails{
+			NoCacheTokens:    u.InputTokenDetails.NoCacheTokens,
+			CacheReadTokens:  u.InputTokenDetails.CacheReadTokens,
+			CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens,
+		},
+		OutputTokenDetails: OutputTokenDetails{
+			TextTokens:      u.OutputTokenDetails.TextTokens,
+			ReasoningTokens: u.OutputTokenDetails.ReasoningTokens,
+		},
 	}
 }
 
 func fromEngineUsage(u engine.Usage) Usage {
 	return Usage{
-		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens,
-		InputTokenDetails:  InputTokenDetails{NoCacheTokens: u.InputTokenDetails.NoCacheTokens, CacheReadTokens: u.InputTokenDetails.CacheReadTokens, CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens},
-		OutputTokenDetails: OutputTokenDetails{TextTokens: u.OutputTokenDetails.TextTokens, ReasoningTokens: u.OutputTokenDetails.ReasoningTokens},
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+		InputTokenDetails: InputTokenDetails{
+			NoCacheTokens:    u.InputTokenDetails.NoCacheTokens,
+			CacheReadTokens:  u.InputTokenDetails.CacheReadTokens,
+			CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens,
+		},
+		OutputTokenDetails: OutputTokenDetails{
+			TextTokens:      u.OutputTokenDetails.TextTokens,
+			ReasoningTokens: u.OutputTokenDetails.ReasoningTokens,
+		},
 	}
 }
 
@@ -765,9 +815,18 @@ func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
 	}
 	if ev.Usage != nil {
 		e.Usage = &engine.Usage{
-			InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens, TotalTokens: ev.Usage.TotalTokens,
-			InputTokenDetails:  engine.InputTokenDetails{NoCacheTokens: ev.Usage.InputTokenDetails.NoCacheTokens, CacheReadTokens: ev.Usage.InputTokenDetails.CacheReadTokens, CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens},
-			OutputTokenDetails: engine.OutputTokenDetails{TextTokens: ev.Usage.OutputTokenDetails.TextTokens, ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens},
+			InputTokens:  ev.Usage.InputTokens,
+			OutputTokens: ev.Usage.OutputTokens,
+			TotalTokens:  ev.Usage.TotalTokens,
+			InputTokenDetails: engine.InputTokenDetails{
+				NoCacheTokens:    ev.Usage.InputTokenDetails.NoCacheTokens,
+				CacheReadTokens:  ev.Usage.InputTokenDetails.CacheReadTokens,
+				CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens,
+			},
+			OutputTokenDetails: engine.OutputTokenDetails{
+				TextTokens:      ev.Usage.OutputTokenDetails.TextTokens,
+				ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens,
+			},
 		}
 	}
 	if len(ev.Warnings) > 0 {

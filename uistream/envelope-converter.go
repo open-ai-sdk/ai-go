@@ -30,7 +30,13 @@ func ApplyApprovalResponses(envelope ChatRequestEnvelope, broker *ApprovalBroker
 		return
 	}
 	for _, response := range envelope.ToolApprovalResponses {
-		broker.Respond(ai.ToolApprovalResponse{ApprovalID: response.ApprovalID, Approved: response.Approved, Reason: response.Reason})
+		broker.Respond(
+			ai.ToolApprovalResponse{
+				ApprovalID: response.ApprovalID,
+				Approved:   response.Approved,
+				Reason:     response.Reason,
+			},
+		)
 	}
 }
 

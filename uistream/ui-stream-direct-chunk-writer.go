@@ -284,11 +284,23 @@ func (wr *Writer) WriteToolApprovalResponse(approvalID string, approved bool, op
 }
 
 func (wr *Writer) WriteCustom(kind string, data any, providerMetadata map[string]any) {
-	WriteSSE(wr.w, Chunk{Type: ChunkCustom, Fields: withProviderMetadata(map[string]any{"kind": kind, "data": data}, providerMetadata)})
+	WriteSSE(
+		wr.w,
+		Chunk{
+			Type:   ChunkCustom,
+			Fields: withProviderMetadata(map[string]any{"kind": kind, "data": data}, providerMetadata),
+		},
+	)
 }
 
 func (wr *Writer) WriteReasoningFile(url, mediaType string, providerMetadata map[string]any) {
-	WriteSSE(wr.w, Chunk{Type: ChunkReasoningFile, Fields: withProviderMetadata(map[string]any{"url": url, "mediaType": mediaType}, providerMetadata)})
+	WriteSSE(
+		wr.w,
+		Chunk{
+			Type:   ChunkReasoningFile,
+			Fields: withProviderMetadata(map[string]any{"url": url, "mediaType": mediaType}, providerMetadata),
+		},
+	)
 }
 
 // WriteChunkWithProviderMetadata emits a named chunk with arbitrary fields plus

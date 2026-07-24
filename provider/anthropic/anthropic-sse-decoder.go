@@ -174,8 +174,12 @@ func handleMessageStart(
 		return send(ai.StreamEvent{
 			Type: ai.StreamEventUsage,
 			Usage: &ai.Usage{
-				InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
-				InputTokenDetails: ai.InputTokenDetails{CacheReadTokens: u.CacheReadInputTokens, CacheWriteTokens: u.CacheCreationInputTokens},
+				InputTokens:  u.InputTokens,
+				OutputTokens: u.OutputTokens,
+				InputTokenDetails: ai.InputTokenDetails{
+					CacheReadTokens:  u.CacheReadInputTokens,
+					CacheWriteTokens: u.CacheCreationInputTokens,
+				},
 			},
 		})
 	}

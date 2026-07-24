@@ -17,7 +17,9 @@ func TestHTTPTransportRedirectPolicy(t *testing.T) {
 	defer server.Close()
 
 	blocked := NewHTTPTransport(HTTPTransportConfig{URL: server.URL + "/redirect"})
-	if _, err := blocked.client.Get(server.URL + "/redirect"); err == nil {
+	blockedResp, err := blocked.client.Get(server.URL + "/redirect")
+	if err == nil {
+		blockedResp.Body.Close()
 		t.Fatal("default redirect policy must reject redirects")
 	}
 	following := NewHTTPTransport(HTTPTransportConfig{URL: server.URL, Redirect: RedirectFollow})
