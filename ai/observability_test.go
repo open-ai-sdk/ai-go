@@ -62,15 +62,14 @@ func TestWithLogger_ReceivesRecoveredPanic(t *testing.T) {
 	rec := &recordingSlogHandler{}
 	logger := slog.New(rec)
 
-	_, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-		Model:    singleToolCallModel{},
-		Messages: []ai.Message{ai.UserMessage("go")},
-		Tools: &ai.ToolSet{
+	rt := ai.NewRuntime(ai.WithDefaultModel(singleToolCallModel{}))
+	_, err := rt.GenerateText(context.Background(), "go",
+		ai.WithTools(&ai.ToolSet{
 			Definitions: []ai.ToolDefinition{{Name: "boom", InputSchema: map[string]any{"type": "object"}}},
 			Executor:    panickingToolExecutor{},
-		},
-		Logger: logger,
-	})
+		}),
+		ai.WithLogger(logger),
+	)
 	if err == nil {
 		t.Fatal("expected the panicking tool call to fail the run")
 	}
@@ -92,14 +91,13 @@ func TestNoLoggerConfigured_NeverWritesToSlogDefault(t *testing.T) {
 	slog.SetDefault(slog.New(rec))
 	defer slog.SetDefault(orig)
 
-	_, _ = ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-		Model:    singleToolCallModel{},
-		Messages: []ai.Message{ai.UserMessage("go")},
-		Tools: &ai.ToolSet{
+	rt := ai.NewRuntime(ai.WithDefaultModel(singleToolCallModel{}))
+	_, _ = rt.GenerateText(context.Background(), "go",
+		ai.WithTools(&ai.ToolSet{
 			Definitions: []ai.ToolDefinition{{Name: "boom", InputSchema: map[string]any{"type": "object"}}},
 			Executor:    panickingToolExecutor{},
-		},
-	})
+		}),
+	)
 
 	if got := rec.count(); got != 0 {
 		t.Fatalf("expected zero records on slog.Default() with no WithLogger, got %d", got)

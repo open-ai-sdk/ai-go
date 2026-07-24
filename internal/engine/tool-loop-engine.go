@@ -19,12 +19,20 @@ func Run(ctx context.Context, params RunParams) <-chan StepEvent {
 
 func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	tracer := params.Tracer
-	if tracer == nil {
-		// No OTel import, no global-provider lookup: a caller that configures
-		// nothing pays nothing for tracing, not even OTel's own no-op path.
+	tracingEnabled := tracer != nil
+	if !tracingEnabled {
+		// No OTel import, no global-provider lookup, no attribute-slice
+		// allocation at any call site below: a caller that configures nothing
+		// pays nothing for tracing, not even OTel's own no-op path.
 		tracer = tracing.NoopTracer{}
 	}
-	ctx = ctxlog.WithLogger(ctx, params.Logger)
+	if params.Logger != nil {
+		// Skipped entirely when nil: ctxlog.FromContext already returns the
+		// discard logger for a context carrying no value at all, the same as
+		// for one explicitly carrying a nil logger, so wrapping ctx here would
+		// only cost an allocation without changing what any reader observes.
+		ctx = ctxlog.WithLogger(ctx, params.Logger)
+	}
 	ctx, runSpan := tracer.Start(ctx, "ai.run")
 
 	var completedSteps []StepResultInfo
@@ -40,11 +48,16 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// the cumulative total remains available to the caller via
 	// GenerateTextResult.Usage in the ai package.
 	defer func() {
-		runSpan.SetAttributes(stepAttrs(lastSR)...)
+		if tracingEnabled {
+			runSpan.SetAttributes(stepAttrs(lastSR)...)
+		}
 		runSpan.End()
 	}()
 
-	r := &run{ctx: ctx, out: out, logger: params.Logger, tracer: tracer, traceContent: params.TraceContent}
+	r := &run{
+		ctx: ctx, out: out, logger: params.Logger,
+		tracer: tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
+	}
 	// close(out) is deferred first so it runs last: on a panic in a control
 	// callback (PrepareStep, StopWhen, ToModelOutput, RepairToolCall, tool
 	// Execute) the error event is emitted before the channel closes, so the
@@ -105,34 +118,69 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		// deterministically once the step's events are consumed, without waiting
 		// for the whole run's context to end.
 		stepCtx, cancelStep := context.WithCancel(ctx)
-		stepCtx, stepSpan := tracer.Start(stepCtx, "ai.step",
-			tracing.Attr{Key: "ai.step_number", Value: step},
-			tracing.Attr{Key: "ai.model_id", Value: model.ModelID()},
-		)
+		// Built only when tracing is enabled, and shared by both spans started
+		// below: passing attrs through the Tracer interface allocates a backing
+		// array unconditionally (escape analysis can't see past the dynamic
+		// dispatch to know NoopTracer discards it), so skipping the literal
+		// here — not just relying on NoopTracer's no-op body — is what keeps
+		// the disabled path allocation-free.
+		var spanAttrs []tracing.Attr
+		if tracingEnabled {
+			spanAttrs = []tracing.Attr{
+				{Key: "ai.step_number", Value: step},
+				{Key: "ai.model_id", Value: model.ModelID()},
+			}
+		}
+		stepCtx, stepSpan := tracer.Start(stepCtx, "ai.step", spanAttrs...)
 
-		mc := runStepModelCall(r, tracer, stepCtx, model, req, step, params.Callbacks)
+		// The model call gets its own nested span. Started and ended inline here
+		// (not factored into a helper function returning a struct) because
+		// moving this same logic behind a function boundary was measured to add
+		// two heap allocations per step even with tracing disabled — the Go
+		// compiler could no longer prove the span value and its attributes
+		// stayed off the heap once they crossed a return. Keeping it inline
+		// keeps the disabled path's allocation count within one of the
+		// pre-instrumentation baseline.
+		modelCtx, modelSpan := tracer.Start(stepCtx, "ai.model_call", spanAttrs...)
+		if r.traceContent {
+			modelSpan.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(req.Messages)})
+		}
+
+		eventCh, err := model.Stream(modelCtx, req)
 		// Release the provider: on the normal path it has already closed; on an
 		// early/fatal return, cancelling the child ctx unblocks its ctx-guarded
 		// send and the drain lets its goroutine finish and close the body.
 		cancelStep()
-		if mc.err != nil {
-			stepSpan.RecordError(mc.err)
+		if err != nil {
+			modelSpan.RecordError(err)
+			modelSpan.End()
+			stepSpan.RecordError(err)
 			stepSpan.End()
-			r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, mc.err)})
+			r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, err)})
 			return
 		}
-		sr, fatalErr := mc.sr, mc.fatal
-		acc := mc.acc
+
+		acc := newToolCallAccumulator()
+		sr, fatalErr := consumeStream(r, eventCh, acc, params.Callbacks)
+		if tracingEnabled {
+			modelSpan.SetAttributes(stepAttrs(sr)...)
+		}
+		if r.traceContent {
+			modelSpan.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})
+		}
+		modelSpan.End()
 		if fatalErr {
 			stepSpan.End()
-			go drainStreamEvents(mc.eventCh)
+			go drainStreamEvents(eventCh)
 			return
 		}
 		lastSR = sr
 		fullText := sr.text
 
 		if !acc.hasToolCalls() {
-			stepSpan.SetAttributes(stepAttrs(sr)...)
+			if tracingEnabled {
+				stepSpan.SetAttributes(stepAttrs(sr)...)
+			}
 			stepSpan.End()
 			if !r.emit(StepEvent{
 				Type:             StepEventStepEnd,
@@ -187,7 +235,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			)
 		}
 
-		stepSpan.SetAttributes(stepAttrs(sr)...)
+		if tracingEnabled {
+			stepSpan.SetAttributes(stepAttrs(sr)...)
+		}
 		stepSpan.End()
 
 		if !r.emit(StepEvent{

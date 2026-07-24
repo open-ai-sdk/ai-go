@@ -125,7 +125,7 @@ stream := ai.StreamText(ctx, req)
 
 var buf bytes.Buffer
 adapter := uistream.NewAdapter("msg-1")
-text := adapter.Stream(stream, &buf)
+text := adapter.Stream(stream.Stream(), &buf)
 // buf contains SSE-encoded AI SDK UI message stream chunks
 ```
 
@@ -228,9 +228,9 @@ only by `MaxSteps` if you set one).
 ## v7 protocol migration
 
 This release intentionally breaks compatibility with the earlier API: request `System` is now
-`Instructions`, lifecycle callbacks use `OnStepEnd`/`OnEnd`, `StreamResult.Stream()` replaces
-`Events()`, and usage is reported as `InputTokens`/`OutputTokens` with nested cache and reasoning
-details. Aggregated results expose `Usage` and `FinalStep`.
+`Instructions`, lifecycle callbacks use `OnStepEnd`/`OnEnd`, `StreamResult` gained an `Events()`
+iterator alongside `Stream()`, and usage is reported as `InputTokens`/`OutputTokens` with nested
+cache and reasoning details. Aggregated results expose `Usage` and `FinalStep`.
 
 Images no longer have a dedicated content part. Everything non-text travels as a file part carrying
 a `MediaType` — either a full IANA media type (`image/png`) or the bare top-level segment (`image`).

@@ -19,6 +19,15 @@ type run struct {
 	// tracer is never nil: runLoop substitutes tracing.NoopTracer{} when the
 	// caller configured none, so every call site can use it unconditionally.
 	tracer tracing.Tracer
+	// tracingEnabled is false exactly when the caller configured no Tracer at
+	// all (tracer is then the NoopTracer fallback). Call sites use it to skip
+	// building a span's attribute slice rather than build one and hand it to
+	// a tracer that discards it: constructing a []tracing.Attr and passing it
+	// through the Tracer interface allocates unconditionally — the compiler
+	// cannot see through the dynamic dispatch to prove NoopTracer never
+	// retains it — so this flag is what keeps the fully-disabled path
+	// allocation-free instead of merely no-op.
+	tracingEnabled bool
 	// traceContent mirrors RunParams.TraceContent — whether spans may carry
 	// prompt/completion/tool-argument content.
 	traceContent bool

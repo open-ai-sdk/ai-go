@@ -215,7 +215,13 @@ func approvedToolCall(
 		}
 	}
 
-	toolCtx, span := r.tracer.Start(ctx, "ai.tool_call", tracing.Attr{Key: "ai.tool_name", Value: tc.name})
+	// Built only when tracing is enabled — see the matching comment in
+	// runLoop for why this can't just rely on NoopTracer discarding attrs.
+	var startAttrs []tracing.Attr
+	if r.tracingEnabled {
+		startAttrs = []tracing.Attr{{Key: "ai.tool_name", Value: tc.name}}
+	}
+	toolCtx, span := r.tracer.Start(ctx, "ai.tool_call", startAttrs...)
 	defer span.End()
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.arguments", Value: tc.args})

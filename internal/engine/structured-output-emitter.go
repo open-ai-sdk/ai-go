@@ -33,10 +33,16 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) {
 	ctx, cancel := context.WithCancel(r.ctx)
 	defer cancel()
 
-	modelCtx, span := r.tracer.Start(ctx, "ai.model_call",
-		tracing.Attr{Key: "ai.model_id", Value: params.Model.ModelID()},
-		tracing.Attr{Key: "ai.structured_output", Value: true},
-	)
+	// Built only when tracing is enabled — see the matching comment in
+	// runLoop for why this can't just rely on NoopTracer discarding attrs.
+	var startAttrs []tracing.Attr
+	if r.tracingEnabled {
+		startAttrs = []tracing.Attr{
+			{Key: "ai.model_id", Value: params.Model.ModelID()},
+			{Key: "ai.structured_output", Value: true},
+		}
+	}
+	modelCtx, span := r.tracer.Start(ctx, "ai.model_call", startAttrs...)
 	defer span.End()
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(msgs)})
