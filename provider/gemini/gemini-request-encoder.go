@@ -11,7 +11,7 @@ func encodeRequest(
 	modelID string,
 	req ai.LanguageModelRequest,
 	streaming bool,
-) (openaichat.ChatRequest, error) {
+) (openaichat.ChatRequest, []ai.Warning, error) {
 	return openaichat.EncodeRequest(openaichat.EncodeRequestParams{
 		ModelID:            modelID,
 		SanitizeTools:      sanitizeToolSchemas,

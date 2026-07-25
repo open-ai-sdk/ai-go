@@ -127,7 +127,7 @@ func contentToString(parts []ContentPart) string {
 		case "text":
 			b.WriteString(p.Text)
 		case "image":
-			fmt.Fprintf(&b, "[image: %s]", p.MimeType)
+			fmt.Fprintf(&b, "[image: %s]", p.MediaType)
 		case "resource":
 			b.WriteString("[embedded resource]")
 		default:

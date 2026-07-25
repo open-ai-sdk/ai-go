@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // Chunk is a typed UI stream chunk that can be serialized to different transports.
@@ -30,7 +31,7 @@ func (cs *ChunkStream) FullText() string {
 	return cs.text
 }
 
-// ChunkProducer translates engine.StepEvents into a channel of typed Chunks.
+// ChunkProducer translates aitypes.StepEvents into a channel of typed Chunks.
 // It holds the same per-stream state as the former Adapter internals.
 type ChunkProducer struct {
 	msgID string
@@ -65,7 +66,7 @@ func NewChunkProducer(msgID string) *ChunkProducer {
 // exhausted or an error event is received.
 //
 // Produce is designed for single use per ChunkProducer instance.
-func (cp *ChunkProducer) Produce(ch <-chan engine.StepEvent) *ChunkStream {
+func (cp *ChunkProducer) Produce(ch <-chan aitypes.StepEvent) *ChunkStream {
 	out := make(chan Chunk, 64)
 	cs := &ChunkStream{
 		Chunks: out,
@@ -75,17 +76,16 @@ func (cp *ChunkProducer) Produce(ch <-chan engine.StepEvent) *ChunkStream {
 	go func() {
 		defer close(out)
 		defer close(cs.done)
+		defer safego.Recover(nil, recoverToChunk(out))
 
 		// Emit the stream-start chunk first.
 		out <- Chunk{Type: ChunkStart, Fields: map[string]any{"messageId": cp.msgID}}
 
 		for ev := range ch {
-			if ev.Type == engine.StepEventError {
-				msg := "stream error"
-				if ev.Error != nil {
-					msg = "stream error: " + ev.Error.Error()
-				}
-				out <- Chunk{Type: ChunkError, Fields: map[string]any{"errorText": msg}}
+			if ev.Type == aitypes.StepEventError {
+				// Redact unconditionally: raw provider error text can carry org/
+				// request IDs and attacker-echoed content into the browser.
+				out <- Chunk{Type: ChunkError, Fields: map[string]any{"errorText": redactStreamError(ev.Error)}}
 				return
 			}
 			chunks, delta := cp.translateEvent(ev)
@@ -101,30 +101,48 @@ func (cp *ChunkProducer) Produce(ch <-chan engine.StepEvent) *ChunkStream {
 
 // translateEvent converts a single StepEvent into zero or more Chunks plus any
 // text delta accumulated.
-func (cp *ChunkProducer) translateEvent(ev engine.StepEvent) ([]Chunk, string) {
+func (cp *ChunkProducer) translateEvent(ev aitypes.StepEvent) ([]Chunk, string) {
 	switch ev.Type {
-	case engine.StepEventStepStart:
+	case aitypes.StepEventStepStart:
 		return cp.chunksStepStart(), ""
-	case engine.StepEventTextDelta:
+	case aitypes.StepEventTextDelta:
 		return cp.chunksTextDelta(ev)
-	case engine.StepEventReasoningDelta:
+	case aitypes.StepEventReasoningDelta:
 		return cp.chunksReasoningDelta(ev), ""
-	case engine.StepEventToolCallStart:
+	case aitypes.StepEventToolCallStart:
 		return cp.chunksToolCallStart(ev), ""
-	case engine.StepEventToolCallDelta:
+	case aitypes.StepEventToolCallDelta:
 		return cp.chunksToolCallDelta(ev), ""
-	case engine.StepEventToolCallReady:
+	case aitypes.StepEventToolCallReady:
 		return cp.chunksToolCallReady(ev), ""
-	case engine.StepEventToolResult:
+	case aitypes.StepEventToolResult:
 		return cp.chunksToolResult(ev), ""
-	case engine.StepEventToolCallInvalid:
+	case aitypes.StepEventToolApprovalRequest:
+		fields := map[string]any{
+			"approvalId": ev.ToolCallID,
+			"toolCallId": ev.ToolCallID,
+			"toolName":   ev.ToolCallName,
+			"args":       ev.ToolCallArgsDelta,
+		}
+		// isAutomatic and signature are optional in the protocol; include them
+		// only when set so the chunk matches node's omit-when-absent shape.
+		if ev.ApprovalIsAutomatic {
+			fields["isAutomatic"] = true
+		}
+		if ev.ApprovalSignature != "" {
+			fields["signature"] = ev.ApprovalSignature
+		}
+		return []Chunk{{Type: ChunkToolApprovalRequest, Fields: fields}}, ""
+	case aitypes.StepEventToolOutputDenied:
+		return []Chunk{{Type: ChunkToolOutputDenied, Fields: map[string]any{"toolCallId": ev.ToolCallID}}}, ""
+	case aitypes.StepEventToolCallInvalid:
 		return cp.chunksToolCallInvalid(ev), ""
-	case engine.StepEventSource:
+	case aitypes.StepEventSource:
 		return cp.chunksSource(ev), ""
-	case engine.StepEventStepEnd:
+	case aitypes.StepEventStepEnd:
 		cp.lastFinishReason = string(ev.FinishReason)
 		return cp.chunksStepEnd(), ""
-	case engine.StepEventDone:
+	case aitypes.StepEventDone:
 		fields := map[string]any{}
 		if cp.lastFinishReason != "" {
 			fields["finishReason"] = cp.lastFinishReason
@@ -158,7 +176,7 @@ func (cp *ChunkProducer) chunksStepStart() []Chunk {
 	return []Chunk{{Type: ChunkStartStep, Fields: nil}}
 }
 
-func (cp *ChunkProducer) chunksTextDelta(ev engine.StepEvent) ([]Chunk, string) {
+func (cp *ChunkProducer) chunksTextDelta(ev aitypes.StepEvent) ([]Chunk, string) {
 	var out []Chunk
 	// End active reasoning block before text starts (matches Vercel AI SDK behavior).
 	if cp.reasoningStarted {
@@ -184,7 +202,7 @@ func (cp *ChunkProducer) chunksTextDelta(ev engine.StepEvent) ([]Chunk, string) 
 	return out, ev.TextDelta
 }
 
-func (cp *ChunkProducer) chunksReasoningDelta(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksReasoningDelta(ev aitypes.StepEvent) []Chunk {
 	var out []Chunk
 	// End active text block before reasoning starts. Symmetric to chunksTextDelta's
 	// reasoning-end emission — preserves chronological order when a model
@@ -209,7 +227,7 @@ func (cp *ChunkProducer) chunksReasoningDelta(ev engine.StepEvent) []Chunk {
 	return out
 }
 
-func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallStart(ev aitypes.StepEvent) []Chunk {
 	tcID := ev.ToolCallID
 	if tcID == "" {
 		return nil
@@ -260,7 +278,7 @@ func (cp *ChunkProducer) chunksToolCallStart(ev engine.StepEvent) []Chunk {
 	return out
 }
 
-func (cp *ChunkProducer) chunksToolCallDelta(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallDelta(ev aitypes.StepEvent) []Chunk {
 	tcID := ev.ToolCallID
 	if !cp.toolInputStarted[tcID] || ev.ToolCallArgsDelta == "" {
 		return nil
@@ -276,7 +294,7 @@ func (cp *ChunkProducer) chunksToolCallDelta(ev engine.StepEvent) []Chunk {
 	}}}
 }
 
-func (cp *ChunkProducer) chunksToolCallReady(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallReady(ev aitypes.StepEvent) []Chunk {
 	tcID := ev.ToolCallID
 	if tcID == "" || cp.toolInputReady[tcID] {
 		return nil
@@ -293,7 +311,7 @@ func (cp *ChunkProducer) chunksToolCallReady(ev engine.StepEvent) []Chunk {
 	}, ev.ProviderMetadata)}}
 }
 
-func (cp *ChunkProducer) chunksToolResult(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolResult(ev aitypes.StepEvent) []Chunk {
 	if ev.ToolResult == nil {
 		return nil
 	}
@@ -343,7 +361,7 @@ func parseToolArgs(args string) any {
 	return parsed
 }
 
-func (cp *ChunkProducer) chunksToolCallInvalid(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallInvalid(ev aitypes.StepEvent) []Chunk {
 	return []Chunk{{Type: ChunkToolInputError, Fields: map[string]any{
 		"toolCallId": ev.ToolCallID,
 		"toolName":   ev.ToolCallName,
@@ -351,15 +369,16 @@ func (cp *ChunkProducer) chunksToolCallInvalid(ev engine.StepEvent) []Chunk {
 	}}}
 }
 
-func (cp *ChunkProducer) chunksSource(ev engine.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksSource(ev aitypes.StepEvent) []Chunk {
 	if ev.Source == nil || ev.Source.URL == "" {
 		return nil
 	}
-	return []Chunk{{Type: ChunkSourceURL, Fields: map[string]any{
+	fields := map[string]any{
 		"sourceId": ev.Source.ID,
 		"url":      ev.Source.URL,
 		"title":    ev.Source.Title,
-	}}}
+	}
+	return []Chunk{{Type: ChunkSourceURL, Fields: withProviderMetadata(fields, ev.Source.ProviderMetadata)}}
 }
 
 func (cp *ChunkProducer) chunksStepEnd() []Chunk {
@@ -428,16 +447,22 @@ func MergeChunks(sources ...<-chan Chunk) <-chan Chunk {
 
 	remaining := make(chan struct{}, len(sources))
 	for _, src := range sources {
-		src := src
 		go func() {
+			// Signal completion even on panic so the closer below never
+			// deadlocks waiting on a source that died mid-relay.
+			defer func() { remaining <- struct{}{} }()
+			defer safego.Recover(nil, recoverToChunk(out))
 			for c := range src {
 				out <- c
 			}
-			remaining <- struct{}{}
 		}()
 	}
 
 	go func() {
+		// The only panic source here is a double close(out), which is
+		// unreachable — so a bare boundary is correct: emitting onto out would
+		// be self-defeating (out is the very channel being closed).
+		defer safego.Recover(nil, nil)
 		for i := 0; i < len(sources); i++ {
 			<-remaining
 		}

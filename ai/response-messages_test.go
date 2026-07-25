@@ -32,7 +32,7 @@ func (m *responseMessageModel) Stream(
 		}
 		ch <- ai.StreamEvent{
 			Type:  ai.StreamEventUsage,
-			Usage: &ai.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3},
+			Usage: &ai.Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3},
 		}
 		ch <- ai.StreamEvent{
 			Type:         ai.StreamEventFinish,
@@ -43,7 +43,7 @@ func (m *responseMessageModel) Stream(
 		ch <- ai.StreamEvent{Type: ai.StreamEventTextDelta, TextDelta: "The answer is 3."}
 		ch <- ai.StreamEvent{
 			Type:  ai.StreamEventUsage,
-			Usage: &ai.Usage{PromptTokens: 4, CompletionTokens: 5, TotalTokens: 9},
+			Usage: &ai.Usage{InputTokens: 4, OutputTokens: 5, TotalTokens: 9},
 		}
 		ch <- ai.StreamEvent{
 			Type:         ai.StreamEventFinish,
@@ -132,8 +132,8 @@ func TestResponseMessagesForStep_UsesToModelOutput(t *testing.T) {
 
 func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 	model := &responseMessageModel{}
-	var stepEvents []ai.StepFinishEvent
-	var finishEvent ai.FinishEvent
+	var stepEvents []ai.StepEndEvent
+	var endEvent ai.EndEvent
 
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:    model,
@@ -147,12 +147,15 @@ func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 			}},
 			Executor: &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); this test exercises
+		// a real two-step loop, so it must opt in explicitly.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
-		OnStepFinish: func(event ai.StepFinishEvent) {
+		OnStepEnd: func(event ai.StepEndEvent) {
 			stepEvents = append(stepEvents, event)
 		},
-		OnFinish: func(event ai.FinishEvent) {
-			finishEvent = event
+		OnEnd: func(event ai.EndEvent) {
+			endEvent = event
 		},
 	})
 	if err != nil {
@@ -193,15 +196,15 @@ func TestGenerateText_ResponseMessagesAndCallbacks(t *testing.T) {
 	if stepEvents[1].Reasoning != "I used a calculator." {
 		t.Fatalf("expected reasoning on step finish, got %q", stepEvents[1].Reasoning)
 	}
-	if finishEvent.TotalUsage.TotalTokens != 12 {
-		t.Fatalf("expected total usage across steps, got %d", finishEvent.TotalUsage.TotalTokens)
+	if endEvent.Usage.TotalTokens != 12 {
+		t.Fatalf("expected total usage across steps, got %d", endEvent.Usage.TotalTokens)
 	}
-	if len(finishEvent.Response.Messages) != 3 {
-		t.Fatalf("expected finish response messages, got %d", len(finishEvent.Response.Messages))
+	if len(endEvent.Response.Messages) != 3 {
+		t.Fatalf("expected finish response messages, got %d", len(endEvent.Response.Messages))
 	}
 }
 
-func TestGenerateText_ExperimentalRepairToolCall(t *testing.T) {
+func TestGenerateText_RepairToolCall(t *testing.T) {
 	model := &repairToolCallModel{}
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:    model,
@@ -210,8 +213,11 @@ func TestGenerateText_ExperimentalRepairToolCall(t *testing.T) {
 			Definitions: []ai.ToolDefinition{{Name: "add"}},
 			Executor:    &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); repairToolCallModel's
+		// second step ("Done") is part of this test's scenario, so opt in.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
-		ExperimentalRepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
+		RepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
 			var noSuchToolErr *ai.NoSuchToolError
 			if !errors.As(input.Error, &noSuchToolErr) {
 				return nil, errors.New("expected NoSuchToolError during repair")
@@ -240,7 +246,7 @@ func TestGenerateText_ExperimentalRepairToolCall(t *testing.T) {
 	}
 }
 
-func TestGenerateText_ExperimentalRepairToolCall_PreservesArgsWhenOnlyNameChanges(t *testing.T) {
+func TestGenerateText_RepairToolCall_PreservesArgsWhenOnlyNameChanges(t *testing.T) {
 	model := &repairToolCallModel{}
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:    model,
@@ -249,8 +255,11 @@ func TestGenerateText_ExperimentalRepairToolCall_PreservesArgsWhenOnlyNameChange
 			Definitions: []ai.ToolDefinition{{Name: "add"}},
 			Executor:    &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); repairToolCallModel's
+		// second step ("Done") is part of this test's scenario, so opt in.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
-		ExperimentalRepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
+		RepairToolCall: func(_ context.Context, input ai.RepairToolCallInput) (*ai.ToolCallOutput, error) {
 			return &ai.ToolCallOutput{Name: "add"}, nil
 		},
 	})

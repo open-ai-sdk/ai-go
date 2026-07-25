@@ -4,7 +4,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ToolResult is a public-facing tool result notification emitted during streaming.
@@ -25,7 +26,7 @@ type ToolResultHook func(wr *Writer, result ToolResult)
 // Callers can use this to collect grounding sources for persistence.
 type SourceHook func(wr *Writer, sourceID, url, title string)
 
-// Adapter translates a channel of engine.StepEvents into UI message stream chunks.
+// Adapter translates a channel of aitypes.StepEvents into UI message stream chunks.
 // It is transport-agnostic: callers can write to an http.ResponseWriter, a buffer, etc.
 //
 // For custom data-* chunks or source chunks between or after stream events,
@@ -34,7 +35,7 @@ type Adapter struct {
 	msgID              string
 	toolResultHook     ToolResultHook
 	sourceHook         SourceHook
-	onFinish           func(text, finishReason string)
+	onEnd              func(text, finishReason string)
 	persistenceBuilder *PersistedMessageBuilder
 }
 
@@ -58,11 +59,11 @@ func (a *Adapter) WithSourceHook(hook SourceHook) *Adapter {
 	return a
 }
 
-// WithOnFinish sets a callback invoked after the stream completes.
+// WithOnEnd sets a callback invoked after the stream completes.
 // text is the full accumulated assistant text; finishReason is "stop" or the
 // finish reason captured from the last finish chunk.
-func (a *Adapter) WithOnFinish(fn func(text, finishReason string)) *Adapter {
-	a.onFinish = fn
+func (a *Adapter) WithOnEnd(fn func(text, finishReason string)) *Adapter {
+	a.onEnd = fn
 	return a
 }
 
@@ -90,24 +91,27 @@ type interceptState struct {
 // interceptEvents wraps an event channel to track usage and cache tool results.
 // The returned channel forwards all events unchanged.
 func (a *Adapter) interceptEvents(
-	ch <-chan engine.StepEvent,
+	ch <-chan aitypes.StepEvent,
 	state *interceptState,
-) <-chan engine.StepEvent {
-	intercepted := make(chan engine.StepEvent, 64)
+) <-chan aitypes.StepEvent {
+	intercepted := make(chan aitypes.StepEvent, 64)
 	go func() {
 		defer close(intercepted)
+		defer safego.Recover(nil, recoverToEvent(intercepted))
 		for ev := range ch {
-			if ev.Type == engine.StepEventUsage && ev.Usage != nil {
+			if ev.Type == aitypes.StepEventUsage && ev.Usage != nil {
 				state.mu.Lock()
-				state.totalUsage.PromptTokens += ev.Usage.PromptTokens
-				state.totalUsage.CompletionTokens += ev.Usage.CompletionTokens
+				state.totalUsage.InputTokens += ev.Usage.InputTokens
+				state.totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
+				state.totalUsage.OutputTokens += ev.Usage.OutputTokens
+				state.totalUsage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
 				state.totalUsage.TotalTokens += ev.Usage.TotalTokens
-				state.totalUsage.ReasoningTokens += ev.Usage.ReasoningTokens
-				state.totalUsage.CacheReadTokens += ev.Usage.CacheReadTokens
-				state.totalUsage.CacheWriteTokens += ev.Usage.CacheWriteTokens
+				state.totalUsage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
+				state.totalUsage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
+				state.totalUsage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
 				state.mu.Unlock()
 			}
-			if state.toolCache != nil && ev.Type == engine.StepEventToolResult && ev.ToolResult != nil {
+			if state.toolCache != nil && ev.Type == aitypes.StepEventToolResult && ev.ToolResult != nil {
 				tr := ev.ToolResult
 				state.mu.Lock()
 				state.toolCache[tr.ID] = toolData{
@@ -123,9 +127,13 @@ func (a *Adapter) interceptEvents(
 	return intercepted
 }
 
-// writeChunkWithHooks writes a non-finish, non-error chunk and fires registered hooks.
-func (a *Adapter) writeChunkWithHooks(wr *Writer, c Chunk, state *interceptState) {
-	wr.WriteChunk(c.Type, c.Fields)
+// writeChunkWithHooks writes a non-finish, non-error chunk and fires registered
+// hooks. It returns the chunk write error so the caller can stop writing once
+// the client has disconnected; hook writes are the consumer's to handle.
+func (a *Adapter) writeChunkWithHooks(wr *Writer, c Chunk, state *interceptState) error {
+	if err := wr.WriteChunk(c.Type, c.Fields); err != nil {
+		return err
+	}
 
 	if c.Type == ChunkSourceURL && a.sourceHook != nil {
 		sid, ok1 := c.Fields["sourceId"].(string)
@@ -150,6 +158,7 @@ func (a *Adapter) writeChunkWithHooks(wr *Writer, c Chunk, state *interceptState
 			}
 		}
 	}
+	return nil
 }
 
 // toolData stores raw tool result strings keyed by toolCallID.
@@ -166,19 +175,25 @@ func usageMetadata(u UsageInfo) map[string]any {
 	}
 	return map[string]any{
 		"usage": map[string]any{
-			"promptTokens":     u.PromptTokens,
-			"completionTokens": u.CompletionTokens,
-			"totalTokens":      u.TotalTokens,
-			"reasoningTokens":  u.ReasoningTokens,
-			"cacheReadTokens":  u.CacheReadTokens,
-			"cacheWriteTokens": u.CacheWriteTokens,
+			"inputTokens": u.InputTokens,
+			"inputTokenDetails": map[string]any{
+				"noCacheTokens":    u.InputTokenDetails.NoCacheTokens,
+				"cacheReadTokens":  u.InputTokenDetails.CacheReadTokens,
+				"cacheWriteTokens": u.InputTokenDetails.CacheWriteTokens,
+			},
+			"outputTokens": u.OutputTokens,
+			"outputTokenDetails": map[string]any{
+				"textTokens":      u.OutputTokenDetails.TextTokens,
+				"reasoningTokens": u.OutputTokenDetails.ReasoningTokens,
+			},
+			"totalTokens": u.TotalTokens,
 		},
 	}
 }
 
 // Stream consumes events from ch and writes SSE lines to w.
 // It returns the full concatenated assistant text for persistence.
-func (a *Adapter) Stream(ch <-chan engine.StepEvent, w io.Writer) string {
+func (a *Adapter) Stream(ch <-chan aitypes.StepEvent, w io.Writer) string {
 	state := &interceptState{}
 	if a.toolResultHook != nil {
 		state.toolCache = make(map[string]toolData)
@@ -191,9 +206,16 @@ func (a *Adapter) Stream(ch <-chan engine.StepEvent, w io.Writer) string {
 	wr := NewWriter(w)
 
 	var lastFinishReason string
+	// Once a write fails the client has disconnected; stop writing but keep
+	// draining cs.Chunks so the producer goroutine never blocks on an unread
+	// channel. Persistence observation continues regardless.
+	var writeErr error
 	for c := range cs.Chunks {
 		if a.persistenceBuilder != nil {
 			a.persistenceBuilder.ObserveChunk(c)
+		}
+		if writeErr != nil {
+			continue
 		}
 		switch c.Type {
 		case ChunkFinish:
@@ -203,22 +225,22 @@ func (a *Adapter) Stream(ch <-chan engine.StepEvent, w io.Writer) string {
 			state.mu.Lock()
 			usage := state.totalUsage
 			state.mu.Unlock()
-			wr.WriteFinishWithReason(lastFinishReason, usageMetadata(usage))
+			writeErr = wr.WriteFinishWithReason(lastFinishReason, usageMetadata(usage))
 		case ChunkError:
 			msg, ok := c.Fields["errorText"].(string)
 			if !ok {
 				msg = "stream error"
 			}
-			wr.WriteError(msg)
+			writeErr = wr.WriteError(msg)
 		default:
-			a.writeChunkWithHooks(wr, c, state)
+			writeErr = a.writeChunkWithHooks(wr, c, state)
 		}
 	}
 
 	text := cs.FullText()
 
-	if a.onFinish != nil {
-		a.onFinish(text, lastFinishReason)
+	if a.onEnd != nil {
+		a.onEnd(text, lastFinishReason)
 	}
 
 	return text

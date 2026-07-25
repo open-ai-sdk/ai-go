@@ -139,8 +139,8 @@ func TestMergeStreamResult_ToolResultHook(t *testing.T) {
 	}
 }
 
-// TestMergeStreamResult_OnFinish verifies the on-finish callback fires.
-func TestMergeStreamResult_OnFinish(t *testing.T) {
+// TestMergeStreamResult_OnEnd verifies the on-end callback fires.
+func TestMergeStreamResult_OnEnd(t *testing.T) {
 	sr := makeStreamResult(
 		engine.StepEvent{Type: engine.StepEventStepStart},
 		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "done"},
@@ -148,15 +148,15 @@ func TestMergeStreamResult_OnFinish(t *testing.T) {
 		engine.StepEvent{Type: engine.StepEventDone},
 	)
 
-	var finishedText string
+	var endedText string
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
-	wr.MergeStreamResult(sr, MergeWithOnFinish(func(text string) {
-		finishedText = text
+	wr.MergeStreamResult(sr, MergeWithOnEnd(func(text string) {
+		endedText = text
 	}))
 
-	if finishedText != "done" {
-		t.Errorf("expected on-finish text=%q, got %q", "done", finishedText)
+	if endedText != "done" {
+		t.Errorf("expected on-end text=%q, got %q", "done", endedText)
 	}
 }
 

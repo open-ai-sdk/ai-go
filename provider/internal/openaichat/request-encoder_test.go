@@ -14,7 +14,7 @@ func TestEncodeRequest_StopSequences(t *testing.T) {
 		},
 	}
 
-	cr, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
+	cr, _, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
 	if err != nil {
 		t.Fatalf("EncodeRequest failed: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestEncodeRequest_StopSequences_Empty(t *testing.T) {
 		Messages: []ai.Message{ai.UserMessage("hello")},
 	}
 
-	cr, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
+	cr, _, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
 	if err != nil {
 		t.Fatalf("EncodeRequest failed: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestEncodeRequest_AssistantToolCallOnly_HasContentNull(t *testing.T) {
 		Messages: []ai.Message{ai.UserMessage("hello"), msg},
 	}
 
-	cr, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
+	cr, _, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
 	if err != nil {
 		t.Fatalf("EncodeRequest failed: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestEncodeRequest_AssistantWithText_HasContentParts(t *testing.T) {
 		Messages: []ai.Message{ai.UserMessage("hello"), msg},
 	}
 
-	cr, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
+	cr, _, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, true)
 	if err != nil {
 		t.Fatalf("EncodeRequest failed: %v", err)
 	}

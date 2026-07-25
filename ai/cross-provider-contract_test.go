@@ -55,9 +55,9 @@ func newSuccessEvents(text string) []ai.StreamEvent {
 			Type:         ai.StreamEventFinish,
 			FinishReason: ai.FinishReasonStop,
 			Usage: &ai.Usage{
-				PromptTokens:     10,
-				CompletionTokens: 5,
-				TotalTokens:      15,
+				InputTokens:  10,
+				OutputTokens: 5,
+				TotalTokens:  15,
 			},
 		},
 	}
@@ -284,9 +284,9 @@ func TestCrossProvider_UsagePropagated(t *testing.T) {
 			{
 				Type: ai.StreamEventUsage,
 				Usage: &ai.Usage{
-					PromptTokens:     100,
-					CompletionTokens: 50,
-					TotalTokens:      150,
+					InputTokens:  100,
+					OutputTokens: 50,
+					TotalTokens:  150,
 				},
 			},
 			{Type: ai.StreamEventFinish, FinishReason: ai.FinishReasonStop},
@@ -300,13 +300,13 @@ func TestCrossProvider_UsagePropagated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.TotalUsage.PromptTokens != 100 {
-		t.Errorf("PromptTokens: got %d", result.TotalUsage.PromptTokens)
+	if result.Usage.InputTokens != 100 {
+		t.Errorf("InputTokens: got %d", result.Usage.InputTokens)
 	}
-	if result.TotalUsage.CompletionTokens != 50 {
-		t.Errorf("CompletionTokens: got %d", result.TotalUsage.CompletionTokens)
+	if result.Usage.OutputTokens != 50 {
+		t.Errorf("OutputTokens: got %d", result.Usage.OutputTokens)
 	}
-	if result.TotalUsage.TotalTokens != 150 {
-		t.Errorf("TotalTokens: got %d", result.TotalUsage.TotalTokens)
+	if result.Usage.TotalTokens != 150 {
+		t.Errorf("TotalTokens: got %d", result.Usage.TotalTokens)
 	}
 }

@@ -24,6 +24,22 @@ func ToGenerateTextRequest(envelope ChatRequestEnvelope, model ai.LanguageModel)
 	return req
 }
 
+// ApplyApprovalResponses delivers approval responses decoded from a UI request envelope.
+func ApplyApprovalResponses(envelope ChatRequestEnvelope, broker *ApprovalBroker) {
+	if broker == nil {
+		return
+	}
+	for _, response := range envelope.ToolApprovalResponses {
+		broker.Respond(
+			ai.ToolApprovalResponse{
+				ApprovalID: response.ApprovalID,
+				Approved:   response.Approved,
+				Reason:     response.Reason,
+			},
+		)
+	}
+}
+
 // ToGenerateTextRequestFromRegistry resolves the model from the registry using
 // envelope.Body["modelId"] (falling back to the registry's default prefix) and
 // then delegates to ToGenerateTextRequest.
@@ -51,7 +67,7 @@ func applyBodyHints(req *ai.GenerateTextRequest, body map[string]any) {
 	}
 
 	if system, ok := body["system"].(string); ok && system != "" {
-		req.System = system
+		req.Instructions = system
 	}
 
 	if maxSteps, ok := numericInt(body["maxSteps"]); ok && maxSteps > 0 {

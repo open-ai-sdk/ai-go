@@ -237,6 +237,9 @@ func TestToolLoop_TwoStep(t *testing.T) {
 			}},
 			Executor: &addExecutor{},
 		},
+		// GenerateText defaults StopWhen to IsStepCount(1); this test exercises
+		// a real two-step loop, so it must opt in explicitly.
+		StopWhen: ai.Never(),
 		MaxSteps: 5,
 	})
 	if err != nil {

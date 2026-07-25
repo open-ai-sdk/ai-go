@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamChunk mirrors the OpenAI chat completions SSE chunk structure.
@@ -39,10 +41,17 @@ type StreamChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens       int `json:"prompt_tokens"`
-		CompletionTokens   int `json:"completion_tokens"`
-		TotalTokens        int `json:"total_tokens"`
-		ThoughtsTokenCount int `json:"thoughts_token_count,omitempty"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
+		ThoughtsTokenCount  int `json:"thoughts_token_count,omitempty"`
+		PromptTokensDetails *struct {
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
 	} `json:"usage"`
 	// ProviderMetadata holds provider-specific metadata from the response (e.g. Gemini groundingMetadata).
 	ProviderMetadata map[string]any `json:"provider_metadata,omitempty"`
@@ -57,6 +66,9 @@ type SSEDecodeParams struct {
 	// SourceExtractor is an optional hook to extract ai.Source events from a chunk.
 	// Called for every chunk; returned sources are emitted before text/tool deltas.
 	SourceExtractor func(chunk StreamChunk) []ai.Source
+	// EncodeWarnings are advisories raised while encoding the request. They are
+	// merged onto the finish event so callers see them in the aggregated result.
+	EncodeWarnings []ai.Warning
 }
 
 // DecodeSSEStream reads SSE lines from body and emits normalized ai.StreamEvents onto ch.
@@ -69,6 +81,17 @@ func DecodeSSEStream(
 ) {
 	defer close(ch)
 	defer body.Close()
+	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
+	// watcher on normal completion.
+	defer httputil.CloseOnCancel(ctx, body)()
+	// Recover is deferred last so it runs first: a panic surfaces as an error
+	// event before the channel closes, instead of crashing the process.
+	defer safego.Recover(nil, func(err error) {
+		select {
+		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+		case <-ctx.Done():
+		}
+	})
 
 	providerName := params.ProviderName
 	if providerName == "" {
@@ -116,6 +139,7 @@ func DecodeSSEStream(
 					Type:            ai.StreamEventFinish,
 					FinishReason:    ai.FinishReasonStop,
 					RawFinishReason: "stop",
+					Warnings:        params.EncodeWarnings,
 				}
 			}
 			return
@@ -130,7 +154,7 @@ func DecodeSSEStream(
 			return
 		}
 
-		emitChunkEvents(chunk, ch, params.MetadataExtractor, params.SourceExtractor, &finishEmitted)
+		emitChunkEvents(chunk, ch, params, &finishEmitted)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -144,31 +168,71 @@ func DecodeSSEStream(
 	}
 }
 
+// emitUsageEvent emits a StreamEventUsage for a chunk that carries token counts.
+// Usage may arrive on a chunk with empty choices, so it is handled separately
+// from the choice-driven events below.
+func emitUsageEvent(chunk StreamChunk, ch chan<- ai.StreamEvent) {
+	if chunk.Usage == nil {
+		return
+	}
+	u := chunk.Usage
+	var cachedTokens, cacheWriteTokens int
+	if u.PromptTokensDetails != nil {
+		cachedTokens = u.PromptTokensDetails.CachedTokens
+		cacheWriteTokens = u.PromptTokensDetails.CacheWriteTokens
+	}
+	reasoningTokens := u.ThoughtsTokenCount
+	if u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens != 0 {
+		reasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+	// prompt_tokens already includes cached and cache-write tokens; the
+	// non-cached remainder is what is left after removing them.
+	noCache := u.PromptTokens - cachedTokens - cacheWriteTokens
+	if noCache < 0 {
+		noCache = 0
+	}
+	ch <- ai.StreamEvent{
+		Type: ai.StreamEventUsage,
+		Usage: &ai.Usage{
+			InputTokens: u.PromptTokens,
+			InputTokenDetails: ai.InputTokenDetails{
+				NoCacheTokens:    noCache,
+				CacheReadTokens:  cachedTokens,
+				CacheWriteTokens: cacheWriteTokens,
+			},
+			OutputTokens: u.CompletionTokens,
+			OutputTokenDetails: ai.OutputTokenDetails{
+				TextTokens:      u.CompletionTokens - reasoningTokens,
+				ReasoningTokens: reasoningTokens,
+			},
+			TotalTokens: u.TotalTokens,
+			Raw: map[string]any{
+				"prompt_tokens":     u.PromptTokens,
+				"completion_tokens": u.CompletionTokens,
+				"total_tokens":      u.TotalTokens,
+				"cached_tokens":     cachedTokens,
+				"reasoning_tokens":  reasoningTokens,
+			},
+		},
+	}
+}
+
 func emitChunkEvents(
 	chunk StreamChunk,
 	ch chan<- ai.StreamEvent,
-	metaExtractor func(StreamChunk) map[string]any,
-	sourceExtractor func(StreamChunk) []ai.Source,
+	params SSEDecodeParams,
 	finishEmitted *bool,
 ) {
+	metaExtractor := params.MetadataExtractor
+	sourceExtractor := params.SourceExtractor
+
 	// Emit usage when present (may arrive on a chunk with empty choices).
-	if chunk.Usage != nil {
-		ch <- ai.StreamEvent{
-			Type: ai.StreamEventUsage,
-			Usage: &ai.Usage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
-				TotalTokens:      chunk.Usage.TotalTokens,
-				ReasoningTokens:  chunk.Usage.ThoughtsTokenCount,
-			},
-		}
-	}
+	emitUsageEvent(chunk, ch)
 
 	// Emit sources extracted from this chunk (e.g. Gemini grounding chunks).
 	if sourceExtractor != nil {
 		for _, src := range sourceExtractor(chunk) {
-			s := src // copy for pointer safety
-			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &s}
+			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &src}
 		}
 	}
 
@@ -188,6 +252,7 @@ func emitChunkEvents(
 			FinishReason:     MapFinishReason(choice.FinishReason),
 			RawFinishReason:  choice.FinishReason,
 			ProviderMetadata: meta,
+			Warnings:         params.EncodeWarnings,
 		}
 		*finishEmitted = true
 	}

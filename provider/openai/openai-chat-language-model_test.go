@@ -111,9 +111,9 @@ func TestChatLanguageModel_Stream_RequestShape(t *testing.T) {
 	})
 
 	req := ai.LanguageModelRequest{
-		System:   "You are helpful",
-		Messages: []ai.Message{ai.UserMessage("what is 2+2?")},
-		Settings: ai.CallSettings{MaxTokens: 100},
+		Instructions: "You are helpful",
+		Messages:     []ai.Message{ai.UserMessage("what is 2+2?")},
+		Settings:     ai.CallSettings{MaxTokens: 100},
 	}
 	ch, err := m.Stream(context.Background(), req)
 	if err != nil {

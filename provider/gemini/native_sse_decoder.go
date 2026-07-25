@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // --------------------------------------------------------------------
@@ -58,6 +61,33 @@ type nativeUsageMetadata struct {
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
 }
 
+// nativeUsageToAI maps Gemini usage metadata to the v7 nested usage shape.
+// promptTokenCount already includes cached content, so the non-cached count is
+// the remainder after subtracting cachedContentTokenCount.
+func nativeUsageToAI(u *nativeUsageMetadata) *ai.Usage {
+	noCache := u.PromptTokenCount - u.CachedContentTokenCount
+	if noCache < 0 {
+		noCache = 0
+	}
+	return &ai.Usage{
+		InputTokens: u.PromptTokenCount,
+		InputTokenDetails: ai.InputTokenDetails{
+			NoCacheTokens:   noCache,
+			CacheReadTokens: u.CachedContentTokenCount,
+		},
+		OutputTokens:       u.CandidatesTokenCount,
+		OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: u.ThoughtsTokenCount},
+		TotalTokens:        u.TotalTokenCount,
+		Raw: map[string]any{
+			"promptTokenCount":        u.PromptTokenCount,
+			"candidatesTokenCount":    u.CandidatesTokenCount,
+			"totalTokenCount":         u.TotalTokenCount,
+			"thoughtsTokenCount":      u.ThoughtsTokenCount,
+			"cachedContentTokenCount": u.CachedContentTokenCount,
+		},
+	}
+}
+
 type nativeGroundingMetadata struct {
 	WebSearchQueries  []string               `json:"webSearchQueries"`
 	GroundingChunks   []nativeGroundingChunk `json:"groundingChunks"`
@@ -101,15 +131,27 @@ type nativeMapsChunk struct {
 func decodeNativeSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- ai.StreamEvent) {
 	defer close(ch)
 	defer body.Close()
+	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
+	// watcher on normal completion.
+	defer httputil.CloseOnCancel(ctx, body)()
+	// Recover is deferred last so it runs first: a panic surfaces as an error
+	// event before the channel closes, instead of crashing the process.
+	defer safego.Recover(nil, func(err error) {
+		select {
+		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+		case <-ctx.Done():
+		}
+	})
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// bufio.Reader has no per-line size cap, so a single data: line larger than
+	// a Scanner's token limit (e.g. a base64 image) no longer kills the stream.
+	reader := bufio.NewReader(body)
 
 	seen := make(map[string]bool)
 	var lastGoogleMeta map[string]any
 	toolCallIndex := 0
 
-	for scanner.Scan() {
+	for {
 		select {
 		case <-ctx.Done():
 			ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()}
@@ -117,31 +159,32 @@ func decodeNativeSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- ai
 		default:
 		}
 
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "" {
-			continue
-		}
-
-		var chunk nativeSSEChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
 			ch <- ai.StreamEvent{
 				Type:  ai.StreamEventError,
-				Error: fmt.Errorf("gemini-native: unmarshal chunk: %w", err),
+				Error: fmt.Errorf("gemini-native: read stream: %w", err),
 			}
-			continue
+			return
 		}
 
-		emitNativeChunkEvents(chunk, ch, seen, &lastGoogleMeta, &toolCallIndex)
-	}
+		line = strings.TrimRight(line, "\r\n")
+		if strings.HasPrefix(line, "data: ") {
+			if data := strings.TrimPrefix(line, "data: "); data != "" {
+				var chunk nativeSSEChunk
+				if jsonErr := json.Unmarshal([]byte(data), &chunk); jsonErr != nil {
+					ch <- ai.StreamEvent{
+						Type:  ai.StreamEventError,
+						Error: fmt.Errorf("gemini-native: unmarshal chunk: %w", jsonErr),
+					}
+				} else {
+					emitNativeChunkEvents(chunk, ch, seen, &lastGoogleMeta, &toolCallIndex)
+				}
+			}
+		}
 
-	if err := scanner.Err(); err != nil {
-		ch <- ai.StreamEvent{
-			Type:  ai.StreamEventError,
-			Error: fmt.Errorf("gemini-native: read stream: %w", err),
+		if errors.Is(err, io.EOF) {
+			return
 		}
 	}
 }
@@ -167,8 +210,7 @@ func emitNativeChunkEvents(
 
 		// 1. Sources from grounding metadata.
 		for _, src := range extractNativeGroundingSources(cand.GroundingMetadata, seen) {
-			s := src
-			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &s}
+			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &src}
 		}
 
 		// 2. Content parts.
@@ -208,9 +250,9 @@ func emitNativeChunkEvents(
 					decoded, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 					if err == nil {
 						ch <- ai.StreamEvent{
-							Type:         ai.StreamEventFileDelta,
-							FileData:     decoded,
-							FileMimeType: part.InlineData.MimeType,
+							Type:          ai.StreamEventFileDelta,
+							FileData:      decoded,
+							FileMediaType: part.InlineData.MediaType,
 						}
 					}
 				}
@@ -220,13 +262,8 @@ func emitNativeChunkEvents(
 		// 3. Usage (emit before finish so consumers see token counts first).
 		if chunk.UsageMetadata != nil {
 			ch <- ai.StreamEvent{
-				Type: ai.StreamEventUsage,
-				Usage: &ai.Usage{
-					PromptTokens:     chunk.UsageMetadata.PromptTokenCount,
-					CompletionTokens: chunk.UsageMetadata.CandidatesTokenCount,
-					TotalTokens:      chunk.UsageMetadata.TotalTokenCount,
-					ReasoningTokens:  chunk.UsageMetadata.ThoughtsTokenCount,
-				},
+				Type:  ai.StreamEventUsage,
+				Usage: nativeUsageToAI(chunk.UsageMetadata),
 			}
 		}
 
@@ -251,13 +288,8 @@ func emitNativeChunkEvents(
 	// No candidates — might still have usage metadata.
 	if chunk.UsageMetadata != nil {
 		ch <- ai.StreamEvent{
-			Type: ai.StreamEventUsage,
-			Usage: &ai.Usage{
-				PromptTokens:     chunk.UsageMetadata.PromptTokenCount,
-				CompletionTokens: chunk.UsageMetadata.CandidatesTokenCount,
-				TotalTokens:      chunk.UsageMetadata.TotalTokenCount,
-				ReasoningTokens:  chunk.UsageMetadata.ThoughtsTokenCount,
-			},
+			Type:  ai.StreamEventUsage,
+			Usage: nativeUsageToAI(chunk.UsageMetadata),
 		}
 	}
 }

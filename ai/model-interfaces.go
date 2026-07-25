@@ -1,6 +1,10 @@
 package ai
 
-import "context"
+import (
+	"context"
+
+	"github.com/open-ai-sdk/ai-go/aitypes"
+)
 
 // LanguageModel is the interface a provider must implement for chat/text generation.
 type LanguageModel interface {
@@ -8,6 +12,12 @@ type LanguageModel interface {
 	ModelID() string
 
 	// Stream starts a streaming chat completion and returns a channel of StreamEvents.
+	//
+	// Context contract: Stream must stop producing and close its channel when ctx
+	// is cancelled, releasing any underlying resources (e.g. the HTTP response
+	// body). Every send on the returned channel must select on ctx.Done() so a
+	// stalled consumer cannot park the producer. Callers that stop reading before
+	// the channel closes must cancel ctx; they are not required to drain.
 	Stream(ctx context.Context, req LanguageModelRequest) (<-chan StreamEvent, error)
 }
 
@@ -26,8 +36,8 @@ type EmbeddingModel interface {
 // LanguageModelRequest is the normalized input passed to LanguageModel.Stream.
 // Providers should read ToolChoice to determine the tool selection policy.
 type LanguageModelRequest struct {
-	// System is the system prompt, already resolved from GenerateTextRequest.System.
-	System string
+	// Instructions is the system prompt, already resolved from GenerateTextRequest.Instructions.
+	Instructions string
 	// Messages is the full conversation history for this step.
 	Messages []Message
 	// Tools is the list of callable function tools available for this step.
@@ -42,78 +52,22 @@ type LanguageModelRequest struct {
 	ProviderOptions map[string]any
 }
 
-// Warning is a non-fatal advisory from the provider or SDK layer.
-type Warning struct {
-	// Type identifies the warning kind: "unsupported-setting", "other", etc.
-	Type    string
-	Message string
-	// Setting is set when Type == "unsupported-setting".
-	Setting string
-}
-
-// StreamEventType identifies the kind of event emitted during streaming.
-type StreamEventType int
-
-const (
-	StreamEventTextDelta StreamEventType = iota
-	StreamEventReasoningDelta
-	StreamEventToolCallDelta
-	StreamEventUsage
-	StreamEventFinish
-	StreamEventError
-	// StreamEventSource carries a source (web search result, document reference, etc.)
-	StreamEventSource
-	// StreamEventFileDelta carries a file/image output part from the model.
-	StreamEventFileDelta
+// Warning, Source, StreamEvent and the StreamEventType enum are aliases of the
+// shared aitypes package (see ai/types.go for the full alias set).
+type (
+	Warning         = aitypes.Warning
+	StreamEventType = aitypes.StreamEventType
+	Source          = aitypes.Source
+	StreamEvent     = aitypes.StreamEvent
 )
 
-// Source represents a single source reference from a provider-native tool such as web search.
-type Source struct {
-	// SourceType is "url" for web results, "document" for file/doc references, or a provider-specific string.
-	SourceType string
-	// ID is an optional provider-assigned identifier for dedup.
-	ID string
-	// URL is set when SourceType == "url".
-	URL string
-	// Title is a human-readable title for the source.
-	Title string
-	// ProviderMetadata holds provider-specific extra fields.
-	ProviderMetadata map[string]any
-}
-
-// StreamEvent is a single normalized event from a LanguageModel stream.
-type StreamEvent struct {
-	Type StreamEventType
-
-	// TextDelta is set for StreamEventTextDelta and StreamEventReasoningDelta.
-	TextDelta string
-
-	// Tool call fields are set for StreamEventToolCallDelta.
-	ToolCallIndex     int
-	ToolCallID        string
-	ToolCallName      string
-	ToolCallArgsDelta string
-	ThoughtSignature  string
-
-	// Usage is set for StreamEventUsage.
-	Usage *Usage
-
-	// FinishReason is set for StreamEventFinish.
-	FinishReason FinishReason
-	// RawFinishReason is the unmodified finish reason string from the provider.
-	RawFinishReason string
-	// ProviderMetadata carries provider-specific metadata attached at finish.
-	ProviderMetadata map[string]any
-	// Warnings carries non-fatal advisories from the provider.
-	Warnings []Warning
-
-	// Source is set for StreamEventSource.
-	Source *Source
-
-	// File fields are set for StreamEventFileDelta.
-	FileData     []byte
-	FileMimeType string
-
-	// Error is set for StreamEventError.
-	Error error
-}
+const (
+	StreamEventTextDelta      = aitypes.StreamEventTextDelta
+	StreamEventReasoningDelta = aitypes.StreamEventReasoningDelta
+	StreamEventToolCallDelta  = aitypes.StreamEventToolCallDelta
+	StreamEventUsage          = aitypes.StreamEventUsage
+	StreamEventFinish         = aitypes.StreamEventFinish
+	StreamEventError          = aitypes.StreamEventError
+	StreamEventSource         = aitypes.StreamEventSource
+	StreamEventFileDelta      = aitypes.StreamEventFileDelta
+)

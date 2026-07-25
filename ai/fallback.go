@@ -2,9 +2,10 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // FallbackModel tries models in order, falling back on transient errors.
@@ -55,7 +56,20 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 
 		// Peek at the first event to detect immediate stream errors.
 		// If the first event is an error and retryable, try the next model.
-		firstEvent, ok := <-ch
+		// Honour caller cancellation while waiting: a primary that stalls after
+		// opening the stream must not pin the caller past its own deadline.
+		var firstEvent StreamEvent
+		var ok bool
+		select {
+		case firstEvent, ok = <-ch:
+		case <-ctx.Done():
+			go func() {
+				defer safego.Recover(nil, nil)
+				for range ch {
+				}
+			}()
+			return nil, ctx.Err()
+		}
 		if !ok {
 			// Channel closed immediately — empty stream, return it.
 			out := make(chan StreamEvent)
@@ -67,6 +81,7 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 				lastErr = firstEvent.Error
 				// Drain remaining events to prevent goroutine leak
 				go func() {
+					defer safego.Recover(nil, nil)
 					for range ch {
 					}
 				}()
@@ -74,13 +89,40 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 			}
 		}
 
-		// Re-emit the first event followed by the rest of the stream.
+		// Re-emit the first event followed by the rest of the stream. Sends are
+		// guarded on ctx so an abandoning consumer cannot park this goroutine;
+		// on early exit the upstream is drained so its body is released.
 		out := make(chan StreamEvent, 64)
 		go func() {
 			defer close(out)
-			out <- firstEvent
+			// A panic while re-emitting surfaces as an error event (ctx-guarded)
+			// before close rather than crashing the process.
+			defer safego.Recover(nil, func(err error) {
+				select {
+				case out <- StreamEvent{Type: StreamEventError, Error: err}:
+				case <-ctx.Done():
+				}
+			})
+			send := func(ev StreamEvent) bool {
+				select {
+				case out <- ev:
+					return true
+				case <-ctx.Done():
+					go func() {
+						defer safego.Recover(nil, nil)
+						for range ch {
+						}
+					}()
+					return false
+				}
+			}
+			if !send(firstEvent) {
+				return
+			}
 			for ev := range ch {
-				out <- ev
+				if !send(ev) {
+					return
+				}
 			}
 		}()
 		return out, nil
@@ -91,28 +133,10 @@ func (f *FallbackModel) Stream(ctx context.Context, req LanguageModelRequest) (<
 	)
 }
 
-// isFallbackRetryable returns true for errors that warrant trying the next model.
+// isFallbackRetryable reports whether err warrants trying the next model. It
+// shares isRetryable's typed classification (status code + network error type),
+// so falling over to the next provider is never triggered by attacker-echoed
+// message text in a 400 body.
 func isFallbackRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Don't retry on context cancellation
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	s := err.Error()
-	// Transient: rate limit, server errors, timeouts
-	for _, code := range []string{"429", "500", "502", "503", "529"} {
-		if strings.Contains(s, "status "+code) ||
-			strings.Contains(s, "unexpected status "+code) {
-			return true
-		}
-	}
-	if strings.Contains(s, "i/o timeout") ||
-		strings.Contains(s, "connection refused") ||
-		strings.Contains(s, "connection reset") ||
-		strings.Contains(s, "EOF") {
-		return true
-	}
-	return false
+	return isRetryable(err)
 }

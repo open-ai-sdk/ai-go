@@ -51,10 +51,10 @@ func TestUploadFile_Success(t *testing.T) {
 
 	model := NewLanguageModel("gpt-4o", Config{APIKey: "test-key", BaseURL: srv.URL})
 	got, err := model.UploadFile(context.Background(), UploadFileRequest{
-		Filename: "report.pdf",
-		Purpose:  FilePurposeUserData,
-		Data:     []byte("fake pdf content"),
-		MimeType: "application/pdf",
+		Filename:  "report.pdf",
+		Purpose:   FilePurposeUserData,
+		Data:      []byte("fake pdf content"),
+		MediaType: "application/pdf",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -167,7 +167,7 @@ func TestUploadFile_DefaultMimeType(t *testing.T) {
 		Filename: "data.bin",
 		Purpose:  FilePurposeBatch,
 		Data:     []byte("data"),
-		// MimeType intentionally omitted to test default.
+		// MediaType intentionally omitted to test default.
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

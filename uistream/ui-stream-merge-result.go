@@ -1,14 +1,17 @@
 package uistream
 
 import (
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"sync"
+
+	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamEventer is satisfied by *ai.StreamResult; using an interface avoids
 // an import cycle between the uistream and ai packages.
 type StreamEventer interface {
-	Events() <-chan engine.StepEvent
-	// DrainUnused prevents fan-out deadlocks when only Events() is consumed.
+	Stream() <-chan aitypes.StepEvent
+	// DrainUnused prevents fan-out deadlocks when only Stream() is consumed.
 	DrainUnused()
 }
 
@@ -16,7 +19,7 @@ type StreamEventer interface {
 type mergeConfig struct {
 	toolResultHook     ToolResultHook
 	sourceHook         SourceHook
-	onFinish           func(text string)
+	onEnd              func(text string)
 	persistenceBuilder *PersistedMessageBuilder
 }
 
@@ -37,10 +40,10 @@ func MergeWithSourceHook(hook SourceHook) MergeOption {
 	}
 }
 
-// MergeWithOnFinish sets a callback invoked when the merged stream completes.
-func MergeWithOnFinish(fn func(text string)) MergeOption {
+// MergeWithOnEnd sets a callback invoked when the merged stream completes.
+func MergeWithOnEnd(fn func(text string)) MergeOption {
 	return func(c *mergeConfig) {
-		c.onFinish = fn
+		c.onEnd = fn
 	}
 }
 
@@ -72,7 +75,7 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 	// Drain unused channels to prevent fan-out goroutine deadlock.
 	sr.DrainUnused()
 
-	ch := sr.Events()
+	ch := sr.Stream()
 
 	// If a tool result hook is set, intercept events before the producer.
 	producerCh := ch
@@ -81,20 +84,29 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 		argsJSON string
 		output   string
 	}
-	var toolCache map[string]toolData
+	// toolCache is written by the interceptor goroutine below and read by the
+	// main loop, so a mutex guards it — a concurrent map read/write is a fatal
+	// runtime error that recover cannot catch.
+	var (
+		toolCache   map[string]toolData
+		toolCacheMu sync.Mutex
+	)
 	if cfg.toolResultHook != nil {
 		toolCache = make(map[string]toolData)
-		intercepted := make(chan engine.StepEvent, 64)
+		intercepted := make(chan aitypes.StepEvent, 64)
 		go func() {
 			defer close(intercepted)
+			defer safego.Recover(nil, recoverToEvent(intercepted))
 			for ev := range ch {
-				if ev.Type == engine.StepEventToolResult && ev.ToolResult != nil {
+				if ev.Type == aitypes.StepEventToolResult && ev.ToolResult != nil {
 					tr := ev.ToolResult
+					toolCacheMu.Lock()
 					toolCache[tr.ID] = toolData{
 						toolName: tr.Name,
 						argsJSON: tr.Args,
 						output:   tr.Output,
 					}
+					toolCacheMu.Unlock()
 				}
 				intercepted <- ev
 			}
@@ -104,9 +116,15 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 
 	cs := producer.Produce(producerCh)
 
+	// Once a write fails the client has disconnected; stop writing but keep
+	// draining so the producer never blocks, and keep observing for persistence.
+	var writeErr error
 	for c := range cs.Chunks {
 		if cfg.persistenceBuilder != nil {
 			cfg.persistenceBuilder.ObserveChunk(c)
+		}
+		if writeErr != nil {
+			continue
 		}
 		switch c.Type {
 		case ChunkFinish:
@@ -118,9 +136,9 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 			if !ok {
 				msg = "stream error"
 			}
-			wr.WriteError(msg)
+			writeErr = wr.WriteError(msg)
 		default:
-			wr.WriteChunk(c.Type, c.Fields)
+			writeErr = wr.WriteChunk(c.Type, c.Fields)
 
 			if c.Type == ChunkSourceURL && cfg.sourceHook != nil {
 				sid, ok1 := c.Fields["sourceId"].(string)
@@ -135,7 +153,10 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 			if c.Type == ChunkToolOutputAvailable && cfg.toolResultHook != nil {
 				tcID, ok := c.Fields["toolCallId"].(string)
 				if ok {
-					if td, found := toolCache[tcID]; found {
+					toolCacheMu.Lock()
+					td, found := toolCache[tcID]
+					toolCacheMu.Unlock()
+					if found {
 						cfg.toolResultHook(wr, ToolResult{
 							ToolCallID: tcID,
 							ToolName:   td.toolName,
@@ -150,8 +171,8 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 
 	text := cs.FullText()
 
-	if cfg.onFinish != nil {
-		cfg.onFinish(text)
+	if cfg.onEnd != nil {
+		cfg.onEnd(text)
 	}
 
 	return text

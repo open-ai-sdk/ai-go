@@ -17,14 +17,14 @@ func TestToAIContentParts_ImageFileID(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeImage {
-		t.Errorf("expected type image_url, got %q", p.Type)
+	if p.Type != ai.ContentPartTypeFile {
+		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileID != "file-abc123" {
 		t.Errorf("expected FileID=file-abc123, got %q", p.FileID)
 	}
-	if p.ImageURL != "" {
-		t.Errorf("expected ImageURL empty, got %q", p.ImageURL)
+	if p.FileURL != "" {
+		t.Errorf("expected FileURL empty, got %q", p.FileURL)
 	}
 	if len(p.Data) != 0 {
 		t.Errorf("expected Data empty, got %v", p.Data)
@@ -43,14 +43,14 @@ func TestToAIContentParts_ImageData(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeImage {
-		t.Errorf("expected type image_url, got %q", p.Type)
+	if p.Type != ai.ContentPartTypeFile {
+		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if string(p.Data) != string(data) {
 		t.Errorf("expected Data=%v, got %v", data, p.Data)
 	}
-	if p.MimeType != "image/png" {
-		t.Errorf("expected MimeType=image/png, got %q", p.MimeType)
+	if p.MediaType != "image/png" {
+		t.Errorf("expected MediaType=image/png, got %q", p.MediaType)
 	}
 	if p.FileID != "" {
 		t.Errorf("expected FileID empty, got %q", p.FileID)
@@ -68,11 +68,11 @@ func TestToAIContentParts_ImageURL(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeImage {
-		t.Errorf("expected type image_url, got %q", p.Type)
+	if p.Type != ai.ContentPartTypeFile {
+		t.Errorf("expected type file, got %q", p.Type)
 	}
-	if p.ImageURL != "https://example.com/img.png" {
-		t.Errorf("expected ImageURL=https://example.com/img.png, got %q", p.ImageURL)
+	if p.FileURL != "https://example.com/img.png" {
+		t.Errorf("expected FileURL=https://example.com/img.png, got %q", p.FileURL)
 	}
 }
 
@@ -93,8 +93,8 @@ func TestToAIContentParts_FileFileID(t *testing.T) {
 	if p.FileID != "file-xyz" {
 		t.Errorf("expected FileID=file-xyz, got %q", p.FileID)
 	}
-	if p.MimeType != "application/pdf" {
-		t.Errorf("expected MimeType=application/pdf, got %q", p.MimeType)
+	if p.MediaType != "application/pdf" {
+		t.Errorf("expected MediaType=application/pdf, got %q", p.MediaType)
 	}
 }
 
@@ -116,8 +116,8 @@ func TestToAIContentParts_FileData(t *testing.T) {
 	if string(p.Data) != string(data) {
 		t.Errorf("expected Data=%v, got %v", data, p.Data)
 	}
-	if p.MimeType != "application/pdf" {
-		t.Errorf("expected MimeType=application/pdf, got %q", p.MimeType)
+	if p.MediaType != "application/pdf" {
+		t.Errorf("expected MediaType=application/pdf, got %q", p.MediaType)
 	}
 	if p.Filename != "report.pdf" {
 		t.Errorf("expected Filename=report.pdf, got %q", p.Filename)
@@ -146,8 +146,8 @@ func TestToAIContentParts_FileURL(t *testing.T) {
 	if p.FileURL != "https://cdn.example.com/doc.pdf" {
 		t.Errorf("expected FileURL=https://cdn.example.com/doc.pdf, got %q", p.FileURL)
 	}
-	if p.MimeType != "application/pdf" {
-		t.Errorf("expected MimeType=application/pdf, got %q", p.MimeType)
+	if p.MediaType != "application/pdf" {
+		t.Errorf("expected MediaType=application/pdf, got %q", p.MediaType)
 	}
 	if p.Filename != "doc.pdf" {
 		t.Errorf("expected Filename=doc.pdf, got %q", p.Filename)

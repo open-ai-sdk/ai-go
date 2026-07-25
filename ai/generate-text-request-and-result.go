@@ -1,13 +1,16 @@
 package ai
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"log/slog"
+)
 
 // GenerateTextRequest is the input to GenerateText and StreamText.
 type GenerateTextRequest struct {
 	// Model is the language model to call.
 	Model LanguageModel
-	// System is an optional system prompt prepended before the conversation.
-	System string
+	// Instructions is an optional system prompt prepended before the conversation.
+	Instructions string
 	// Messages is the conversation history.
 	Messages []Message
 	// Tools is an optional set of callable functions for multi-step tool loops.
@@ -15,42 +18,64 @@ type GenerateTextRequest struct {
 	// ToolChoice controls which tool(s) the model may call. Defaults to ToolChoiceAuto.
 	// Ignored when Tools is nil.
 	ToolChoice *ToolChoice
-	// StopWhen is an optional custom stop condition for the tool loop.
+	// StopWhen is a custom stop condition for the tool loop. Nil defaults to
+	// IsStepCount(1) — a single step (node parity: generateText/streamText
+	// default to stopWhen=isStepCount(1)). Tool calls made in that step still
+	// execute; only a follow-up model call is gated. Use IsStepCount(n),
+	// Never(), or a custom StopCondition for a real multi-step loop.
 	StopWhen StopCondition
 	// Output optionally constrains the model's output to a JSON schema or mode.
 	Output *OutputSchema
 	// Settings controls per-request model parameters (temperature, maxTokens, etc.).
 	Settings CallSettings
-	// MaxSteps limits the number of tool-loop iterations. Defaults to 10.
+	// MaxSteps caps the number of tool-loop iterations. Zero means unbounded:
+	// StopWhen (or the model naturally stopping — no tool calls) becomes the
+	// only gate. There is no implicit default step count.
 	MaxSteps int
 	// ProviderOptions carries provider-specific options keyed by provider name.
 	// Example: map[string]any{"openai": map[string]any{"previousResponseId": "r_abc"}}.
 	ProviderOptions map[string]any
 	// PrepareStep is called before each tool-loop step to allow per-step overrides.
 	PrepareStep PrepareStepFunc
-	// ExperimentalRepairToolCall attempts to repair invalid or unknown tool calls
-	// before they are surfaced as invalid. Experimental and subject to change.
-	ExperimentalRepairToolCall ExperimentalRepairToolCallFunc
+	// RepairToolCall attempts to repair invalid or unknown tool calls
+	// before they are surfaced as invalid.
+	RepairToolCall RepairToolCallFunc
 	// ActiveTools filters the tool set to only these tool names. Nil means all tools.
-	ActiveTools []string
-	// OnStepFinish is called after each step completes.
-	OnStepFinish func(StepFinishEvent)
-	// OnFinish is called when the entire run completes.
-	OnFinish func(FinishEvent)
+	ActiveTools           []string
+	ToolsContext          ToolsContext
+	RuntimeContext        RuntimeContext
+	ToolApproval          map[string]ToolApprovalFunc
+	ToolApprovalResponder ToolApprovalResponder
+	// OnStepEnd is called after each step completes.
+	OnStepEnd func(StepEndEvent)
+	// OnEnd is called when the entire run completes.
+	OnEnd func(EndEvent)
 	// OnChunk is called for every engine event during streaming.
 	OnChunk func(ChunkEvent)
 	// OnError is called when an error occurs during the run.
 	OnError func(error)
 	// SmoothStream enables smooth text streaming with configurable chunking.
-	// Only used by StreamText; ignored by GenerateText.
+	// Applied by StreamText; GenerateText explicitly disables it so a
+	// non-streaming call pays no per-chunk delay.
 	SmoothStream *SmoothStream
-	// Middlewares holds deferred model middlewares set via WithMiddleware.
-	// Applied after model resolution in Runtime.buildRequest.
+	// Middlewares holds deferred model middlewares set via WithMiddleware or
+	// WithRetry. Applied (and cleared) by StreamText, and earlier by
+	// Runtime.buildRequest on the facade path — both honour them.
 	Middlewares []LanguageModelMiddleware
 	// ParallelToolExecution enables parallel execution of tool calls within a step.
 	ParallelToolExecution bool
 	// MaxParallelTools limits concurrent tool executions. Default: 5.
 	MaxParallelTools int
+	// Logger, when set via WithLogger, receives structured diagnostics
+	// (recovered panics, dropped provider error bodies). Nil — the
+	// default — produces no output at all; the SDK never writes to
+	// slog.Default().
+	Logger *slog.Logger
+	// TraceContent, when set via WithTraceContent(true), attaches prompt,
+	// completion, and tool-argument content to trace spans. Default false:
+	// spans carry only metadata (model ID, step number, tool name, usage,
+	// finish reason), never content.
+	TraceContent bool
 }
 
 // StepOutput holds the result of a single tool-loop step.
@@ -81,11 +106,13 @@ type ToolCallOutput struct {
 
 // GenerateTextResult holds the full output of a GenerateText call.
 type GenerateTextResult struct {
-	Text             string
-	Reasoning        string
-	Steps            []StepOutput
+	Text      string
+	Reasoning string
+	Steps     []StepOutput
+	// FinalStep contains the complete final-step output. It is zero when no step completed.
+	FinalStep        StepOutput
 	ToolResults      []ToolResult
-	TotalUsage       Usage
+	Usage            Usage
 	FinishReason     FinishReason
 	RawFinishReason  string
 	ProviderMetadata map[string]any
@@ -100,8 +127,10 @@ type GenerateTextResult struct {
 
 // PrepareStepContext provides information about the current step for the PrepareStep callback.
 type PrepareStepContext struct {
-	StepNumber int
-	Steps      []PrepareStepInfo
+	StepNumber     int
+	Steps          []PrepareStepInfo
+	ToolsContext   ToolsContext
+	RuntimeContext RuntimeContext
 }
 
 // PrepareStepInfo holds information about a completed step for PrepareStep evaluation.
@@ -118,15 +147,15 @@ type PrepareStepResult struct {
 	Model           LanguageModel
 	ToolChoice      *ToolChoice
 	ActiveTools     []string
-	System          string
+	Instructions    string
 	ProviderOptions map[string]any
 }
 
 // PrepareStepFunc is called before each step to allow per-step configuration overrides.
 type PrepareStepFunc func(ctx PrepareStepContext) *PrepareStepResult
 
-// StepFinishEvent is passed to the OnStepFinish callback after each step.
-type StepFinishEvent struct {
+// StepEndEvent is passed to the OnStepEnd callback after each step.
+type StepEndEvent struct {
 	StepNumber       int
 	Text             string
 	Reasoning        string
@@ -139,12 +168,12 @@ type StepFinishEvent struct {
 	Response         Response
 }
 
-// FinishEvent is passed to the OnFinish callback when the entire run completes.
-type FinishEvent struct {
+// EndEvent is passed to the OnEnd callback when the entire run completes.
+type EndEvent struct {
 	Text             string
 	Reasoning        string
 	Steps            []StepOutput
-	TotalUsage       Usage
+	Usage            Usage
 	FinishReason     FinishReason
 	ProviderMetadata map[string]any
 	Response         Response
@@ -160,12 +189,22 @@ type ChunkEvent struct {
 	ToolCallArgsDelta string
 	StepNumber        int
 	FinishReason      FinishReason
+	// Typed payloads previously dropped by the flattening converter. Each is set
+	// only for the matching Type; consumers no longer lose Source/File/Usage/
+	// ToolResult/metadata data on an OnChunk callback. Note: the slice and map
+	// fields make ChunkEvent non-comparable with ==.
+	Usage            *Usage
+	Source           *Source
+	ToolResult       *ToolResult
+	FileData         []byte
+	FileMediaType    string
+	ProviderMetadata map[string]any
 }
 
 // GeneratedFile holds a file (typically an image) output from the model.
 type GeneratedFile struct {
 	// Data is the raw file bytes.
 	Data []byte
-	// MimeType is the MIME type of the file (e.g. "image/png").
-	MimeType string
+	// MediaType is the MIME type of the file (e.g. "image/png").
+	MediaType string
 }

@@ -98,8 +98,8 @@ data: {"candidates":[{"content":{"parts":[{"text":"The answer is 42."}],"role":"
 	if usageEvent == nil {
 		t.Fatal("expected usage event")
 	}
-	if usageEvent.Usage.ReasoningTokens != 8 {
-		t.Errorf("expected 8 reasoning tokens, got %d", usageEvent.Usage.ReasoningTokens)
+	if usageEvent.Usage.OutputTokenDetails.ReasoningTokens != 8 {
+		t.Errorf("expected 8 reasoning tokens, got %d", usageEvent.Usage.OutputTokenDetails.ReasoningTokens)
 	}
 }
 
@@ -155,17 +155,17 @@ func TestDecodeNativeSSE_UsageMapping(t *testing.T) {
 	if usage == nil {
 		t.Fatal("expected usage event")
 	}
-	if usage.PromptTokens != 10 {
-		t.Errorf("expected 10 prompt tokens, got %d", usage.PromptTokens)
+	if usage.InputTokens != 10 {
+		t.Errorf("expected 10 prompt tokens, got %d", usage.InputTokens)
 	}
-	if usage.CompletionTokens != 20 {
-		t.Errorf("expected 20 completion tokens, got %d", usage.CompletionTokens)
+	if usage.OutputTokens != 20 {
+		t.Errorf("expected 20 completion tokens, got %d", usage.OutputTokens)
 	}
 	if usage.TotalTokens != 30 {
 		t.Errorf("expected 30 total tokens, got %d", usage.TotalTokens)
 	}
-	if usage.ReasoningTokens != 5 {
-		t.Errorf("expected 5 reasoning tokens, got %d", usage.ReasoningTokens)
+	if usage.OutputTokenDetails.ReasoningTokens != 5 {
+		t.Errorf("expected 5 reasoning tokens, got %d", usage.OutputTokenDetails.ReasoningTokens)
 	}
 }
 

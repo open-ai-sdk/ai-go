@@ -8,6 +8,8 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // UploadOptions controls Kie file-upload helpers. UploadPath is required by
@@ -75,6 +77,13 @@ func (p *Provider) UploadFromReader(
 	errCh := make(chan error, 1)
 	go func() {
 		defer pw.Close()
+		// A panic in the writer (e.g. from a misbehaving reader) fails the pipe
+		// and signals errCh so the concurrent upload read unblocks instead of
+		// the process crashing or the parent deadlocking on errCh.
+		defer safego.Recover(nil, func(err error) {
+			pw.CloseWithError(err)
+			errCh <- err
+		})
 
 		fw, err := mw.CreateFormFile("file", filename)
 		if err != nil {

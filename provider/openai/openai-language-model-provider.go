@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -47,7 +48,9 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 		apiKey:       cfg.APIKey,
 		baseURL:      base,
 		chunkTimeout: cfg.ChunkTimeout,
-		client:       &http.Client{Timeout: timeout},
+		// Streaming path: no client-wide timeout (it would cap the whole SSE
+		// exchange); cfg.Timeout becomes a response-header deadline instead.
+		client: httputil.NewStreamingClient(timeout),
 	}
 }
 
@@ -63,7 +66,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		return nil, fmt.Errorf("openai: encode request: %w", err)
 	}
 
-	resp, err := m.doRequest(ctx, apiReq) //nolint:bodyclose // body closed by decodeResponsesSSEStream
+	resp, err := m.doRequest(ctx, apiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -73,13 +76,15 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		body = openaichat.NewTimeoutReader(resp.Body, m.chunkTimeout)
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
+	raw := make(chan ai.StreamEvent, 64)
 	go func() {
 		// Encoding warnings are merged onto the response.completed finish event
 		// inside the decoder so callers see them in GenerateTextResult.Warnings.
-		decodeResponsesSSEStream(ctx, body, ch, warnings...)
+		decodeResponsesSSEStream(ctx, body, raw, warnings...)
 	}()
-	return ch, nil
+	// GuardStream honours the Stream context contract: sends are ctx-guarded and
+	// the decoder is drained on cancel so its body is released.
+	return httputil.GuardStream(ctx, raw), nil
 }
 
 // GenerateText sends a non-streaming Responses API request and returns the
@@ -105,7 +110,8 @@ func (m *LanguageModel) GenerateText(ctx context.Context, req ai.LanguageModelRe
 }
 
 // doRequest marshals body, sends POST /responses, and returns the HTTP response.
-// Non-2xx responses are converted to errors with the body included.
+// Non-2xx responses become a typed *APIError; the body is parsed for code/message
+// then discarded, never embedded.
 func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) (*http.Response, error) {
 	body, err := json.Marshal(apiReq)
 	if err != nil {
@@ -125,12 +131,9 @@ func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) 
 		return nil, fmt.Errorf("openai: http request: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		errBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf("openai: unexpected status %d (failed to read body: %w)", resp.StatusCode, readErr)
-		}
-		return nil, fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(errBody))
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse(ctx, "openai", resp)
 	}
 	return resp, nil
 }

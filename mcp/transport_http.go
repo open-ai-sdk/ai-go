@@ -14,6 +14,16 @@ import (
 	"time"
 )
 
+// RedirectPolicy controls whether the transport follows HTTP redirects.
+type RedirectPolicy string
+
+const (
+	// RedirectError rejects redirects, which is the safe default for MCP endpoints.
+	RedirectError RedirectPolicy = "error"
+	// RedirectFollow opts into the net/http redirect behavior.
+	RedirectFollow RedirectPolicy = "follow"
+)
+
 // LatestProtocolVersion is the MCP protocol version advertised in HTTP headers.
 const LatestProtocolVersion = "2025-11-25"
 
@@ -23,8 +33,10 @@ type HTTPTransportConfig struct {
 	URL string
 	// Headers are additional HTTP headers sent with every request.
 	Headers map[string]string
-	// HTTPClient is an optional HTTP client; http.DefaultClient is used if nil.
+	// HTTPClient is an optional HTTP client. A caller-supplied client owns its redirect policy.
 	HTTPClient *http.Client
+	// Redirect defaults to RedirectError. Set RedirectFollow to opt in.
+	Redirect RedirectPolicy
 }
 
 // HTTPTransport implements Transport using the MCP Streamable HTTP protocol.
@@ -63,7 +75,12 @@ var _ Transport = (*HTTPTransport)(nil)
 func NewHTTPTransport(config HTTPTransportConfig) *HTTPTransport {
 	client := config.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{}
+		if config.Redirect != RedirectFollow {
+			client.CheckRedirect = func(*http.Request, []*http.Request) error {
+				return fmt.Errorf("mcp: redirect blocked")
+			}
+		}
 	}
 	return &HTTPTransport{
 		config: config,

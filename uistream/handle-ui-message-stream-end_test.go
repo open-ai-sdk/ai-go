@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestHandleUIMessageStreamFinish_OnFinishCalled(t *testing.T) {
+func TestHandleUIMessageStreamEnd_OnEndCalled(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart, Fields: map[string]any{"messageId": "msg-1"}},
 		{Type: ChunkTextStart, Fields: map[string]any{"id": "t1"}},
@@ -14,14 +14,14 @@ func TestHandleUIMessageStreamFinish_OnFinishCalled(t *testing.T) {
 		{Type: ChunkFinish, Fields: map[string]any{"finishReason": "stop"}},
 	}
 
-	var finishInfo FinishInfo
+	var endInfo EndInfo
 	var mu sync.Mutex
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "msg-1",
-		OnFinish: func(info FinishInfo) {
+		OnEnd: func(info EndInfo) {
 			mu.Lock()
-			finishInfo = info
+			endInfo = info
 			mu.Unlock()
 		},
 	})
@@ -30,28 +30,28 @@ func TestHandleUIMessageStreamFinish_OnFinishCalled(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if finishInfo.IsAborted {
+	if endInfo.IsAborted {
 		t.Error("expected IsAborted=false")
 	}
-	if finishInfo.IsContinuation {
+	if endInfo.IsContinuation {
 		t.Error("expected IsContinuation=false")
 	}
-	if finishInfo.ResponseMessage.ID != "msg-1" {
-		t.Errorf("expected message ID msg-1, got %q", finishInfo.ResponseMessage.ID)
+	if endInfo.ResponseMessage.ID != "msg-1" {
+		t.Errorf("expected message ID msg-1, got %q", endInfo.ResponseMessage.ID)
 	}
-	if finishInfo.FinishReason != "stop" {
-		t.Errorf("expected finishReason=stop, got %q", finishInfo.FinishReason)
+	if endInfo.FinishReason != "stop" {
+		t.Errorf("expected finishReason=stop, got %q", endInfo.FinishReason)
 	}
 	// Should have text part.
-	if len(finishInfo.ResponseMessage.Parts) != 1 {
-		t.Fatalf("expected 1 part, got %d", len(finishInfo.ResponseMessage.Parts))
+	if len(endInfo.ResponseMessage.Parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(endInfo.ResponseMessage.Parts))
 	}
-	if finishInfo.ResponseMessage.Parts[0]["text"] != "Hello World" {
-		t.Errorf("expected 'Hello World', got %v", finishInfo.ResponseMessage.Parts[0]["text"])
+	if endInfo.ResponseMessage.Parts[0]["text"] != "Hello World" {
+		t.Errorf("expected 'Hello World', got %v", endInfo.ResponseMessage.Parts[0]["text"])
 	}
 }
 
-func TestHandleUIMessageStreamFinish_OnStepFinishCalled(t *testing.T) {
+func TestHandleUIMessageStreamEnd_OnStepEndCalled(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart, Fields: map[string]any{"messageId": "msg-2"}},
 		{Type: ChunkStartStep},
@@ -67,12 +67,12 @@ func TestHandleUIMessageStreamFinish_OnStepFinishCalled(t *testing.T) {
 		{Type: ChunkFinish, Fields: map[string]any{"finishReason": "stop"}},
 	}
 
-	var stepInfos []StepFinishInfo
+	var stepInfos []StepEndInfo
 	var mu sync.Mutex
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "msg-2",
-		OnStepFinish: func(info StepFinishInfo) {
+		OnStepEnd: func(info StepEndInfo) {
 			mu.Lock()
 			stepInfos = append(stepInfos, info)
 			mu.Unlock()
@@ -84,7 +84,7 @@ func TestHandleUIMessageStreamFinish_OnStepFinishCalled(t *testing.T) {
 	defer mu.Unlock()
 
 	if len(stepInfos) != 2 {
-		t.Fatalf("expected 2 step finish callbacks, got %d", len(stepInfos))
+		t.Fatalf("expected 2 step end callbacks, got %d", len(stepInfos))
 	}
 
 	// First step should have step-start + text part.
@@ -106,7 +106,7 @@ func TestHandleUIMessageStreamFinish_OnStepFinishCalled(t *testing.T) {
 	}
 }
 
-func TestHandleUIMessageStreamFinish_AbortTracking(t *testing.T) {
+func TestHandleUIMessageStreamEnd_AbortTracking(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart, Fields: map[string]any{"messageId": "msg-3"}},
 		{Type: ChunkTextStart, Fields: map[string]any{"id": "t1"}},
@@ -115,14 +115,14 @@ func TestHandleUIMessageStreamFinish_AbortTracking(t *testing.T) {
 		{Type: ChunkFinish},
 	}
 
-	var finishInfo FinishInfo
+	var endInfo EndInfo
 	var mu sync.Mutex
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "msg-3",
-		OnFinish: func(info FinishInfo) {
+		OnEnd: func(info EndInfo) {
 			mu.Lock()
-			finishInfo = info
+			endInfo = info
 			mu.Unlock()
 		},
 	})
@@ -131,12 +131,12 @@ func TestHandleUIMessageStreamFinish_AbortTracking(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if !finishInfo.IsAborted {
+	if !endInfo.IsAborted {
 		t.Error("expected IsAborted=true")
 	}
 }
 
-func TestHandleUIMessageStreamFinish_Continuation(t *testing.T) {
+func TestHandleUIMessageStreamEnd_Continuation(t *testing.T) {
 	lastMsg := &StreamingUIMessage{
 		ID:   "existing-assistant",
 		Role: "assistant",
@@ -155,15 +155,15 @@ func TestHandleUIMessageStreamFinish_Continuation(t *testing.T) {
 		{Type: ChunkFinish},
 	}
 
-	var finishInfo FinishInfo
+	var endInfo EndInfo
 	var mu sync.Mutex
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID:            "ignored-id",
 		LastAssistantMessage: lastMsg,
-		OnFinish: func(info FinishInfo) {
+		OnEnd: func(info EndInfo) {
 			mu.Lock()
-			finishInfo = info
+			endInfo = info
 			mu.Unlock()
 		},
 	})
@@ -178,21 +178,21 @@ func TestHandleUIMessageStreamFinish_Continuation(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if !finishInfo.IsContinuation {
+	if !endInfo.IsContinuation {
 		t.Error("expected IsContinuation=true")
 	}
-	if finishInfo.ResponseMessage.ID != "existing-assistant" {
-		t.Errorf("expected message ID existing-assistant, got %q", finishInfo.ResponseMessage.ID)
+	if endInfo.ResponseMessage.ID != "existing-assistant" {
+		t.Errorf("expected message ID existing-assistant, got %q", endInfo.ResponseMessage.ID)
 	}
 }
 
-func TestHandleUIMessageStreamFinish_MessageIdInjection(t *testing.T) {
+func TestHandleUIMessageStreamEnd_MessageIdInjection(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart}, // no messageId
 		{Type: ChunkFinish},
 	}
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "injected-123",
 	})
 	result := drainChunks(out)
@@ -202,13 +202,13 @@ func TestHandleUIMessageStreamFinish_MessageIdInjection(t *testing.T) {
 	}
 }
 
-func TestHandleUIMessageStreamFinish_ExistingMessageIdPreserved(t *testing.T) {
+func TestHandleUIMessageStreamEnd_ExistingMessageIdPreserved(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart, Fields: map[string]any{"messageId": "original-id"}},
 		{Type: ChunkFinish},
 	}
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "should-not-override",
 	})
 	result := drainChunks(out)
@@ -218,7 +218,7 @@ func TestHandleUIMessageStreamFinish_ExistingMessageIdPreserved(t *testing.T) {
 	}
 }
 
-func TestHandleUIMessageStreamFinish_PassthroughWithoutCallbacks(t *testing.T) {
+func TestHandleUIMessageStreamEnd_PassthroughWithoutCallbacks(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart, Fields: map[string]any{"messageId": "msg-pass"}},
 		{Type: ChunkTextStart, Fields: map[string]any{"id": "t1"}},
@@ -227,7 +227,7 @@ func TestHandleUIMessageStreamFinish_PassthroughWithoutCallbacks(t *testing.T) {
 		{Type: ChunkFinish},
 	}
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "msg-pass",
 		// No callbacks.
 	})
@@ -238,20 +238,20 @@ func TestHandleUIMessageStreamFinish_PassthroughWithoutCallbacks(t *testing.T) {
 	}
 }
 
-func TestHandleUIMessageStreamFinish_OnFinishCalledOnce(t *testing.T) {
+func TestHandleUIMessageStreamEnd_OnEndCalledOnce(t *testing.T) {
 	chunks := []Chunk{
 		{Type: ChunkStart, Fields: map[string]any{"messageId": "msg-once"}},
 		{Type: ChunkFinish},
 	}
 
-	finishCount := 0
+	endCount := 0
 	var mu sync.Mutex
 
-	out := HandleUIMessageStreamFinish(chunkSliceToChan(chunks), HandleUIMessageStreamFinishOptions{
+	out := HandleUIMessageStreamEnd(chunkSliceToChan(chunks), HandleUIMessageStreamEndOptions{
 		MessageID: "msg-once",
-		OnFinish: func(info FinishInfo) {
+		OnEnd: func(info EndInfo) {
 			mu.Lock()
-			finishCount++
+			endCount++
 			mu.Unlock()
 		},
 	})
@@ -260,7 +260,7 @@ func TestHandleUIMessageStreamFinish_OnFinishCalledOnce(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if finishCount != 1 {
-		t.Errorf("expected onFinish called once, got %d", finishCount)
+	if endCount != 1 {
+		t.Errorf("expected onEnd called once, got %d", endCount)
 	}
 }

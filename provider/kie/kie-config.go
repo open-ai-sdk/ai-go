@@ -56,6 +56,8 @@ func (c Config) resolved() Config {
 		c.PollTimeout = defaultPollTimeout
 	}
 	if c.HTTPClient == nil {
+		// One-shot POST plus polling GETs (not a stream), so a client-wide
+		// timeout is safe here — it bounds each request rather than a stream.
 		c.HTTPClient = &http.Client{Timeout: c.Timeout}
 	}
 	return c

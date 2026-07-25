@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
 )
 
 // ModelConfig holds all configuration for the shared chat completions LanguageModel.
@@ -68,7 +68,9 @@ func NewLanguageModel(cfg ModelConfig) *LanguageModel {
 		if timeout == 0 {
 			timeout = 120 * time.Second
 		}
-		client = &http.Client{Timeout: timeout}
+		// Streaming path: no client-wide timeout (it would cap the whole SSE
+		// exchange); cfg.Timeout becomes a response-header deadline instead.
+		client = httputil.NewStreamingClient(timeout)
 	}
 	return &LanguageModel{
 		cfg:    cfg,
@@ -90,7 +92,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		params.ExtraTools = m.cfg.ExtraToolsForRequest(req)
 	}
 
-	cr, err := EncodeRequest(params, req, true)
+	cr, encodeWarnings, err := EncodeRequest(params, req, true)
 	if err != nil {
 		return nil, fmt.Errorf("%s: encode request: %w", m.cfg.ProviderName, err)
 	}
@@ -141,18 +143,9 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		return nil, fmt.Errorf("%s: http request: %w", m.cfg.ProviderName, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		respBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"%s: unexpected status %d (failed to read body: %w)",
-				m.cfg.ProviderName, resp.StatusCode, readErr,
-			)
-		}
-		return nil, fmt.Errorf(
-			"%s: unexpected status %d: %s",
-			m.cfg.ProviderName, resp.StatusCode, string(respBody),
-		)
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse(ctx, m.cfg.ProviderName, resp)
 	}
 
 	respBody := resp.Body
@@ -160,12 +153,21 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 		respBody = NewTimeoutReader(resp.Body, m.cfg.ChunkTimeout)
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
-	go DecodeSSEStream(ctx, respBody, ch, SSEDecodeParams{
-		ProviderName:      m.cfg.ProviderName,
-		MetadataExtractor: m.cfg.MetadataExtractor,
-	})
-	return ch, nil
+	raw := make(chan ai.StreamEvent, 64)
+	// The deferred close guarantees resp.Body is released regardless of whether
+	// the (possibly TimeoutReader-wrapped) respBody close propagates, and keeps
+	// body ownership visible; a second Close is a safe no-op.
+	go func() {
+		defer resp.Body.Close()
+		DecodeSSEStream(ctx, respBody, raw, SSEDecodeParams{
+			ProviderName:      m.cfg.ProviderName,
+			MetadataExtractor: m.cfg.MetadataExtractor,
+			EncodeWarnings:    encodeWarnings,
+		})
+	}()
+	// GuardStream honours the Stream context contract: sends are ctx-guarded and
+	// the decoder is drained on cancel so its body is released.
+	return httputil.GuardStream(ctx, raw), nil
 }
 
 // structToMap marshals v to JSON and unmarshals into a map[string]any.

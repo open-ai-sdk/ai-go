@@ -1,17 +1,21 @@
 package uistream
 
-import "encoding/json"
+import (
+	"encoding/json"
 
-// StepFinishInfo is the argument passed to the OnStepFinish callback.
-type StepFinishInfo struct {
+	"github.com/open-ai-sdk/ai-go/internal/safego"
+)
+
+// StepEndInfo is the argument passed to the OnStepEnd callback.
+type StepEndInfo struct {
 	// IsContinuation is true when appending to an existing assistant message.
 	IsContinuation bool
 	// ResponseMessage is a snapshot of the reconstructed assistant message at step boundary.
 	ResponseMessage StreamingUIMessage
 }
 
-// FinishInfo is the argument passed to the OnFinish callback.
-type FinishInfo struct {
+// EndInfo is the argument passed to the OnEnd callback.
+type EndInfo struct {
 	// IsAborted is true if an abort chunk was seen.
 	IsAborted bool
 	// IsContinuation is true when appending to an existing assistant message.
@@ -22,8 +26,8 @@ type FinishInfo struct {
 	FinishReason string
 }
 
-// HandleUIMessageStreamFinishOptions configures HandleUIMessageStreamFinish.
-type HandleUIMessageStreamFinishOptions struct {
+// HandleUIMessageStreamEndOptions configures HandleUIMessageStreamEnd.
+type HandleUIMessageStreamEndOptions struct {
 	// MessageID to use for the response message. If the start chunk already
 	// contains a messageId, the start chunk's value takes precedence.
 	MessageID string
@@ -33,26 +37,27 @@ type HandleUIMessageStreamFinishOptions struct {
 	// existing message are preserved and the message ID is inherited.
 	LastAssistantMessage *StreamingUIMessage
 
-	// OnStepFinish is called on every finish-step chunk with a snapshot of
+	// OnStepEnd is called on every finish-step chunk with a snapshot of
 	// the reconstructed assistant message.
-	OnStepFinish func(info StepFinishInfo)
+	OnStepEnd func(info StepEndInfo)
 
-	// OnFinish is called once when the stream completes (flush) or is
+	// OnEnd is called once when the stream completes (flush) or is
 	// cancelled.
-	OnFinish func(info FinishInfo)
+	OnEnd func(info EndInfo)
 
 	// OnError is called when an error chunk is received.
 	OnError func(err error)
 }
 
-// HandleUIMessageStreamFinish wraps a chunk channel with stateful processing
+// HandleUIMessageStreamEnd wraps a chunk channel with stateful processing
 // and lifecycle callbacks. It injects a messageId into the start chunk if
 // missing, drives processUIMessageStream for state accumulation, and fires
-// OnStepFinish on every finish-step and OnFinish when the stream is fully
+// OnStepEnd on every finish-step and OnEnd when the stream is fully
 // consumed.
 //
-// This is the Go equivalent of AI SDK Node's handleUIMessageStreamFinish.
-func HandleUIMessageStreamFinish(chunks <-chan Chunk, opts HandleUIMessageStreamFinishOptions) <-chan Chunk {
+// This mirrors the AI SDK Node UI-message-stream lifecycle helper that
+// reconstructs a UI message from a chunk stream.
+func HandleUIMessageStreamEnd(chunks <-chan Chunk, opts HandleUIMessageStreamEndOptions) <-chan Chunk {
 	// Determine effective message ID and whether this is a continuation.
 	messageID := opts.MessageID
 	var lastMsg *StreamingUIMessage
@@ -62,7 +67,7 @@ func HandleUIMessageStreamFinish(chunks <-chan Chunk, opts HandleUIMessageStream
 	}
 
 	// If no callbacks, pass through with messageId injection only.
-	if opts.OnFinish == nil && opts.OnStepFinish == nil {
+	if opts.OnEnd == nil && opts.OnStepEnd == nil {
 		return injectMessageID(chunks, messageID)
 	}
 
@@ -74,24 +79,29 @@ func HandleUIMessageStreamFinish(chunks <-chan Chunk, opts HandleUIMessageStream
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
+		defer safego.Recover(nil, recoverToChunk(out))
 
 		isAborted := false
-		finishCalled := false
+		endCalled := false
 
 		isContinuation := func() bool {
 			return lastMsg != nil && state.Message.ID == lastMsg.ID
 		}
 
-		callOnFinish := func() {
-			if finishCalled || opts.OnFinish == nil {
+		callOnEnd := func() {
+			if endCalled || opts.OnEnd == nil {
 				return
 			}
-			finishCalled = true
-			opts.OnFinish(FinishInfo{
-				IsAborted:       isAborted,
-				IsContinuation:  isContinuation(),
-				ResponseMessage: snapshotMessage(state.Message),
-				FinishReason:    state.FinishReason,
+			endCalled = true
+			// Observer callback: a panic here is swallowed so it cannot tear
+			// down the stream (node parity — mergeCallbacks swallows errors).
+			safeObserver(func() {
+				opts.OnEnd(EndInfo{
+					IsAborted:       isAborted,
+					IsContinuation:  isContinuation(),
+					ResponseMessage: snapshotMessage(state.Message),
+					FinishReason:    state.FinishReason,
+				})
 			})
 		}
 
@@ -115,18 +125,20 @@ func HandleUIMessageStreamFinish(chunks <-chan Chunk, opts HandleUIMessageStream
 				isAborted = true
 			}
 
-			if c.Type == ChunkFinishStep && opts.OnStepFinish != nil {
-				opts.OnStepFinish(StepFinishInfo{
-					IsContinuation:  isContinuation(),
-					ResponseMessage: snapshotMessage(state.Message),
+			if c.Type == ChunkFinishStep && opts.OnStepEnd != nil {
+				safeObserver(func() {
+					opts.OnStepEnd(StepEndInfo{
+						IsContinuation:  isContinuation(),
+						ResponseMessage: snapshotMessage(state.Message),
+					})
 				})
 			}
 
 			out <- c
 		}
 
-		// Stream fully consumed — call onFinish.
-		callOnFinish()
+		// Stream fully consumed — call onEnd.
+		callOnEnd()
 	}()
 
 	return out
@@ -141,6 +153,7 @@ func injectMessageID(chunks <-chan Chunk, messageID string) <-chan Chunk {
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
+		defer safego.Recover(nil, recoverToChunk(out))
 		for c := range chunks {
 			if c.Type == ChunkStart {
 				existing, ok := c.Fields["messageId"].(string)

@@ -18,7 +18,7 @@ func encodeFullRequest(req ai.LanguageModelRequest) (map[string]any, error) {
 }
 
 func encodeFullRequestForModel(modelID string, req ai.LanguageModelRequest) (map[string]any, error) {
-	cr, err := openaichat.EncodeRequest(openaichat.EncodeRequestParams{
+	cr, _, err := openaichat.EncodeRequest(openaichat.EncodeRequestParams{
 		ModelID:            modelID,
 		SanitizeTools:      sanitizeToolSchemas,
 		IncludeStreamUsage: true,

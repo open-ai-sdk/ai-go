@@ -37,9 +37,9 @@ model := openai.NewChatLanguageModel("gpt-4o", openai.Config{
 })
 
 result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:    model,
-    System:   "You are a helpful assistant.",
-    Messages: []ai.Message{ai.UserMessage("Hello!")},
+    Model:        model,
+    Instructions: "You are a helpful assistant.",
+    Messages:     []ai.Message{ai.UserMessage("Hello!")},
 })
 fmt.Println(result.Text)
 ```
@@ -125,8 +125,216 @@ stream := ai.StreamText(ctx, req)
 
 var buf bytes.Buffer
 adapter := uistream.NewAdapter("msg-1")
-text := adapter.Stream(stream, &buf)
+text := adapter.Stream(stream.Stream(), &buf)
 // buf contains SSE-encoded AI SDK UI message stream chunks
+```
+
+### Tool approval
+
+Gate individual tool calls behind a human decision. `ToolApproval` maps a tool
+name to a policy that decides whether the call needs approval; `ToolApprovalResponder`
+resolves each request (blocking until a decision or context cancellation). A call
+proceeds only when the responder approves it — the default is deny.
+
+```go
+result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model:    model,
+    Messages: []ai.Message{ai.UserMessage("Delete stale records")},
+    Tools:    tools,
+    ToolApproval: map[string]ai.ToolApprovalFunc{
+        "deleteRecords": func(name string, args json.RawMessage) ai.ApprovalDecision {
+            return ai.ApprovalRequired
+        },
+    },
+    ToolApprovalResponder: func(ctx context.Context, req ai.ToolApprovalRequest) (ai.ToolApprovalResponse, error) {
+        approved := promptOperator(req.ToolName, req.Args) // your UI/CLI decision
+        return ai.ToolApprovalResponse{ApprovalID: req.ApprovalID, Approved: approved}, nil
+    },
+})
+```
+
+### Tool context
+
+Supply per-tool data with `ToolsContext` (keyed by tool name) and run-wide data
+with `RuntimeContext`. Both reach the executor through the call `context.Context`;
+read them with `ai.ToolContextFrom` / `ai.TypedToolContext[T]` and `ai.RuntimeContextFrom`.
+When a tool defines a `ContextSchema`, its `ToolsContext` entry is required and the
+call fails fast if it is missing (in both `GenerateText` and `StreamText`).
+
+```go
+ai.GenerateTextRequest{
+    Model:          model,
+    Tools:          tools,
+    ToolsContext:   ai.ToolsContext{"lookup": map[string]any{"tenant": "acme"}},
+    RuntimeContext: ai.RuntimeContext{"requestID": "req-123"},
+}
+
+// Inside the tool executor:
+func (e myExec) Execute(ctx context.Context, name, args string) (string, error) {
+    toolCtx, _ := ai.ToolContextFrom(ctx)      // per-tool value for `name`
+    runtime := ai.RuntimeContextFrom(ctx)      // shared across all tools
+    _ = toolCtx
+    _ = runtime
+    // ...
+}
+```
+
+### Agents
+
+`ai.Agent` binds a model, tools, and step-loop defaults, then delegates each call to
+`GenerateText`/`StreamText` — it never runs a loop of its own. `ai.ToolLoopAgent` is the reference
+implementation; consumers may implement `Agent` themselves (four methods, all in terms of the
+existing public types).
+
+```go
+agent := ai.NewToolLoopAgent(model,
+    ai.WithAgentTools(tools),
+    ai.WithAgentInstructions("You are a helpful assistant."),
+    // Unlike a bare GenerateText call (see "Breaking change" below), an agent
+    // defaults to a real multi-step loop: stopWhen=IsStepCount(20).
+)
+
+result, err := agent.Generate(ctx, ai.WithMessages(ai.UserMessage("Hello!")))
+```
+
+`Generate`/`Stream` accept the same `ai.Option` values as the bare functions; scalar options (model,
+tools, stop condition, ...) override the agent's defaults for that call only, while `OnStepEnd`/
+`OnEnd`/`OnChunk`/`OnError` set at the agent level and at the call level both fire — concurrently,
+with either side's panic swallowed — instead of one replacing the other.
+
+Stream an agent over SSE with the free functions in `uistream` (never methods on the agent, to keep
+`uistream`'s existing one-way dependency on `ai`):
+
+```go
+chunks, err := uistream.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessage("Hello!")))
+
+// Or serve it directly:
+http.Handle("/chat", uistream.AgentHandler(agent))
+```
+
+### Breaking change: tool-loop step count now has no implicit default
+
+`GenerateText`/`StreamText` used to fall back to an implicit 10-step budget whenever neither
+`MaxSteps` nor `StopWhen` was set. That implicit cap is gone: `MaxSteps` now means "unbounded" when
+zero, and `StopWhen` is the only gate, matching `ai-sdk-node` (which has no `maxSteps` concept at
+all). `generateText`/`streamText` default to `StopWhen: IsStepCount(1)` — a single step; a tool call
+in that step still executes, but the loop no longer continues into a follow-up model call unless you
+set a wider `StopWhen` (or use `ai.NewToolLoopAgent`, which defaults to `IsStepCount(20)`).
+
+If your code relied on the old implicit multi-step behavior without setting `StopWhen`, add one
+explicitly — `ai.IsStepCount(n)` or `ai.Never()` (run until the model stops calling tools, bounded
+only by `MaxSteps` if you set one).
+
+## v7 protocol migration
+
+This release intentionally breaks compatibility with the earlier API: request `System` is now
+`Instructions`, lifecycle callbacks use `OnStepEnd`/`OnEnd`, `StreamResult` gained an `Events()`
+iterator alongside `Stream()`, and usage is reported as `InputTokens`/`OutputTokens` with nested
+cache and reasoning details. Aggregated results expose `Usage` and `FinalStep`.
+
+Images no longer have a dedicated content part. Everything non-text travels as a file part carrying
+a `MediaType` — either a full IANA media type (`image/png`) or the bare top-level segment (`image`).
+`ImageURLPart`/`ImageDataPart`/`ImageFileIDPart` keep their signatures as conveniences that emit file
+parts; `MimeType` fields are now `MediaType`, and tool-result content is `text` or `file`.
+
+UI streams support v7 `tool-approval-response`, `custom`, and `reasoning-file` chunks. MCP HTTP
+transports reject redirects by default; set `Redirect: mcp.RedirectFollow` only for trusted endpoints.
+
+Provider-specific v7 defaults (OpenAI Responses reasoning detail, Anthropic cache-creation removal,
+Google provider rename, xAI Responses default, and runtime rejection of system messages) remain deferred.
+
+## Streaming views
+
+`StreamText` returns a `*StreamResult` that fans out to as many views as a caller registers; each
+view gets its own branch of the underlying event stream, so using more than one (e.g. `TextStream()`
+for display and `Consume()` for the final result) does not race or steal events from the others.
+
+| View | Returns | Use for |
+|---|---|---|
+| `Stream()` | `<-chan StepEvent` | Raw engine events, one channel |
+| `Events()` | `iter.Seq2[StepEvent, error]` | `for ev, err := range sr.Events()` — idiomatic Go 1.23+ iteration |
+| `TextStream()` | `<-chan string` | Text deltas only, e.g. printing to a terminal |
+| `Consume()` | `(*GenerateTextResult, error)` | Block for the full aggregated result |
+
+```go
+sr := ai.StreamText(ctx, req)
+for ev, err := range sr.Events() {
+    if err != nil {
+        // err is the stream's terminal error (including a mid-stream provider failure);
+        // ranging simply stops after this — no further events follow.
+        break
+    }
+    if ev.Type == ai.StepEventTextDelta {
+        fmt.Print(ev.TextDelta)
+    }
+}
+```
+
+Breaking out of a `range` early unregisters only that view — it does not cancel the run, since other
+views (or a later `Consume()`) may still be reading. To stop the run itself, cancel the `context.Context`
+passed to `StreamText`.
+
+## Error handling
+
+Provider HTTP failures surface as `*ai.APIError` (an alias of the shared `aitypes.APIError`), never as
+an opaque string. The raw response body is deliberately never embedded — it has, in other SDKs, leaked
+credentials and internal identifiers through error logs — but the fields a caller actually needs
+(status code, provider error code/message, request ID, `Retry-After`) are parsed out and kept:
+
+```go
+result, err := ai.GenerateText(ctx, req)
+if err != nil {
+    var apiErr *ai.APIError
+    if errors.As(err, &apiErr) {
+        fmt.Println(apiErr.Provider, apiErr.StatusCode, apiErr.RequestID)
+    }
+    switch {
+    case errors.Is(err, ai.ErrRateLimited):
+        // apiErr.RetryAfter holds the provider's Retry-After value, when sent.
+    case errors.Is(err, ai.ErrContextLength):
+    case errors.Is(err, ai.ErrUnauthorized):
+    }
+}
+```
+
+`ai.ErrNoSuchTool` classifies a tool call for a name the request's `ToolSet` does not define, the same
+way — `errors.Is(err, ai.ErrNoSuchTool)` rather than matching an error string.
+
+## Observability
+
+By default the SDK produces no logs and no trace spans: instrumentation is opt-in, never assumed.
+
+`WithLogger` injects a `*slog.Logger` that receives structured diagnostics — a panic recovered at a
+goroutine or callback boundary, and a provider error body that `*APIError` deliberately drops (see
+"Error handling" above) — at debug/error level. Leaving it unset is silent; the SDK never writes to
+`slog.Default()`, since a library taking over a consumer's log stream without being asked is exactly
+the surprise this option exists to prevent.
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model:    model,
+    Messages: []ai.Message{ai.UserMessage("Hello!")},
+    Logger:   logger,
+})
+```
+
+Tracing follows the standard OpenTelemetry pattern: the SDK always instruments run/step/model-call/
+tool-call spans through the `go.opentelemetry.io/otel/trace` API, but until *your application* calls
+`otel.SetTracerProvider(...)` with a real SDK, that global provider is OTel's own no-op — spans cost a
+few interface calls and nothing is exported. No `ai-go`-specific option is needed to turn tracing on;
+wiring up an exporter is the application's concern, not this SDK's.
+
+Span attributes are metadata only by default — model ID, step number, tool name, token usage, finish
+reason — never prompt, completion, or tool-argument content, since spans are commonly exported to a
+third-party backend. Opt into content with `ai.WithTraceContent(true)` on the request:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model:        model,
+    Messages:     []ai.Message{ai.UserMessage("Hello!")},
+    TraceContent: true, // spans now include prompt/completion/tool-argument text
+})
 ```
 
 ## Requirements

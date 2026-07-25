@@ -3,69 +3,59 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
+//
+// It delegates to the streaming path so the step-event aggregation switch lives
+// in exactly one place — StreamResult.Consume. Smoothing only shapes live-stream
+// timing, so it is disabled here: a non-streaming call must never pay the
+// per-chunk delays SmoothStream would otherwise impose.
 func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextResult, error) {
-	ch := engine.Run(ctx, toEngineParams(req))
+	// Surface a pre-flight validation failure as (nil, err) — the same contract
+	// the direct implementation had — before delegating. Mid-stream errors still
+	// return a partial result alongside the error, matching Consume.
+	if err := validateToolsContext(req); err != nil {
+		return nil, err
+	}
+	req.SmoothStream = nil
+	return StreamText(ctx, req).Consume()
+}
 
-	result := &GenerateTextResult{}
-	var currentStep *StepOutput
-
-	for ev := range ch {
-		switch ev.Type {
-		case engine.StepEventStepStart:
-			currentStep = &StepOutput{}
-
-		case engine.StepEventTextDelta:
-			result.Text += ev.TextDelta
-			if currentStep != nil {
-				currentStep.Text += ev.TextDelta
+func validateToolsContext(req GenerateTextRequest) error {
+	if req.Tools == nil {
+		return nil
+	}
+	for _, tool := range req.Tools.Definitions {
+		if tool.ContextSchema == nil {
+			continue
+		}
+		value, found := req.ToolsContext[tool.Name]
+		if !found {
+			return fmt.Errorf("ai: missing context for tool %q", tool.Name)
+		}
+		object, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("ai: context for tool %q must be an object", tool.Name)
+		}
+		if required, ok := tool.ContextSchema["required"].([]any); ok {
+			for _, raw := range required {
+				key, ok := raw.(string)
+				if !ok {
+					continue
+				}
+				if _, ok := object[key]; !ok {
+					return fmt.Errorf("ai: context for tool %q missing required field %q", tool.Name, key)
+				}
 			}
-
-		case engine.StepEventReasoningDelta:
-			result.Reasoning += ev.ReasoningDelta
-			if currentStep != nil {
-				currentStep.Reasoning += ev.ReasoningDelta
-			}
-
-		case engine.StepEventToolCallStart:
-			handleToolCallStart(ev, currentStep)
-
-		case engine.StepEventToolCallDelta:
-			handleToolCallDelta(ev, currentStep)
-
-		case engine.StepEventToolCallReady:
-			handleToolCallReady(ev, currentStep)
-
-		case engine.StepEventToolResult:
-			currentStep = handleToolResult(ev, result, currentStep)
-
-		case engine.StepEventUsage:
-			handleUsage(ev, result, currentStep)
-
-		case engine.StepEventSource:
-			handleSource(ev, result, currentStep)
-
-		case engine.StepEventFileDelta:
-			handleFileDelta(ev, result, currentStep)
-
-		case engine.StepEventStepEnd:
-			currentStep = handleStepEnd(ev, result, currentStep, req.Tools)
-
-		case engine.StepEventStructuredOutput:
-			result.StructuredOutput = ev.StructuredOutput
-
-		case engine.StepEventError:
-			return result, ev.Error
 		}
 	}
-
-	result.Response = Response{Messages: ResponseMessagesForSteps(result.Steps, req.Tools)}
-	return result, nil
+	return nil
 }
 
 func handleToolCallStart(ev engine.StepEvent, step *StepOutput) {
@@ -138,20 +128,31 @@ func handleUsage(ev engine.StepEvent, result *GenerateTextResult, step *StepOutp
 	if ev.Usage == nil {
 		return
 	}
-	result.TotalUsage.PromptTokens += ev.Usage.PromptTokens
-	result.TotalUsage.CompletionTokens += ev.Usage.CompletionTokens
-	result.TotalUsage.TotalTokens += ev.Usage.TotalTokens
-	result.TotalUsage.ReasoningTokens += ev.Usage.ReasoningTokens
-	result.TotalUsage.CacheReadTokens += ev.Usage.CacheReadTokens
-	result.TotalUsage.CacheWriteTokens += ev.Usage.CacheWriteTokens
+	result.Usage.InputTokens += ev.Usage.InputTokens
+	result.Usage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
+	result.Usage.OutputTokens += ev.Usage.OutputTokens
+	result.Usage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
+	result.Usage.TotalTokens += ev.Usage.TotalTokens
+	result.Usage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
+	result.Usage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
+	result.Usage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
+	if ev.Usage.Raw != nil {
+		result.Usage.Raw = ev.Usage.Raw
+	}
 	if step != nil {
 		step.Usage = Usage{
-			PromptTokens:     ev.Usage.PromptTokens,
-			CompletionTokens: ev.Usage.CompletionTokens,
-			TotalTokens:      ev.Usage.TotalTokens,
-			ReasoningTokens:  ev.Usage.ReasoningTokens,
-			CacheReadTokens:  ev.Usage.CacheReadTokens,
-			CacheWriteTokens: ev.Usage.CacheWriteTokens,
+			InputTokens:  ev.Usage.InputTokens,
+			OutputTokens: ev.Usage.OutputTokens,
+			TotalTokens:  ev.Usage.TotalTokens,
+			InputTokenDetails: InputTokenDetails{
+				NoCacheTokens:    ev.Usage.InputTokenDetails.NoCacheTokens,
+				CacheReadTokens:  ev.Usage.InputTokenDetails.CacheReadTokens,
+				CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens,
+			},
+			OutputTokenDetails: OutputTokenDetails{
+				TextTokens:      ev.Usage.OutputTokenDetails.TextTokens,
+				ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens,
+			},
 		}
 	}
 }
@@ -178,8 +179,8 @@ func handleFileDelta(ev engine.StepEvent, result *GenerateTextResult, step *Step
 		return
 	}
 	f := GeneratedFile{
-		Data:     ev.FileData,
-		MimeType: ev.FileMimeType,
+		Data:      ev.FileData,
+		MediaType: ev.FileMediaType,
 	}
 	result.Files = append(result.Files, f)
 	if step != nil {
@@ -191,13 +192,16 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 	if step == nil {
 		return nil
 	}
-	step.FinishReason = FinishReason(ev.FinishReason)
+	step.FinishReason = ev.FinishReason
 	step.RawFinishReason = ev.RawFinishReason
 	step.ProviderMetadata = ev.ProviderMetadata
 	step.Warnings = fromEngineWarnings(ev.Warnings)
 	step.Response = Response{Messages: ResponseMessagesForStep(*step, tools)}
 	result.Steps = append(result.Steps, *step)
-	result.FinishReason = FinishReason(ev.FinishReason)
+	result.FinalStep = *step
+	result.Text = step.Text
+	result.Reasoning = step.Reasoning
+	result.FinishReason = ev.FinishReason
 	result.RawFinishReason = ev.RawFinishReason
 	result.ProviderMetadata = ev.ProviderMetadata
 	result.Warnings = append(result.Warnings, step.Warnings...)
@@ -206,9 +210,20 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 
 // StreamText runs the tool loop and returns a *StreamResult for callers that
 // need live streaming (e.g. SSE adapters). Use StreamResult.TextStream() for
-// text deltas, StreamResult.Events() for raw engine events, or
+// text deltas, StreamResult.Stream() for raw engine events, or
 // StreamResult.Consume() to block and get the full aggregated result.
 func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
+	if err := validateToolsContext(req); err != nil {
+		return NewStreamResultWithTools(erroredEventChannel(err), req.Tools)
+	}
+	// Honour deferred middlewares (WithMiddleware, WithRetry) on the bare path
+	// too, so a directly-built request no longer silently ignores them. The
+	// Runtime facade already applies and clears them, so this only fires when
+	// StreamText/GenerateText are called with a request struct directly.
+	if len(req.Middlewares) > 0 {
+		req.Model = WrapLanguageModel(req.Model, req.Middlewares...)
+		req.Middlewares = nil
+	}
 	ch := engine.Run(ctx, toEngineParams(req))
 	if req.SmoothStream != nil {
 		ch = req.SmoothStream.Transform(ctx, ch)
@@ -216,14 +231,41 @@ func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 	return NewStreamResultWithTools(ch, req.Tools)
 }
 
+// erroredEventChannel returns a closed channel yielding a single error event, so
+// a pre-flight validation failure surfaces through the normal stream API
+// (Consume returns the error, Stream emits it) instead of being silently dropped.
+func erroredEventChannel(err error) <-chan engine.StepEvent {
+	ch := make(chan engine.StepEvent, 1)
+	ch <- engine.StepEvent{Type: engine.StepEventError, Error: err}
+	close(ch)
+	return ch
+}
+
 // toEngineParams converts a public GenerateTextRequest to engine.RunParams.
 // It also wraps the ai.LanguageModel to satisfy engine.Model.
 func toEngineParams(req GenerateTextRequest) engine.RunParams {
+	if req.StopWhen == nil {
+		// Node parity: generateText/streamText default to stopWhen=isStepCount(1)
+		// (ai-sdk-node generate-text.ts) now that the engine no longer has an
+		// implicit step cap of its own. Tool calls in that single step still
+		// execute; only the loop's continuation into a follow-up model call is
+		// gated. Multi-step tool loops require an explicit StopWhen (or
+		// ToolLoopAgent, which defaults to a 20-step budget instead).
+		req.StopWhen = IsStepCount(1)
+	}
 	engReq, engTools := toEngineRequest(req)
 	stopWhen := toEngineStopWhen(req.StopWhen)
 	engPrepareStep := toEnginePrepareStep(req.PrepareStep)
-	repairToolCall := toEngineRepairToolCall(req.ExperimentalRepairToolCall)
+	repairToolCall := toEngineRepairToolCall(req.RepairToolCall)
 	engCallbacks := toEngineLifecycleCallbacks(req)
+	approval := make(map[string]func(string, string) bool, len(req.ToolApproval))
+	for name, policy := range req.ToolApproval {
+		approval[name] = func(tool, args string) bool { return policy(tool, json.RawMessage(args)) == ApprovalRequired }
+	}
+	var approver engine.ApprovalResponder
+	if req.ToolApprovalResponder != nil {
+		approver = approvalResponder{fn: req.ToolApprovalResponder}
+	}
 
 	return engine.RunParams{
 		Model:                 &engineModelAdapter{req.Model},
@@ -233,17 +275,30 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 		MaxSteps:              req.MaxSteps,
 		PrepareStep:           engPrepareStep,
 		RepairToolCall:        repairToolCall,
+		ToolApproval:          approval,
+		Approver:              approver,
 		Callbacks:             engCallbacks,
 		ParallelToolExecution: req.ParallelToolExecution,
 		MaxParallelTools:      req.MaxParallelTools,
+		Logger:                req.Logger,
+		// Always bound to the process-global OTel TracerProvider: until the
+		// consumer's application registers a real one, that global provider is
+		// OTel's own no-op, so this costs nothing extra by default (see
+		// internal/tracing.NewTracer). There is no WithTracer option — tracing
+		// backend selection is the application's concern (otel.SetTracerProvider),
+		// not this SDK's.
+		Tracer:       tracing.NewTracer(),
+		TraceContent: req.TraceContent,
 	}
 }
 
 func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) {
 	engReq := engine.Request{
-		System:          req.System,
+		Instructions:    req.Instructions,
 		Messages:        toEngineMessages(req.Messages),
 		ProviderOptions: req.ProviderOptions,
+		ToolsContext:    req.ToolsContext,
+		RuntimeContext:  req.RuntimeContext,
 		Settings: engine.CallSettings{
 			Temperature:   req.Settings.Temperature,
 			MaxTokens:     req.Settings.MaxTokens,
@@ -270,7 +325,9 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 			Name:          d.Name,
 			Description:   d.Description,
 			InputSchema:   d.InputSchema,
+			ContextSchema: d.ContextSchema,
 			ToModelOutput: d.ToModelOutput,
+			Timeout:       d.Timeout,
 		}
 	}
 	engReq.Tools = defs
@@ -280,8 +337,52 @@ func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) 
 
 	return engReq, &engine.ToolSet{
 		Definitions: defs,
-		Executor:    req.Tools.Executor,
+		Executor: contextualExecutor{
+			executor:       req.Tools.Executor,
+			toolsContext:   req.ToolsContext,
+			runtimeContext: req.RuntimeContext,
+		},
 	}
+}
+
+type contextualExecutor struct {
+	executor       ToolExecutor
+	toolsContext   ToolsContext
+	runtimeContext RuntimeContext
+}
+
+// Compile-time assertions that contextualExecutor satisfies both the public
+// ToolExecutor seam and the engine-internal mirror it is registered under
+// (engine.ToolSet.Executor) — the same method set, so one value satisfies both.
+var (
+	_ ToolExecutor        = contextualExecutor{}
+	_ engine.ToolExecutor = contextualExecutor{}
+)
+
+type approvalResponder struct{ fn ToolApprovalResponder }
+
+func (r approvalResponder) RequestApproval(
+	ctx context.Context,
+	request engine.ApprovalRequest,
+) (engine.ApprovalResponse, error) {
+	response, err := r.fn(
+		ctx,
+		ToolApprovalRequest{
+			ApprovalID: request.ApprovalID,
+			ToolCallID: request.ToolCallID,
+			ToolName:   request.ToolName,
+			Args:       json.RawMessage(request.Args),
+		},
+	)
+	return engine.ApprovalResponse{
+		ApprovalID: response.ApprovalID,
+		Approved:   response.Approved,
+		Reason:     response.Reason,
+	}, err
+}
+
+func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
+	return e.executor.Execute(withToolContexts(ctx, e.toolsContext[name], e.runtimeContext), name, args)
 }
 
 func toEngineStopWhen(stopWhen StopCondition) engine.StopCondition {
@@ -302,14 +403,18 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 		return nil
 	}
 	return func(ectx engine.PrepareStepContext) *engine.PrepareStepResult {
-		aiCtx := PrepareStepContext{StepNumber: ectx.StepNumber}
+		aiCtx := PrepareStepContext{
+			StepNumber:     ectx.StepNumber,
+			ToolsContext:   ectx.ToolsContext,
+			RuntimeContext: ectx.RuntimeContext,
+		}
 		for _, s := range ectx.Steps {
 			aiCtx.Steps = append(aiCtx.Steps, PrepareStepInfo{
 				StepNumber:   s.StepNumber,
 				HasToolCalls: s.HasToolCalls,
 				ToolNames:    s.ToolNames,
 				Text:         s.Text,
-				FinishReason: FinishReason(s.FinishReason),
+				FinishReason: s.FinishReason,
 			})
 		}
 		result := prepare(aiCtx)
@@ -318,7 +423,7 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 		}
 		engResult := &engine.PrepareStepResult{
 			ActiveTools:     result.ActiveTools,
-			System:          result.System,
+			Instructions:    result.Instructions,
 			ProviderOptions: result.ProviderOptions,
 		}
 		if result.Model != nil {
@@ -334,14 +439,14 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 	}
 }
 
-func toEngineRepairToolCall(fn ExperimentalRepairToolCallFunc) engine.ToolCallRepairFunc {
+func toEngineRepairToolCall(fn RepairToolCallFunc) engine.ToolCallRepairFunc {
 	if fn == nil {
 		return nil
 	}
 	return func(ctx context.Context, input engine.ToolCallRepairContext) (*engine.ToolCallInfo, error) {
 		publicInput := RepairToolCallInput{
-			System:   input.System,
-			Messages: fromEngineMessages(input.Messages),
+			Instructions: input.Instructions,
+			Messages:     fromEngineMessages(input.Messages),
 			ToolCall: ToolCallOutput{
 				ID:               input.ToolCall.ID,
 				Name:             input.ToolCall.Name,
@@ -349,7 +454,9 @@ func toEngineRepairToolCall(fn ExperimentalRepairToolCallFunc) engine.ToolCallRe
 				ThoughtSignature: input.ToolCall.ThoughtSignature,
 			},
 			Tools: fromEngineToolSet(input.Tools),
-			Error: fromEngineToolCallError(input.Error),
+			// Tool error types are now unified in aitypes, so the engine's typed
+			// error passes straight through — errors.As/Is match end to end.
+			Error: input.Error,
 		}
 		repaired, err := fn(ctx, publicInput)
 		if err != nil {
@@ -383,20 +490,20 @@ func toEngineRepairToolCall(fn ExperimentalRepairToolCallFunc) engine.ToolCallRe
 }
 
 func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallbacks {
-	if req.OnStepFinish == nil && req.OnFinish == nil && req.OnChunk == nil && req.OnError == nil {
+	if req.OnStepEnd == nil && req.OnEnd == nil && req.OnChunk == nil && req.OnError == nil {
 		return nil
 	}
 
 	callbacks := &engine.LifecycleCallbacks{}
-	if req.OnStepFinish != nil {
-		callbacks.OnStepFinish = func(ev engine.StepFinishEvent) {
-			stepEvent := StepFinishEvent{
+	if req.OnStepEnd != nil {
+		callbacks.OnStepEnd = func(ev engine.StepEndEvent) {
+			stepEvent := StepEndEvent{
 				StepNumber:       ev.StepNumber,
 				Text:             ev.Text,
 				Reasoning:        ev.Reasoning,
 				ToolCalls:        fromEngineToolCalls(ev.ToolCalls),
 				ToolResults:      fromEngineToolResults(ev.ToolResults),
-				FinishReason:     FinishReason(ev.FinishReason),
+				FinishReason:     ev.FinishReason,
 				Usage:            fromEngineUsagePtr(ev.Usage),
 				ProviderMetadata: ev.ProviderMetadata,
 				Warnings:         fromEngineWarnings(ev.Warnings),
@@ -407,22 +514,22 @@ func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallba
 				ToolCalls:   stepEvent.ToolCalls,
 				ToolResults: stepEvent.ToolResults,
 			}, req.Tools)}
-			req.OnStepFinish(stepEvent)
+			req.OnStepEnd(stepEvent)
 		}
 	}
-	if req.OnFinish != nil {
-		callbacks.OnFinish = func(ev engine.FinishEvent) {
+	if req.OnEnd != nil {
+		callbacks.OnEnd = func(ev engine.EndEvent) {
 			steps := fromEngineStepInfos(ev.Steps, req.Tools)
-			finishEvent := FinishEvent{
+			endEvent := EndEvent{
 				Text:             ev.Text,
 				Reasoning:        ev.Reasoning,
 				Steps:            steps,
-				TotalUsage:       fromEngineUsage(ev.TotalUsage),
-				FinishReason:     FinishReason(ev.FinishReason),
+				Usage:            fromEngineUsage(ev.Usage),
+				FinishReason:     ev.FinishReason,
 				ProviderMetadata: ev.ProviderMetadata,
 			}
-			finishEvent.Response = Response{Messages: ResponseMessagesForSteps(steps, req.Tools)}
-			req.OnFinish(finishEvent)
+			endEvent.Response = Response{Messages: ResponseMessagesForSteps(steps, req.Tools)}
+			req.OnEnd(endEvent)
 		}
 	}
 	if req.OnChunk != nil {
@@ -477,6 +584,7 @@ func fromEngineToolSet(ts *engine.ToolSet) *ToolSet {
 			Description:   def.Description,
 			InputSchema:   def.InputSchema,
 			ToModelOutput: def.ToModelOutput,
+			Timeout:       def.Timeout,
 		}
 	}
 	return &ToolSet{
@@ -505,9 +613,7 @@ func fromEngineToolResultContent(cs []engine.ToolResultContent) []ToolResultCont
 		return nil
 	}
 	out := make([]ToolResultContent, len(cs))
-	for i, c := range cs {
-		out[i] = ToolResultContent{Type: c.Type, Text: c.Text, Data: c.Data, MimeType: c.MimeType}
-	}
+	copy(out, cs)
 	return out
 }
 
@@ -516,23 +622,35 @@ func fromEngineUsagePtr(u *engine.Usage) *Usage {
 		return nil
 	}
 	return &Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+		InputTokenDetails: InputTokenDetails{
+			NoCacheTokens:    u.InputTokenDetails.NoCacheTokens,
+			CacheReadTokens:  u.InputTokenDetails.CacheReadTokens,
+			CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens,
+		},
+		OutputTokenDetails: OutputTokenDetails{
+			TextTokens:      u.OutputTokenDetails.TextTokens,
+			ReasoningTokens: u.OutputTokenDetails.ReasoningTokens,
+		},
 	}
 }
 
 func fromEngineUsage(u engine.Usage) Usage {
 	return Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+		InputTokenDetails: InputTokenDetails{
+			NoCacheTokens:    u.InputTokenDetails.NoCacheTokens,
+			CacheReadTokens:  u.InputTokenDetails.CacheReadTokens,
+			CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens,
+		},
+		OutputTokenDetails: OutputTokenDetails{
+			TextTokens:      u.OutputTokenDetails.TextTokens,
+			ReasoningTokens: u.OutputTokenDetails.ReasoningTokens,
+		},
 	}
 }
 
@@ -547,7 +665,7 @@ func fromEngineStepInfos(steps []engine.StepResultInfo, tools *ToolSet) []StepOu
 			Reasoning:        s.Reasoning,
 			ToolCalls:        fromEngineToolCalls(s.ToolCalls),
 			ToolResults:      fromEngineToolResults(s.ToolResults),
-			FinishReason:     FinishReason(s.FinishReason),
+			FinishReason:     s.FinishReason,
 			RawFinishReason:  s.RawFinishReason,
 			ProviderMetadata: s.ProviderMetadata,
 			Warnings:         fromEngineWarnings(s.Warnings),
@@ -558,34 +676,6 @@ func fromEngineStepInfos(steps []engine.StepResultInfo, tools *ToolSet) []StepOu
 		out[i].Response = Response{Messages: ResponseMessagesForStep(out[i], tools)}
 	}
 	return out
-}
-
-func fromEngineToolCallError(err error) error {
-	var noSuchToolErr *engine.NoSuchToolError
-	if errors.As(err, &noSuchToolErr) {
-		if noSuchToolErr == nil {
-			return nil
-		}
-		available := append([]string(nil), noSuchToolErr.AvailableTools...)
-		return &NoSuchToolError{
-			ToolName:       noSuchToolErr.ToolName,
-			AvailableTools: available,
-		}
-	}
-
-	var invalidArgsErr *engine.InvalidToolArgumentsError
-	if errors.As(err, &invalidArgsErr) {
-		if invalidArgsErr == nil {
-			return nil
-		}
-		return &InvalidToolArgumentsError{
-			ToolName: invalidArgsErr.ToolName,
-			Args:     invalidArgsErr.Args,
-			Cause:    invalidArgsErr.Cause,
-		}
-	}
-
-	return err
 }
 
 func toChunkEvent(ev engine.StepEvent) ChunkEvent {
@@ -628,7 +718,15 @@ func toChunkEvent(ev engine.StepEvent) ChunkEvent {
 		ToolCallName:      ev.ToolCallName,
 		ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		StepNumber:        ev.StepNumber,
-		FinishReason:      FinishReason(ev.FinishReason),
+		FinishReason:      ev.FinishReason,
+		// Carry the typed payloads instead of dropping them. These are already
+		// the shared aitypes types (Usage/Source/ToolResult), so no conversion.
+		Usage:            ev.Usage,
+		Source:           ev.Source,
+		ToolResult:       ev.ToolResult,
+		FileData:         ev.FileData,
+		FileMediaType:    ev.FileMediaType,
+		ProviderMetadata: ev.ProviderMetadata,
 	}
 }
 
@@ -641,7 +739,7 @@ func (a *engineModelAdapter) ModelID() string { return a.m.ModelID() }
 
 func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-chan engine.StreamEvent, error) {
 	aiReq := LanguageModelRequest{
-		System:          req.System,
+		Instructions:    req.Instructions,
 		Messages:        fromEngineMessages(req.Messages),
 		ProviderOptions: req.ProviderOptions,
 		Settings: CallSettings{
@@ -675,6 +773,14 @@ func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-
 	engCh := make(chan engine.StreamEvent, 64)
 	go func() {
 		defer close(engCh)
+		// A panic while adapting events surfaces as an error event before
+		// close instead of crashing the process.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case engCh <- engine.StreamEvent{Type: engine.StreamEventError, Error: err}:
+			default:
+			}
+		})
 		for ev := range aiCh {
 			engCh <- toEngineStreamEvent(ev)
 		}
@@ -684,35 +790,39 @@ func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-
 
 func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
 	e := engine.StreamEvent{
-		Type:              engine.StreamEventType(ev.Type),
+		Type:              ev.Type,
 		TextDelta:         ev.TextDelta,
 		ToolCallIndex:     ev.ToolCallIndex,
 		ToolCallID:        ev.ToolCallID,
 		ToolCallName:      ev.ToolCallName,
 		ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		ThoughtSignature:  ev.ThoughtSignature,
-		FinishReason:      engine.FinishReason(ev.FinishReason),
+		FinishReason:      ev.FinishReason,
 		RawFinishReason:   ev.RawFinishReason,
 		ProviderMetadata:  ev.ProviderMetadata,
 		FileData:          ev.FileData,
-		FileMimeType:      ev.FileMimeType,
+		FileMediaType:     ev.FileMediaType,
 		Error:             ev.Error,
 	}
 	if ev.Usage != nil {
 		e.Usage = &engine.Usage{
-			PromptTokens:     ev.Usage.PromptTokens,
-			CompletionTokens: ev.Usage.CompletionTokens,
-			TotalTokens:      ev.Usage.TotalTokens,
-			ReasoningTokens:  ev.Usage.ReasoningTokens,
-			CacheReadTokens:  ev.Usage.CacheReadTokens,
-			CacheWriteTokens: ev.Usage.CacheWriteTokens,
+			InputTokens:  ev.Usage.InputTokens,
+			OutputTokens: ev.Usage.OutputTokens,
+			TotalTokens:  ev.Usage.TotalTokens,
+			InputTokenDetails: engine.InputTokenDetails{
+				NoCacheTokens:    ev.Usage.InputTokenDetails.NoCacheTokens,
+				CacheReadTokens:  ev.Usage.InputTokenDetails.CacheReadTokens,
+				CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens,
+			},
+			OutputTokenDetails: engine.OutputTokenDetails{
+				TextTokens:      ev.Usage.OutputTokenDetails.TextTokens,
+				ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens,
+			},
 		}
 	}
 	if len(ev.Warnings) > 0 {
 		e.Warnings = make([]engine.Warning, len(ev.Warnings))
-		for i, w := range ev.Warnings {
-			e.Warnings[i] = engine.Warning{Type: w.Type, Message: w.Message, Setting: w.Setting}
-		}
+		copy(e.Warnings, ev.Warnings)
 	}
 	if ev.Source != nil {
 		e.Source = &engine.Source{
@@ -742,9 +852,8 @@ func toEngineContentParts(parts []ContentPart) []engine.ContentPart {
 	for i, p := range parts {
 		ep := engine.ContentPart{
 			Type:             string(p.Type),
-			ImageURL:         p.ImageURL,
 			FileURL:          p.FileURL,
-			MimeType:         p.MimeType,
+			MediaType:        p.MediaType,
 			Data:             p.Data,
 			FileID:           p.FileID,
 			Filename:         p.Filename,
@@ -785,9 +894,7 @@ func fromEngineWarnings(ws []engine.Warning) []Warning {
 		return nil
 	}
 	out := make([]Warning, len(ws))
-	for i, w := range ws {
-		out[i] = Warning{Type: w.Type, Message: w.Message, Setting: w.Setting}
-	}
+	copy(out, ws)
 	return out
 }
 
@@ -796,9 +903,8 @@ func fromEngineContentParts(parts []engine.ContentPart) []ContentPart {
 	for i, p := range parts {
 		cp := ContentPart{
 			Type:             ContentPartType(p.Type),
-			ImageURL:         p.ImageURL,
 			FileURL:          p.FileURL,
-			MimeType:         p.MimeType,
+			MediaType:        p.MediaType,
 			Data:             p.Data,
 			FileID:           p.FileID,
 			Filename:         p.Filename,

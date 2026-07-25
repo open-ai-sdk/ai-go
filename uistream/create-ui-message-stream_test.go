@@ -116,7 +116,9 @@ func TestCreateUIMessageStream_ErrorHandling(t *testing.T) {
 
 	output := buf.String()
 	assertContains(t, output, `"type":"error"`)
-	assertContains(t, output, "connection reset")
+	// Error text is redacted by default — the raw error must not reach the UI.
+	assertContains(t, output, "stream error")
+	assertNotContains(t, output, "connection reset")
 	assertContains(t, output, `"type":"finish"`)
 	assertContains(t, output, `"finishReason":"error"`)
 
@@ -128,15 +130,15 @@ func TestCreateUIMessageStream_ErrorHandling(t *testing.T) {
 	}
 }
 
-// TestCreateUIMessageStream_OnFinishCallback verifies the callback fires with correct data.
-func TestCreateUIMessageStream_OnFinishCallback(t *testing.T) {
+// TestCreateUIMessageStream_OnEndCallback verifies the callback fires with correct data.
+func TestCreateUIMessageStream_OnEndCallback(t *testing.T) {
 	var buf bytes.Buffer
-	var finishResult UIStreamFinishResult
+	var endResult UIStreamEndResult
 
 	CreateUIMessageStream(&buf, CreateUIStreamOptions{
 		MessageID: "msg-create-4",
-		OnFinish: func(result UIStreamFinishResult) {
-			finishResult = result
+		OnEnd: func(result UIStreamEndResult) {
+			endResult = result
 		},
 	}, func(sw *UIStreamWriter) error {
 		sr := newMockStreamEventer(
@@ -152,11 +154,11 @@ func TestCreateUIMessageStream_OnFinishCallback(t *testing.T) {
 		return nil
 	})
 
-	if finishResult.Text != "Hello world" {
-		t.Errorf("expected Text=%q, got %q", "Hello world", finishResult.Text)
+	if endResult.Text != "Hello world" {
+		t.Errorf("expected Text=%q, got %q", "Hello world", endResult.Text)
 	}
-	if finishResult.FinishReason != "stop" {
-		t.Errorf("expected FinishReason=stop, got %q", finishResult.FinishReason)
+	if endResult.FinishReason != "stop" {
+		t.Errorf("expected FinishReason=stop, got %q", endResult.FinishReason)
 	}
 }
 
@@ -225,7 +227,7 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 			engine.StepEvent{Type: engine.StepEventStepStart},
 			engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
 			engine.StepEvent{Type: engine.StepEventUsage, Usage: &engine.Usage{
-				PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15,
+				InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
 			}},
 			engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
 			engine.StepEvent{Type: engine.StepEventDone},
@@ -246,21 +248,21 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 	assertContains(t, output, `"tokens":15`)
 }
 
-// TestCreateUIMessageStream_OnFinishWithError verifies OnFinish fires with error reason.
-func TestCreateUIMessageStream_OnFinishWithError(t *testing.T) {
+// TestCreateUIMessageStream_OnEndWithError verifies OnEnd fires with error reason.
+func TestCreateUIMessageStream_OnEndWithError(t *testing.T) {
 	var buf bytes.Buffer
-	var finishResult UIStreamFinishResult
+	var endResult UIStreamEndResult
 
 	CreateUIMessageStream(&buf, CreateUIStreamOptions{
 		MessageID: "msg-create-9",
-		OnFinish: func(result UIStreamFinishResult) {
-			finishResult = result
+		OnEnd: func(result UIStreamEndResult) {
+			endResult = result
 		},
 	}, func(sw *UIStreamWriter) error {
 		return fmt.Errorf("something broke")
 	})
 
-	if finishResult.FinishReason != "error" {
-		t.Errorf("expected FinishReason=error, got %q", finishResult.FinishReason)
+	if endResult.FinishReason != "error" {
+		t.Errorf("expected FinishReason=error, got %q", endResult.FinishReason)
 	}
 }

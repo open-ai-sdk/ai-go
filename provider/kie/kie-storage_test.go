@@ -34,14 +34,14 @@ func TestUploadBase64_Success(t *testing.T) {
 				FilePath    string `json:"filePath"`
 				DownloadURL string `json:"downloadUrl"`
 				FileSize    int64  `json:"fileSize"`
-				MimeType    string `json:"mimeType"`
+				MediaType   string `json:"mimeType"`
 				UploadedAt  string `json:"uploadedAt"`
 			}{
 				FileName:    "out.png",
 				FilePath:    "uploads/out.png",
 				DownloadURL: "https://tempfile.redpandaai.co/uploads/out.png",
 				FileSize:    100,
-				MimeType:    "image/png",
+				MediaType:   "image/png",
 				UploadedAt:  "2025-01-01T00:00:00.000Z",
 			},
 		})
@@ -94,7 +94,7 @@ func TestUploadStream_Multipart(t *testing.T) {
 				FilePath    string `json:"filePath"`
 				DownloadURL string `json:"downloadUrl"`
 				FileSize    int64  `json:"fileSize"`
-				MimeType    string `json:"mimeType"`
+				MediaType   string `json:"mimeType"`
 				UploadedAt  string `json:"uploadedAt"`
 			}{DownloadURL: "https://tempfile.redpandaai.co/x.bin"},
 		})

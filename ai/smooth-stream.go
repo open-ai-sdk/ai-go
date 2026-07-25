@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ChunkDetector extracts the next chunk from a buffer.
@@ -83,10 +83,18 @@ func WithChunkDetector(fn ChunkDetector) SmoothStreamOption {
 
 // Transform pipes an input event channel through smooth-stream buffering
 // and returns a new channel of re-chunked events.
-func (ss *SmoothStream) Transform(ctx context.Context, in_ <-chan engine.StepEvent) <-chan engine.StepEvent {
-	out := make(chan engine.StepEvent, 64)
+func (ss *SmoothStream) Transform(ctx context.Context, in_ <-chan StepEvent) <-chan StepEvent {
+	out := make(chan StepEvent, 64)
 	go func() {
 		defer close(out)
+		// The chunk detector may be consumer-supplied; a panic in it surfaces
+		// as an error event (ctx-guarded so it cannot park) before close.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case out <- StepEvent{Type: StepEventError, Error: err}:
+			case <-ctx.Done():
+			}
+		})
 		s := &smoothState{ss: ss, ctx: ctx, out: out}
 		s.run(in_)
 	}()
@@ -97,14 +105,14 @@ func (ss *SmoothStream) Transform(ctx context.Context, in_ <-chan engine.StepEve
 type smoothState struct {
 	ss  *SmoothStream
 	ctx context.Context
-	out chan<- engine.StepEvent
+	out chan<- StepEvent
 
 	buffer    string
-	bufType   engine.StepEventType
+	bufType   StepEventType
 	bufActive bool
 }
 
-func (s *smoothState) send(ev engine.StepEvent) bool {
+func (s *smoothState) send(ev StepEvent) bool {
 	select {
 	case s.out <- ev:
 		return true
@@ -123,10 +131,10 @@ func (s *smoothState) flush() bool {
 	return s.send(ev)
 }
 
-func (s *smoothState) makeBufferEvent(text string) engine.StepEvent {
-	var ev engine.StepEvent
+func (s *smoothState) makeBufferEvent(text string) StepEvent {
+	var ev StepEvent
 	ev.Type = s.bufType
-	if s.bufType == engine.StepEventTextDelta {
+	if s.bufType == StepEventTextDelta {
 		ev.TextDelta = text
 	} else {
 		ev.ReasoningDelta = text
@@ -167,10 +175,10 @@ func (s *smoothState) sleepDelay() bool {
 	}
 }
 
-func (s *smoothState) appendDelta(ev engine.StepEvent) bool {
+func (s *smoothState) appendDelta(ev StepEvent) bool {
 	evType := ev.Type
 	delta := ev.TextDelta
-	if evType == engine.StepEventReasoningDelta {
+	if evType == StepEventReasoningDelta {
 		delta = ev.ReasoningDelta
 	}
 	// Flush if type changed
@@ -185,10 +193,10 @@ func (s *smoothState) appendDelta(ev engine.StepEvent) bool {
 	return s.emitChunks()
 }
 
-func (s *smoothState) run(in_ <-chan engine.StepEvent) {
+func (s *smoothState) run(in_ <-chan StepEvent) {
 	for ev := range in_ {
 		switch ev.Type {
-		case engine.StepEventTextDelta, engine.StepEventReasoningDelta:
+		case StepEventTextDelta, StepEventReasoningDelta:
 			if !s.appendDelta(ev) {
 				return
 			}

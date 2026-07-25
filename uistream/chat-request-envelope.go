@@ -41,7 +41,14 @@ type ChatRequestEnvelope struct {
 	// MessageID is the target message ID for regeneration.
 	// Set when Trigger == "regenerate-message".
 	// ResolveMessageID returns this when non-empty.
-	MessageID string `json:"messageId,omitempty"`
+	MessageID             string                 `json:"messageId,omitempty"`
+	ToolApprovalResponses []ToolApprovalResponse `json:"toolApprovalResponses,omitempty"`
+}
+
+type ToolApprovalResponse struct {
+	ApprovalID string `json:"approvalId"`
+	Approved   bool   `json:"approved"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // EnvelopeMessage is a single message inside ChatRequestEnvelope.

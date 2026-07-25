@@ -1,234 +1,267 @@
 package ai
 
 import (
+	"errors"
 	"sync"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
-// StreamResult wraps a streaming response with convenient accessors.
-// It fans out the source engine channel to text-delta and raw-event subscribers.
+// ErrStreamConsumed is delivered to a view registered after the source stream
+// has already been fully consumed. Channel views surface it as a trailing
+// StepEventError; Events() yields it. A late view is never a silently-closed
+// empty channel.
+var ErrStreamConsumed = errors.New("ai: stream already fully consumed")
+
+// StreamResult wraps a streaming response with convenient accessors. It fans the
+// single source channel out to any number of views — Stream, TextStream, Events,
+// and Consume — created on demand.
 //
-// Callers must consume at least one channel (Events, TextStream, or Consume)
-// or call DrainUnused/ConsumeStream to prevent goroutine leaks.
+// Views may be created in any order, before or after consumption starts. Each
+// registers its own branch of the fan-out; a branch created after the source has
+// advanced receives events from that point on, and one created after the source
+// is exhausted receives ErrStreamConsumed rather than an empty channel.
 //
-// The fan-out goroutine is started lazily on the first call to Events(),
-// TextStream(), Consume(), DrainUnused(), or ConsumeStream(). Channels that
-// are not requested before the fan-out starts are automatically drained, so
-// callers never need to worry about deadlocks from unconsumed channels.
+// Backpressure: the source advances at the speed of the slowest *live* branch
+// (each branch has a bounded buffer). A branch whose consumer has explicitly
+// stopped — an Events() range that breaks — is unregistered and dropped, so it
+// cannot wedge the source or the other views. Channel views (Stream/TextStream)
+// have no break signal; their consumers are expected to drain to completion.
 type StreamResult struct {
-	src   <-chan engine.StepEvent
+	src   <-chan StepEvent
 	tools *ToolSet
 
-	textCh    chan string
-	eventsCh  chan engine.StepEvent
-	consumeCh chan engine.StepEvent
+	mu       sync.Mutex
+	branches []*streamBranch
+	started  bool
+	srcDone  bool
 
 	// done is closed when the fan-out goroutine has finished.
 	done chan struct{}
+}
 
-	// Track which channels were requested before fan-out starts.
-	mu               sync.Mutex
-	startOnce        sync.Once
-	drainOnce        sync.Once
-	consumeOnce      sync.Once
-	textRequested    bool
-	eventsRequested  bool
-	consumeRequested bool
+// streamBranch is one registered view of the fan-out. done is closed when the
+// branch unregisters so the producer's select drops it instead of blocking.
+type streamBranch struct {
+	ch   chan StepEvent
+	done chan struct{}
 }
 
 // NewStreamResult wraps an engine step-event channel in a StreamResult.
-func NewStreamResult(ch <-chan engine.StepEvent) *StreamResult {
+func NewStreamResult(ch <-chan StepEvent) *StreamResult {
 	return NewStreamResultWithTools(ch, nil)
 }
 
 // NewStreamResultWithTools wraps an engine step-event channel and preserves the
 // tool definitions required to build response.messages in Consume().
-func NewStreamResultWithTools(ch <-chan engine.StepEvent, tools *ToolSet) *StreamResult {
-	sr := &StreamResult{
-		src:       ch,
-		tools:     tools,
-		textCh:    make(chan string, 64),
-		eventsCh:  make(chan engine.StepEvent, 64),
-		consumeCh: make(chan engine.StepEvent, 64),
-		done:      make(chan struct{}),
+func NewStreamResultWithTools(ch <-chan StepEvent, tools *ToolSet) *StreamResult {
+	return &StreamResult{src: ch, tools: tools, done: make(chan struct{})}
+}
+
+// register creates a new branch of the fan-out. When the source is already
+// exhausted it returns a branch pre-loaded with an ErrStreamConsumed event and a
+// non-nil error, so every view surfaces the condition rather than a silent close.
+func (sr *StreamResult) register() (*streamBranch, error) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	if sr.srcDone {
+		b := &streamBranch{ch: make(chan StepEvent, 1), done: make(chan struct{})}
+		b.ch <- StepEvent{Type: StepEventError, Error: ErrStreamConsumed}
+		close(b.ch)
+		return b, ErrStreamConsumed
 	}
-	return sr
+	b := &streamBranch{ch: make(chan StepEvent, 64), done: make(chan struct{})}
+	sr.branches = append(sr.branches, b)
+	return b, nil
+}
+
+// unregister removes b from sr's fan-out and signals the producer to drop it. It
+// is safe to call more than once. The branch channel is intentionally not closed
+// here: its consumer has already stopped reading, and finish() only closes
+// branches still registered.
+func (b *streamBranch) unregister(sr *StreamResult) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	for i, cur := range sr.branches {
+		if cur == b {
+			sr.branches = append(sr.branches[:i], sr.branches[i+1:]...)
+			close(b.done)
+			return
+		}
+	}
 }
 
 // ensureStarted launches the fan-out goroutine exactly once.
-// It snapshots which channels have been requested and skips unrequested ones.
 func (sr *StreamResult) ensureStarted() {
-	sr.startOnce.Do(func() {
-		sr.mu.Lock()
-		wantText := sr.textRequested
-		wantEvents := sr.eventsRequested
-		wantConsume := sr.consumeRequested
+	sr.mu.Lock()
+	if sr.started {
 		sr.mu.Unlock()
+		return
+	}
+	sr.started = true
+	sr.mu.Unlock()
 
-		go func() {
-			defer close(sr.done)
-			defer close(sr.textCh)
-			defer close(sr.eventsCh)
-			defer close(sr.consumeCh)
-
-			for ev := range sr.src {
-				if ev.Type == engine.StepEventTextDelta && wantText {
-					sr.textCh <- ev.TextDelta
-				}
-				if wantEvents {
-					sr.eventsCh <- ev
-				}
-				if wantConsume {
-					sr.consumeCh <- ev
-				}
-			}
-		}()
-	})
+	go func() {
+		defer sr.finish()
+		defer safego.Recover(nil, func(err error) { sr.broadcast(StepEvent{Type: StepEventError, Error: err}) })
+		for ev := range sr.src {
+			sr.broadcast(ev)
+		}
+	}()
 }
 
-// TextStream returns a channel yielding text deltas only.
-// The channel is closed when the stream completes.
+// broadcast delivers ev to every live branch. A slow but live branch applies
+// backpressure (blocking send on its bounded buffer); an unregistered branch is
+// dropped via its done channel.
+func (sr *StreamResult) broadcast(ev StepEvent) {
+	sr.mu.Lock()
+	branches := append([]*streamBranch(nil), sr.branches...)
+	sr.mu.Unlock()
+	for _, b := range branches {
+		select {
+		case b.ch <- ev:
+		case <-b.done:
+		}
+	}
+}
+
+// finish marks the source exhausted and closes every still-registered branch.
+func (sr *StreamResult) finish() {
+	sr.mu.Lock()
+	sr.srcDone = true
+	branches := sr.branches
+	sr.branches = nil
+	sr.mu.Unlock()
+	for _, b := range branches {
+		close(b.ch)
+	}
+	close(sr.done)
+}
+
+// TextStream returns a channel yielding text deltas only. Closed when the stream
+// completes. A stream already consumed yields a closed channel (a text view has
+// no error channel; use Stream or Events to observe ErrStreamConsumed).
 func (sr *StreamResult) TextStream() <-chan string {
-	sr.mu.Lock()
-	sr.textRequested = true
-	sr.mu.Unlock()
+	b, err := sr.register()
+	out := make(chan string, 64)
+	if err != nil {
+		close(out)
+		return out
+	}
 	sr.ensureStarted()
-	return sr.textCh
-}
-
-// Events returns the raw engine StepEvent channel.
-// This is an escape hatch for callers such as uistream.Adapter that need
-// full event visibility.
-// The channel is closed when the stream completes.
-func (sr *StreamResult) Events() <-chan engine.StepEvent {
-	sr.mu.Lock()
-	sr.eventsRequested = true
-	sr.mu.Unlock()
-	sr.ensureStarted()
-	return sr.eventsCh
-}
-
-// DrainUnused starts goroutines to consume channels that won't be read.
-// Call this when only Events() is being consumed (e.g. from StreamToWriter)
-// to prevent the fan-out goroutine from deadlocking on full buffers.
-//
-// Safe to call multiple times; only the first call spawns drain goroutines.
-// Must not be combined with Consume() — both read from consumeCh.
-//
-// NOTE: With the lazy fan-out design, DrainUnused is no longer strictly
-// required — unrequested channels are automatically skipped. It is kept
-// for backward compatibility and as an explicit safety net.
-func (sr *StreamResult) DrainUnused() {
-	sr.drainOnce.Do(func() {
-		// Mark textCh and consumeCh as requested so the fan-out sends to them,
-		// then drain them in background goroutines.
-		// NOTE: Do NOT call ensureStarted() here — the caller will call Events()
-		// (or TextStream/Consume) which triggers ensureStarted with all flags set.
-		sr.mu.Lock()
-		sr.textRequested = true
-		sr.consumeRequested = true
-		sr.mu.Unlock()
-
-		go func() {
-			for range sr.textCh {
+	go func() {
+		defer close(out)
+		defer safego.Recover(nil, nil)
+		defer b.unregister(sr)
+		for ev := range b.ch {
+			if ev.Type == StepEventTextDelta {
+				out <- ev.TextDelta
 			}
-		}()
-		go func() {
-			for range sr.consumeCh {
-			}
-		}()
-	})
+		}
+	}()
+	return out
 }
 
-// ConsumeStream drains all output channels for fire-and-forget usage.
-// Call this when you want the stream to run to completion without reading
-// any output — e.g. when side effects are handled via callbacks or merge.
+// Stream returns the raw engine StepEvent channel, closed when the stream
+// completes. This is an escape hatch for callers such as uistream.Adapter that
+// need full event visibility.
 //
-// Unlike DrainUnused (which preserves Events() for reading), ConsumeStream
-// drains everything including the events channel.
-//
-// Must not be combined with DrainUnused or direct channel reads.
-func (sr *StreamResult) ConsumeStream() {
-	sr.consumeOnce.Do(func() {
-		sr.mu.Lock()
-		sr.textRequested = true
-		sr.eventsRequested = true
-		sr.consumeRequested = true
-		sr.mu.Unlock()
+// Unlike TextStream/Events, this channel has no break signal: abandoning it
+// without draining leaves the branch registered, so once its buffer fills the
+// producer blocks — stalling every other live view of the same result. Drain it
+// to completion, or cancel the StreamText context to tear the whole run down.
+func (sr *StreamResult) Stream() <-chan StepEvent {
+	b, err := sr.register()
+	if err == nil {
 		sr.ensureStarted()
-		go func() {
-			for range sr.textCh {
-			}
-		}()
-		go func() {
-			for range sr.eventsCh {
-			}
-		}()
-		go func() {
-			for range sr.consumeCh {
-			}
-		}()
-	})
+	}
+	return b.ch
+}
+
+// DrainUnused exists for backward compatibility and to satisfy the
+// uistream.StreamEventer interface. With the on-demand fan-out it is a no-op:
+// unrequested views are never created, so there is nothing to drain. Safe to
+// call any number of times, in any order relative to the view methods.
+func (sr *StreamResult) DrainUnused() {}
+
+// ConsumeStream drives the stream to completion without exposing any output,
+// for fire-and-forget usage where side effects happen via callbacks. It
+// registers one discard branch and drains it in the background.
+func (sr *StreamResult) ConsumeStream() {
+	b, err := sr.register()
+	if err != nil {
+		return
+	}
+	sr.ensureStarted()
+	go func() {
+		defer safego.Recover(nil, nil)
+		defer b.unregister(sr)
+		for range b.ch {
+		}
+	}()
 }
 
 // Consume blocks until the stream completes and returns the aggregated result.
-// It reads from its own internal channel so it does not interfere with
-// TextStream or Events consumers.
+// It reads its own branch so it does not interfere with other views.
 func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
-	sr.mu.Lock()
-	sr.consumeRequested = true
-	sr.mu.Unlock()
-	sr.ensureStarted()
+	b, err := sr.register()
+	if err == nil {
+		sr.ensureStarted()
+	}
+	defer b.unregister(sr)
 
 	result := &GenerateTextResult{}
 	var currentStep *StepOutput
 
-	for ev := range sr.consumeCh {
+	for ev := range b.ch {
 		switch ev.Type {
-		case engine.StepEventStepStart:
+		case StepEventStepStart:
 			currentStep = &StepOutput{}
 
-		case engine.StepEventTextDelta:
+		case StepEventTextDelta:
 			result.Text += ev.TextDelta
 			if currentStep != nil {
 				currentStep.Text += ev.TextDelta
 			}
 
-		case engine.StepEventReasoningDelta:
+		case StepEventReasoningDelta:
 			result.Reasoning += ev.ReasoningDelta
 			if currentStep != nil {
 				currentStep.Reasoning += ev.ReasoningDelta
 			}
 
-		case engine.StepEventToolCallStart:
+		case StepEventToolCallStart:
 			handleToolCallStart(ev, currentStep)
 
-		case engine.StepEventToolCallDelta:
+		case StepEventToolCallDelta:
 			handleToolCallDelta(ev, currentStep)
 
-		case engine.StepEventToolCallReady:
+		case StepEventToolCallReady:
 			handleToolCallReady(ev, currentStep)
 
-		case engine.StepEventToolResult:
+		case StepEventToolResult:
 			currentStep = handleToolResult(ev, result, currentStep)
 
-		case engine.StepEventUsage:
+		case StepEventUsage:
 			handleUsage(ev, result, currentStep)
 
-		case engine.StepEventSource:
+		case StepEventSource:
 			handleSource(ev, result, currentStep)
 
-		case engine.StepEventFileDelta:
+		case StepEventFileDelta:
 			handleFileDelta(ev, result, currentStep)
 
-		case engine.StepEventStepEnd:
+		case StepEventStepEnd:
 			currentStep = handleStepEnd(ev, result, currentStep, sr.tools)
 
-		case engine.StepEventStructuredOutput:
+		case StepEventStructuredOutput:
 			result.StructuredOutput = ev.StructuredOutput
 
-		case engine.StepEventError:
+		case StepEventToolApprovalRequest, StepEventToolOutputDenied, StepEventToolCallInvalid:
+			// Observed for streaming/UI consumers; they carry no aggregate state
+			// into the non-streaming result, so Consume records nothing here.
+
+		case StepEventError:
 			return result, ev.Error
 		}
 	}

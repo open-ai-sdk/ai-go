@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // emitStructuredOutput makes a final constrained LLM call when an OutputSchema is configured.
-func emitStructuredOutput(ctx context.Context, out chan<- StepEvent, params RunParams, history []Message) {
+func emitStructuredOutput(r *run, params RunParams, history []Message) {
 	if params.Request.Output == nil || params.Request.Output.Type == "text" {
 		return
 	}
@@ -26,9 +28,30 @@ func emitStructuredOutput(ctx context.Context, out chan<- StepEvent, params RunP
 		Settings: params.Request.Settings,
 	}
 
-	eventCh, err := params.Model.Stream(ctx, req)
+	// Bind the structured-output call to a child context so it is released when
+	// this function returns (including an early return on consumer cancellation).
+	ctx, cancel := context.WithCancel(r.ctx)
+	defer cancel()
+
+	// Built only when tracing is enabled — see the matching comment in
+	// runLoop for why this can't just rely on NoopTracer discarding attrs.
+	var startAttrs []tracing.Attr
+	if r.tracingEnabled {
+		startAttrs = []tracing.Attr{
+			{Key: "ai.model_id", Value: params.Model.ModelID()},
+			{Key: "ai.structured_output", Value: true},
+		}
+	}
+	modelCtx, span := r.tracer.Start(ctx, "ai.model_call", startAttrs...)
+	defer span.End()
+	if r.traceContent {
+		span.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(msgs)})
+	}
+
+	eventCh, err := params.Model.Stream(modelCtx, req)
 	if err != nil {
-		out <- StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)}
+		span.RecordError(err)
+		r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)})
 		return
 	}
 
@@ -38,13 +61,18 @@ func emitStructuredOutput(ctx context.Context, out chan<- StepEvent, params RunP
 			b.WriteString(ev.TextDelta)
 		}
 		if ev.Type == StreamEventError {
+			span.RecordError(ev.Error)
 			return
 		}
 	}
 
+	if r.traceContent {
+		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: b.String()})
+	}
+
 	parsed := parseStructuredOutput(b.String())
 	if parsed != nil {
-		out <- StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed}
+		r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
 	}
 }
 

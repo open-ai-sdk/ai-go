@@ -44,8 +44,8 @@ data: {"type":"response.completed","response":{"id":"resp_1","status":"completed
 			textDeltas++
 		case ai.StreamEventUsage:
 			usageCount++
-			if e.Usage.PromptTokens != 5 {
-				t.Errorf("expected 5 input tokens, got %d", e.Usage.PromptTokens)
+			if e.Usage.InputTokens != 5 {
+				t.Errorf("expected 5 input tokens, got %d", e.Usage.InputTokens)
 			}
 		case ai.StreamEventFinish:
 			finishCount++
@@ -200,10 +200,10 @@ func TestOpenAISSE_ContextCancelled(t *testing.T) {
 
 // Request encoder tests
 
-func TestEncodeRequest_SystemAndUserMessage(t *testing.T) {
+func TestEncodeRequest_InstructionsAndUserMessage(t *testing.T) {
 	req := ai.LanguageModelRequest{
-		System:   "You are helpful",
-		Messages: []ai.Message{ai.UserMessage("hello")},
+		Instructions: "You are helpful",
+		Messages:     []ai.Message{ai.UserMessage("hello")},
 	}
 	r, _, err := encodeRequest("gpt-4o", req, true)
 	if err != nil {
@@ -447,8 +447,8 @@ func TestDecodeNonStream_TextResponse(t *testing.T) {
 	if result.Text != "Hello, world!" {
 		t.Errorf("expected Text=Hello, world!, got %q", result.Text)
 	}
-	if result.TotalUsage.PromptTokens != 10 {
-		t.Errorf("expected 10 prompt tokens, got %d", result.TotalUsage.PromptTokens)
+	if result.Usage.InputTokens != 10 {
+		t.Errorf("expected 10 prompt tokens, got %d", result.Usage.InputTokens)
 	}
 	if result.FinishReason != ai.FinishReasonStop {
 		t.Errorf("expected FinishReasonStop, got %q", result.FinishReason)
@@ -467,5 +467,30 @@ func TestDecodeNonStream_ErrorResponse(t *testing.T) {
 	_, err := decodeResponsesNonStream(body, nil)
 	if err == nil {
 		t.Error("expected error, got nil")
+	}
+}
+
+// An image URL must be encoded as input_image. Before media-type routing
+// replaced the old type discriminator, an ImageURLPart carried no media type
+// and fell through to the input_file branch, so the model never saw an image.
+func TestEncodeRequest_ImageURLInput(t *testing.T) {
+	msg := ai.Message{
+		Role: ai.RoleUser,
+		Content: []ai.ContentPart{
+			ai.TextPart("describe this image"),
+			ai.ImageURLPart("https://example.com/img.png"),
+		},
+	}
+	req := ai.LanguageModelRequest{Messages: []ai.Message{msg}}
+	r, _, err := encodeRequest("gpt-4o", req, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	imgPart := r.Input[0].Content[1]
+	if imgPart.Type != "input_image" {
+		t.Errorf("expected type=input_image, got %q", imgPart.Type)
+	}
+	if imgPart.ImageURL != "https://example.com/img.png" {
+		t.Errorf("unexpected ImageURL: %q", imgPart.ImageURL)
 	}
 }

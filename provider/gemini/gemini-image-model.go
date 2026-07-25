@@ -38,7 +38,9 @@ func NewImageModel(modelID string, cfg Config) *ImageModel {
 	return &ImageModel{
 		modelID: modelID,
 		cfg:     cfg,
-		client:  &http.Client{Timeout: timeout},
+		// One-shot request/response (not a stream), so a client-wide timeout is
+		// safe here — it bounds the whole image call rather than capping a stream.
+		client: &http.Client{Timeout: timeout},
 	}
 }
 
@@ -73,12 +75,22 @@ func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		// Bound the error body: attacker-influenced and only used for a message.
+		errBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if readErr != nil {
+			return nil, fmt.Errorf(
+				"gemini-image: unexpected status %d (failed to read body: %w)",
+				resp.StatusCode,
+				readErr,
+			)
+		}
+		return nil, fmt.Errorf("gemini-image: unexpected status %d: %s", resp.StatusCode, string(errBody))
+	}
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-image: read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini-image: unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return m.parseResponse(respBody)
@@ -117,12 +129,12 @@ func (m *ImageModel) buildRequest(req ai.GenerateImageRequest) nativeRequest {
 		if len(img.Data) > 0 {
 			parts = append(parts, nativePart{
 				InlineData: &nativeInlineData{
-					MimeType: img.MimeType,
-					Data:     base64.StdEncoding.EncodeToString(img.Data),
+					MediaType: img.MediaType,
+					Data:      base64.StdEncoding.EncodeToString(img.Data),
 				},
 			})
 		} else if img.URL != "" {
-			parts = append(parts, encodeMediaFromURL(img.URL, img.MimeType))
+			parts = append(parts, encodeMediaFromURL(img.URL, img.MediaType))
 		}
 	}
 
@@ -170,8 +182,8 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 					continue
 				}
 				result.Images = append(result.Images, ai.GeneratedImage{
-					Data:     decoded,
-					MimeType: part.InlineData.MimeType,
+					Data:      decoded,
+					MediaType: part.InlineData.MediaType,
 				})
 			}
 		}
@@ -179,9 +191,9 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 
 	if resp.UsageMetadata != nil {
 		result.Usage = &ai.Usage{
-			PromptTokens:     resp.UsageMetadata.PromptTokenCount,
-			CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:      resp.UsageMetadata.TotalTokenCount,
+			InputTokens:  resp.UsageMetadata.PromptTokenCount,
+			OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:  resp.UsageMetadata.TotalTokenCount,
 		}
 	}
 

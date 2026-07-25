@@ -1,5 +1,7 @@
 package ai
 
+import "github.com/open-ai-sdk/ai-go/aitypes"
+
 // CallSettings controls model behavior per-request.
 // All pointer fields are optional; nil means "use the model default".
 type CallSettings struct {
@@ -18,25 +20,20 @@ type CallSettings struct {
 	StopSequences []string
 }
 
-// Usage holds token counts for a completion.
-type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	// ReasoningTokens is the number of tokens used for reasoning/thinking (e.g. Gemini thoughtsTokenCount).
-	ReasoningTokens  int
-	CacheReadTokens  int
-	CacheWriteTokens int
-}
-
-// FinishReason indicates why the model stopped generating.
-type FinishReason string
+// Usage, token-detail, and FinishReason types are aliases of the shared aitypes
+// package so the ai and engine layers name one identical set (see ai/types.go).
+type (
+	Usage              = aitypes.Usage
+	InputTokenDetails  = aitypes.InputTokenDetails
+	OutputTokenDetails = aitypes.OutputTokenDetails
+	FinishReason       = aitypes.FinishReason
+)
 
 const (
-	FinishReasonStop          FinishReason = "stop"
-	FinishReasonToolCalls     FinishReason = "tool_calls"
-	FinishReasonLength        FinishReason = "length"
-	FinishReasonContentFilter FinishReason = "content_filter"
-	FinishReasonError         FinishReason = "error"
-	FinishReasonUnknown       FinishReason = "unknown"
+	FinishReasonStop          = aitypes.FinishReasonStop
+	FinishReasonToolCalls     = aitypes.FinishReasonToolCalls
+	FinishReasonLength        = aitypes.FinishReasonLength
+	FinishReasonContentFilter = aitypes.FinishReasonContentFilter
+	FinishReasonError         = aitypes.FinishReasonError
+	FinishReasonUnknown       = aitypes.FinishReasonUnknown
 )

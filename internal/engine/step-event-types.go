@@ -1,171 +1,121 @@
 // Package engine implements the multi-step tool-loop that drives GenerateText and StreamText.
-// It defines its own model interface and event types to avoid import cycles with package ai.
+// Its event and data types are aliases of the public aitypes package, so the ai
+// and uistream packages name one identical set of types instead of bridging
+// duplicate universes with converters.
 package engine
 
-import "encoding/json"
+import "github.com/open-ai-sdk/ai-go/aitypes"
 
-// StepEventType identifies the kind of event emitted by the engine during a run.
-type StepEventType int
-
-const (
-	StepEventTextDelta StepEventType = iota
-	StepEventReasoningDelta
-	StepEventToolCallStart // first delta for a new tool call
-	StepEventToolCallDelta // subsequent argument fragment
-	StepEventToolCallReady // tool call complete, about to execute
-	StepEventToolResult    // tool execution result
-	StepEventUsage
-	StepEventStepStart
-	StepEventStepEnd
-	StepEventToolCallInvalid // tool call had invalid JSON args, skipped execution
-	StepEventStructuredOutput
-	StepEventDone
-	StepEventError
-	// StepEventSource carries a source reference from a provider-native tool.
-	StepEventSource
-	// StepEventFileDelta carries a file/image output part from the model.
-	StepEventFileDelta
+// Event and data types are aliases of aitypes: an alias is the same type, so a
+// value constructed as engine.StepEvent is also an aitypes.StepEvent and an
+// ai.StepEvent with no conversion.
+type (
+	StepEventType      = aitypes.StepEventType
+	StepEvent          = aitypes.StepEvent
+	FinishReason       = aitypes.FinishReason
+	Usage              = aitypes.Usage
+	InputTokenDetails  = aitypes.InputTokenDetails
+	OutputTokenDetails = aitypes.OutputTokenDetails
+	ToolResultContent  = aitypes.ToolResultContent
+	ToolResult         = aitypes.ToolResult
+	StreamEventType    = aitypes.StreamEventType
+	Source             = aitypes.Source
+	Warning            = aitypes.Warning
+	StreamEvent        = aitypes.StreamEvent
 )
 
-// StepEvent is a single event emitted by the engine's Run goroutine.
-type StepEvent struct {
-	Type StepEventType
-
-	// Text/reasoning fields.
-	TextDelta      string
-	ReasoningDelta string
-
-	// Tool call fields.
-	ToolCallIndex     int
-	ToolCallID        string
-	ToolCallName      string
-	ToolCallArgsDelta string
-	ThoughtSignature  string
-
-	// Tool result.
-	ToolResult *ToolResult
-
-	// Usage.
-	Usage *Usage
-
-	// Step metadata.
-	StepNumber   int
-	FinishReason FinishReason
-	// RawFinishReason is the unmodified finish reason string from the provider.
-	RawFinishReason string
-	// ProviderMetadata carries provider-specific metadata.
-	ProviderMetadata map[string]any
-	// Warnings carries non-fatal advisories.
-	Warnings []Warning
-
-	// Source is set for StepEventSource events.
-	Source *Source
-
-	// File fields are set for StepEventFileDelta.
-	FileData     []byte
-	FileMimeType string
-
-	// Structured output (final step only).
-	StructuredOutput json.RawMessage
-
-	// Error.
-	Error error
-}
-
-// FinishReason indicates why the model stopped generating.
-type FinishReason string
-
+// StepEventType values.
 const (
-	FinishReasonStop          FinishReason = "stop"
-	FinishReasonToolCalls     FinishReason = "tool_calls"
-	FinishReasonLength        FinishReason = "length"
-	FinishReasonContentFilter FinishReason = "content_filter"
-	FinishReasonError         FinishReason = "error"
-	FinishReasonUnknown       FinishReason = "unknown"
+	StepEventTextDelta           = aitypes.StepEventTextDelta
+	StepEventReasoningDelta      = aitypes.StepEventReasoningDelta
+	StepEventToolCallStart       = aitypes.StepEventToolCallStart
+	StepEventToolCallDelta       = aitypes.StepEventToolCallDelta
+	StepEventToolCallReady       = aitypes.StepEventToolCallReady
+	StepEventToolResult          = aitypes.StepEventToolResult
+	StepEventToolApprovalRequest = aitypes.StepEventToolApprovalRequest
+	StepEventToolOutputDenied    = aitypes.StepEventToolOutputDenied
+	StepEventUsage               = aitypes.StepEventUsage
+	StepEventStepStart           = aitypes.StepEventStepStart
+	StepEventStepEnd             = aitypes.StepEventStepEnd
+	StepEventToolCallInvalid     = aitypes.StepEventToolCallInvalid
+	StepEventStructuredOutput    = aitypes.StepEventStructuredOutput
+	StepEventDone                = aitypes.StepEventDone
+	StepEventError               = aitypes.StepEventError
+	StepEventSource              = aitypes.StepEventSource
+	StepEventFileDelta           = aitypes.StepEventFileDelta
 )
 
-// Usage holds token counts for a completion step.
-type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	// ReasoningTokens is the number of tokens used for reasoning/thinking (e.g. Gemini thoughtsTokenCount).
-	ReasoningTokens  int
-	CacheReadTokens  int
-	CacheWriteTokens int
-}
-
-// ToolResultContent represents a single content part in a tool result.
-type ToolResultContent struct {
-	Type     string // "text" or "image"
-	Text     string // for type="text"
-	Data     []byte // for type="image"
-	MimeType string // for type="image"
-}
-
-// ToolResult holds the output of a single tool invocation.
-type ToolResult struct {
-	ID      string
-	Name    string
-	Args    string
-	Output  string
-	Content []ToolResultContent // optional multi-part content
-}
-
-// StreamEventType identifies provider stream event kinds.
-type StreamEventType int
-
+// FinishReason values.
 const (
-	StreamEventTextDelta StreamEventType = iota
-	StreamEventReasoningDelta
-	StreamEventToolCallDelta
-	StreamEventUsage
-	StreamEventFinish
-	StreamEventError
-	// StreamEventSource carries a source reference (web search result, document, etc.)
-	StreamEventSource
-	// StreamEventFileDelta carries a file/image output part from the model.
-	StreamEventFileDelta
+	FinishReasonStop          = aitypes.FinishReasonStop
+	FinishReasonToolCalls     = aitypes.FinishReasonToolCalls
+	FinishReasonLength        = aitypes.FinishReasonLength
+	FinishReasonContentFilter = aitypes.FinishReasonContentFilter
+	FinishReasonError         = aitypes.FinishReasonError
+	FinishReasonUnknown       = aitypes.FinishReasonUnknown
 )
 
-// Source represents a single source reference from a provider-native tool.
-type Source struct {
-	SourceType       string
-	ID               string
-	URL              string
-	Title            string
-	ProviderMetadata map[string]any
-}
+// ToolResultContent kinds.
+const (
+	ToolResultContentTypeText = aitypes.ToolResultContentTypeText
+	ToolResultContentTypeFile = aitypes.ToolResultContentTypeFile
+)
 
-// Warning is a non-fatal advisory from a provider.
-type Warning struct {
-	Type    string
-	Message string
-	Setting string
-}
+// StreamEventType values.
+const (
+	StreamEventTextDelta      = aitypes.StreamEventTextDelta
+	StreamEventReasoningDelta = aitypes.StreamEventReasoningDelta
+	StreamEventToolCallDelta  = aitypes.StreamEventToolCallDelta
+	StreamEventUsage          = aitypes.StreamEventUsage
+	StreamEventFinish         = aitypes.StreamEventFinish
+	StreamEventError          = aitypes.StreamEventError
+	StreamEventSource         = aitypes.StreamEventSource
+	StreamEventFileDelta      = aitypes.StreamEventFileDelta
+)
 
-// StreamEvent is a normalized event from a Model stream.
-type StreamEvent struct {
-	Type StreamEventType
-
-	TextDelta         string
-	ToolCallIndex     int
-	ToolCallID        string
-	ToolCallName      string
-	ToolCallArgsDelta string
-	ThoughtSignature  string
-	Usage             *Usage
-	FinishReason      FinishReason
-	// RawFinishReason is the unmodified finish reason string from the provider.
-	RawFinishReason string
-	// ProviderMetadata carries provider-specific metadata.
-	ProviderMetadata map[string]any
-	// Warnings carries non-fatal advisories from the provider.
-	Warnings []Warning
-	// Source is set for StreamEventSource events.
-	Source *Source
-	// File fields are set for StreamEventFileDelta.
-	FileData     []byte
-	FileMimeType string
-	Error        error
+// mergeUsage combines two usage reports from the same step, taking each field
+// from the incoming report when it is non-zero and otherwise keeping the prior
+// value. This lets providers report token counts across multiple stream events
+// without a later partial update zeroing an earlier one.
+func mergeUsage(prior, incoming *Usage) *Usage {
+	if incoming == nil {
+		return prior
+	}
+	if prior == nil {
+		return incoming
+	}
+	takeInt := func(cur, next int) int {
+		if next != 0 {
+			return next
+		}
+		return cur
+	}
+	merged := *prior
+	merged.InputTokens = takeInt(prior.InputTokens, incoming.InputTokens)
+	merged.OutputTokens = takeInt(prior.OutputTokens, incoming.OutputTokens)
+	merged.TotalTokens = takeInt(prior.TotalTokens, incoming.TotalTokens)
+	merged.InputTokenDetails.NoCacheTokens = takeInt(
+		prior.InputTokenDetails.NoCacheTokens,
+		incoming.InputTokenDetails.NoCacheTokens,
+	)
+	merged.InputTokenDetails.CacheReadTokens = takeInt(
+		prior.InputTokenDetails.CacheReadTokens,
+		incoming.InputTokenDetails.CacheReadTokens,
+	)
+	merged.InputTokenDetails.CacheWriteTokens = takeInt(
+		prior.InputTokenDetails.CacheWriteTokens,
+		incoming.InputTokenDetails.CacheWriteTokens,
+	)
+	merged.OutputTokenDetails.TextTokens = takeInt(
+		prior.OutputTokenDetails.TextTokens,
+		incoming.OutputTokenDetails.TextTokens,
+	)
+	merged.OutputTokenDetails.ReasoningTokens = takeInt(
+		prior.OutputTokenDetails.ReasoningTokens,
+		incoming.OutputTokenDetails.ReasoningTokens,
+	)
+	if incoming.Raw != nil {
+		merged.Raw = incoming.Raw
+	}
+	return &merged
 }

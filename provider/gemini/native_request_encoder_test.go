@@ -23,9 +23,9 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, nr.Contents[0].Parts[0].Text, "Hello")
 	})
 
-	t.Run("system from req.System field", func(t *testing.T) {
+	t.Run("system from req.Instructions field", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
-			System: "You are a helpful assistant.",
+			Instructions: "You are a helpful assistant.",
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Hi")}},
 			},
@@ -41,7 +41,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 
 	t.Run("system from leading system messages", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
-			System: "Base system.",
+			Instructions: "Base system.",
 			Messages: []ai.Message{
 				ai.SystemMessage("Extra system context."),
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Hi")}},
@@ -180,7 +180,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		req := ai.LanguageModelRequest{
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{
-					{Type: ai.ContentPartTypeImageURL, ImageURL: "https://example.com/photo.jpg"},
+					{Type: ai.ContentPartTypeFile, FileURL: "https://example.com/photo.jpg"},
 				}},
 			},
 		}
@@ -190,14 +190,14 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].FileData)
 		assertEqual(t, parts[0].FileData.FileUri, "https://example.com/photo.jpg")
-		assertEqual(t, parts[0].FileData.MimeType, "image/jpeg")
+		assertEqual(t, parts[0].FileData.MediaType, "image/jpeg")
 	})
 
 	t.Run("image data URI as inline data", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{
-					{Type: ai.ContentPartTypeImageURL, ImageURL: "data:image/png;base64,iVBOR"},
+					{Type: ai.ContentPartTypeFile, FileURL: "data:image/png;base64,iVBOR"},
 				}},
 			},
 		}
@@ -206,7 +206,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		parts := nr.Contents[0].Parts
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].InlineData)
-		assertEqual(t, parts[0].InlineData.MimeType, "image/png")
+		assertEqual(t, parts[0].InlineData.MediaType, "image/png")
 		assertEqual(t, parts[0].InlineData.Data, "iVBOR")
 	})
 
@@ -223,7 +223,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		parts := nr.Contents[0].Parts
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].InlineData)
-		assertEqual(t, parts[0].InlineData.MimeType, "image/png")
+		assertEqual(t, parts[0].InlineData.MediaType, "image/png")
 		assertEqual(t, parts[0].InlineData.Data, "UE5HIGRhdGE=") // base64("PNG data")
 		assertNilPtr(t, parts[0].FileData)
 	})
@@ -241,7 +241,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		parts := nr.Contents[0].Parts
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].InlineData)
-		assertEqual(t, parts[0].InlineData.MimeType, "application/pdf")
+		assertEqual(t, parts[0].InlineData.MediaType, "application/pdf")
 		assertEqual(t, parts[0].InlineData.Data, "UERGIGNvbnRlbnQ=")
 	})
 
@@ -259,7 +259,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, len(parts), 1)
 		assertNotNilPtr(t, parts[0].FileData)
 		assertEqual(t, parts[0].FileData.FileUri, "https://storage.googleapis.com/bucket/file.pdf")
-		assertEqual(t, parts[0].FileData.MimeType, "application/pdf")
+		assertEqual(t, parts[0].FileData.MediaType, "application/pdf")
 	})
 
 	t.Run("generation config mapping", func(t *testing.T) {
@@ -406,7 +406,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 		temp := float32(0.5)
 		budget := 4096
 		req := ai.LanguageModelRequest{
-			System: "Be helpful.",
+			Instructions: "Be helpful.",
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Hello")}},
 			},
@@ -450,7 +450,7 @@ func TestEncodeNativeRequest(t *testing.T) {
 	t.Run("full tool loop conversation", func(t *testing.T) {
 		args := json.RawMessage(`{"city":"NYC"}`)
 		req := ai.LanguageModelRequest{
-			System: "You help with weather.",
+			Instructions: "You help with weather.",
 			Messages: []ai.Message{
 				{Role: ai.RoleUser, Content: []ai.ContentPart{ai.TextPart("Weather in NYC?")}},
 				{Role: ai.RoleAssistant, Content: []ai.ContentPart{

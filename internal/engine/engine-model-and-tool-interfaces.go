@@ -1,6 +1,12 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"log/slog"
+
+	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
+)
 
 type ctxKey int
 
@@ -23,25 +29,6 @@ type Model interface {
 	Stream(ctx context.Context, req Request) (<-chan StreamEvent, error)
 }
 
-// ToolExecutor executes a named tool with JSON arguments.
-type ToolExecutor interface {
-	Execute(ctx context.Context, name, argsJSON string) (string, error)
-}
-
-// ToolDefinition describes a tool available to the model.
-type ToolDefinition struct {
-	Name          string
-	Description   string
-	InputSchema   map[string]any
-	ToModelOutput func(result string) string
-}
-
-// ToolSet is a collection of tool definitions and an executor.
-type ToolSet struct {
-	Definitions []ToolDefinition
-	Executor    ToolExecutor
-}
-
 // Message is a conversation turn (engine-internal).
 type Message struct {
 	Role    string
@@ -49,21 +36,19 @@ type Message struct {
 }
 
 // ContentPart is a single part of a message.
-// Type is one of: "text", "image_url", "file", "tool_call", "tool_result", "reasoning".
+// Type is one of: "text", "file", "tool_call", "tool_result", "reasoning".
+// Images have no dedicated type — they are file parts carrying an image MediaType.
 type ContentPart struct {
 	Type string
 
 	// text / reasoning
 	Text string
 
-	// image_url
-	ImageURL string
-
 	// file
-	FileURL  string
-	MimeType string
+	FileURL   string
+	MediaType string
 
-	// Shared multimodal fields (image_url and file parts).
+	// Shared multimodal fields (file parts).
 	Data     []byte // Inline binary content.
 	FileID   string // Provider-specific file identifier.
 	Filename string // Original filename (file parts).
@@ -90,13 +75,15 @@ type ToolChoice struct {
 
 // Request is the engine-internal model request.
 type Request struct {
-	System          string
+	Instructions    string
 	Messages        []Message
 	Tools           []ToolDefinition
 	ToolChoice      *ToolChoice
 	Output          *OutputSchema
 	Settings        CallSettings
 	ProviderOptions map[string]any
+	ToolsContext    map[string]any
+	RuntimeContext  map[string]any
 }
 
 // OutputSchema describes the desired JSON structure for a structured output call.
@@ -127,8 +114,10 @@ type StepResult struct {
 
 // PrepareStepContext provides information about the current step for the PrepareStep callback.
 type PrepareStepContext struct {
-	StepNumber int
-	Steps      []StepResultInfo
+	StepNumber     int
+	Steps          []StepResultInfo
+	ToolsContext   map[string]any
+	RuntimeContext map[string]any
 }
 
 // StepResultInfo holds information about a completed step for PrepareStep evaluation.
@@ -153,7 +142,7 @@ type PrepareStepResult struct {
 	Model           Model
 	ToolChoice      *ToolChoice
 	ActiveTools     []string
-	System          string
+	Instructions    string
 	ProviderOptions map[string]any
 }
 
@@ -162,14 +151,14 @@ type PrepareStepFunc func(ctx PrepareStepContext) *PrepareStepResult
 
 // LifecycleCallbacks holds optional callbacks for observability during a run.
 type LifecycleCallbacks struct {
-	OnStepFinish func(event StepFinishEvent)
-	OnFinish     func(event FinishEvent)
-	OnChunk      func(event StepEvent)
-	OnError      func(err error)
+	OnStepEnd func(event StepEndEvent)
+	OnEnd     func(event EndEvent)
+	OnChunk   func(event StepEvent)
+	OnError   func(err error)
 }
 
-// StepFinishEvent holds data passed to OnStepFinish after each step.
-type StepFinishEvent struct {
+// StepEndEvent holds data passed to OnStepEnd after each step.
+type StepEndEvent struct {
 	StepNumber       int
 	Text             string
 	Reasoning        string
@@ -181,12 +170,12 @@ type StepFinishEvent struct {
 	Warnings         []Warning
 }
 
-// FinishEvent holds data passed to OnFinish when the entire run completes.
-type FinishEvent struct {
+// EndEvent holds data passed to OnEnd when the entire run completes.
+type EndEvent struct {
 	Text             string
 	Reasoning        string
 	Steps            []StepResultInfo
-	TotalUsage       Usage
+	Usage            Usage
 	FinishReason     FinishReason
 	ProviderMetadata map[string]any
 }
@@ -205,46 +194,23 @@ type ToolCallInfo struct {
 
 // ToolCallRepairContext describes a tool call that failed validation.
 type ToolCallRepairContext struct {
-	System   string
-	Messages []Message
-	ToolCall ToolCallInfo
-	Tools    *ToolSet
-	Error    error
+	Instructions string
+	Messages     []Message
+	ToolCall     ToolCallInfo
+	Tools        *ToolSet
+	Error        error
 }
 
 // ToolCallRepairFunc attempts to repair an invalid tool call before it is surfaced.
 type ToolCallRepairFunc func(ctx context.Context, input ToolCallRepairContext) (*ToolCallInfo, error)
 
-// NoSuchToolError indicates the model called a tool that is not active.
-type NoSuchToolError struct {
-	ToolName       string
-	AvailableTools []string
-}
-
-func (e *NoSuchToolError) Error() string {
-	if len(e.AvailableTools) == 0 {
-		return "unknown tool " + e.ToolName
-	}
-	return "unknown tool " + e.ToolName
-}
-
-// InvalidToolArgumentsError indicates that the tool call arguments were invalid.
-type InvalidToolArgumentsError struct {
-	ToolName string
-	Args     string
-	Cause    error
-}
-
-func (e *InvalidToolArgumentsError) Error() string {
-	return "invalid arguments for tool " + e.ToolName
-}
-
-func (e *InvalidToolArgumentsError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
+// Tool error types are aliases of the shared aitypes definitions, so a value
+// raised inside the engine loop is the same type the caller matches with
+// errors.As/Is (see aitypes/tool-errors.go).
+type (
+	NoSuchToolError           = aitypes.NoSuchToolError
+	InvalidToolArgumentsError = aitypes.InvalidToolArgumentsError
+)
 
 // RunParams configures a single engine run.
 type RunParams struct {
@@ -255,9 +221,22 @@ type RunParams struct {
 	MaxSteps       int
 	PrepareStep    PrepareStepFunc
 	RepairToolCall ToolCallRepairFunc
+	ToolApproval   map[string]func(string, string) bool
+	Approver       ApprovalResponder
 	Callbacks      *LifecycleCallbacks
 	// ParallelToolExecution enables parallel tool execution.
 	ParallelToolExecution bool
 	// MaxParallelTools limits concurrent tool executions. Default: 5.
 	MaxParallelTools int
+	// Logger, when set, receives structured logs (e.g. recovered panics). Nil is
+	// a no-op.
+	Logger *slog.Logger
+	// Tracer, when set, receives spans for the run/step/model-call/tool-call
+	// boundaries (see internal/tracing). Nil falls back to a genuine no-op
+	// that never touches OTel.
+	Tracer tracing.Tracer
+	// TraceContent attaches prompt, completion, and tool-argument content to
+	// spans when true. Default false: spans never carry content, only
+	// metadata (model ID, step number, tool name, usage, finish reason).
+	TraceContent bool
 }

@@ -8,12 +8,12 @@ import (
 type CreateUIStreamOptions struct {
 	MessageID string
 	Metadata  any
-	OnFinish  func(result UIStreamFinishResult)
+	OnEnd     func(result UIStreamEndResult)
 	OnError   func(err error) string // return custom error message, or "" for default
 }
 
-// UIStreamFinishResult holds info about the completed stream.
-type UIStreamFinishResult struct {
+// UIStreamEndResult holds info about the completed stream.
+type UIStreamEndResult struct {
 	Text         string
 	FinishReason string
 }
@@ -26,25 +26,28 @@ type UIStreamWriter struct {
 }
 
 // WriteData emits a custom data-* chunk.
-func (sw *UIStreamWriter) WriteData(name string, payload any) {
-	sw.writer.WriteData(name, payload)
+func (sw *UIStreamWriter) WriteData(name string, payload any) error {
+	return sw.writer.WriteData(name, payload)
 }
 
 // WriteTransientData emits a transient custom data-* chunk.
-func (sw *UIStreamWriter) WriteTransientData(name string, payload any) {
-	sw.writer.WriteTransientData(name, payload)
+func (sw *UIStreamWriter) WriteTransientData(name string, payload any) error {
+	return sw.writer.WriteTransientData(name, payload)
 }
 
 // WriteSource emits a source chunk.
-func (sw *UIStreamWriter) WriteSource(s Source) {
-	sw.writer.WriteSource(s)
+func (sw *UIStreamWriter) WriteSource(s Source) error {
+	return sw.writer.WriteSource(s)
 }
 
 // Merge pipes chunks from a ToUIMessageStream output into this stream.
 // The merge respects lifecycle: it skips the start chunk from the merged stream
 // (since the outer stream already emitted start) and captures the finish reason
 // without emitting finish (the outer stream manages finish).
-func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) {
+// Merge returns the first write error (client disconnected); writes stop after
+// it while text tracking continues so the returned text stays accurate.
+func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) error {
+	var writeErr error
 	for c := range chunks {
 		switch c.Type {
 		case ChunkStart:
@@ -54,12 +57,14 @@ func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) {
 				sw.lastFinish = fr
 			}
 			// Emit message-metadata from finish if present.
-			if md, ok := c.Fields["messageMetadata"]; ok && md != nil {
-				sw.writer.WriteMessageMetadata(md)
+			if md, ok := c.Fields["messageMetadata"]; ok && md != nil && writeErr == nil {
+				writeErr = sw.writer.WriteMessageMetadata(md)
 			}
 			// Don't emit finish — outer manages lifecycle.
 		default:
-			sw.writer.WriteChunk(c.Type, c.Fields)
+			if writeErr == nil {
+				writeErr = sw.writer.WriteChunk(c.Type, c.Fields)
+			}
 			// Track text for finish result.
 			if c.Type == ChunkTextDelta {
 				if delta, ok := c.Fields["delta"].(string); ok {
@@ -68,12 +73,13 @@ func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) {
 			}
 		}
 	}
+	return writeErr
 }
 
 // MergeStreamResult is a convenience that merges a StreamEventer using ToUIMessageStream.
-func (sw *UIStreamWriter) MergeStreamResult(sr StreamEventer, msgID string, opts ToUIStreamOptions) {
+func (sw *UIStreamWriter) MergeStreamResult(sr StreamEventer, msgID string, opts ToUIStreamOptions) error {
 	chunks := ToUIMessageStream(sr, msgID, opts)
-	sw.Merge(chunks)
+	return sw.Merge(chunks)
 }
 
 // CreateUIMessageStream creates a managed UI message stream.
@@ -85,7 +91,13 @@ func CreateUIMessageStream(w io.Writer, opts CreateUIStreamOptions, execute func
 	if opts.Metadata != nil {
 		startFields["messageMetadata"] = opts.Metadata
 	}
-	WriteSSE(w, Chunk{Type: ChunkStart, Fields: startFields})
+	if err := WriteSSE(w, Chunk{Type: ChunkStart, Fields: startFields}); err != nil {
+		// Client disconnected before the stream began.
+		if opts.OnEnd != nil {
+			opts.OnEnd(UIStreamEndResult{FinishReason: "error"})
+		}
+		return
+	}
 
 	// Create stream writer.
 	sw := &UIStreamWriter{
@@ -100,21 +112,33 @@ func CreateUIMessageStream(w io.Writer, opts CreateUIStreamOptions, execute func
 	if sw.lastFinish != "" {
 		finishReason = sw.lastFinish
 	}
+	// A failed terminal write means the client disconnected; the flag reflects it
+	// so OnEnd (which may drive server-side persistence) sees an error finish.
+	clientGone := false
 	if err != nil {
-		errMsg := err.Error()
+		// Redact by default; OnError is the consumer's own code and receives the
+		// full typed error, so it can choose what (if anything) to surface.
+		errMsg := redactStreamError(err)
 		if opts.OnError != nil {
 			if custom := opts.OnError(err); custom != "" {
 				errMsg = custom
 			}
 		}
-		sw.writer.WriteError(errMsg)
+		finishReason = "error"
+		if werr := sw.writer.WriteError(errMsg); werr != nil {
+			clientGone = true
+		}
+	}
+
+	if werr := sw.writer.WriteFinishWithReason(finishReason, nil); werr != nil {
+		clientGone = true
+	}
+	if clientGone {
 		finishReason = "error"
 	}
 
-	sw.writer.WriteFinishWithReason(finishReason, nil)
-
-	if opts.OnFinish != nil {
-		opts.OnFinish(UIStreamFinishResult{
+	if opts.OnEnd != nil {
+		opts.OnEnd(UIStreamEndResult{
 			Text:         sw.text,
 			FinishReason: finishReason,
 		})

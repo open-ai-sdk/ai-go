@@ -95,8 +95,8 @@ func TestStreamToWriter_ToolResultHookFires(t *testing.T) {
 	}
 }
 
-// TestStreamToWriter_OnFinishCallback verifies the onFinish callback is invoked with full text.
-func TestStreamToWriter_OnFinishCallback(t *testing.T) {
+// TestStreamToWriter_OnEndCallback verifies the onEnd callback is invoked with full text.
+func TestStreamToWriter_OnEndCallback(t *testing.T) {
 	sr := makeStreamResult(
 		engine.StepEvent{Type: engine.StepEventStepStart},
 		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hello"},
@@ -104,14 +104,14 @@ func TestStreamToWriter_OnFinishCallback(t *testing.T) {
 		engine.StepEvent{Type: engine.StepEventDone},
 	)
 
-	var finished string
+	var ended string
 	var buf bytes.Buffer
-	StreamToWriter(sr, &buf, "msg-finish", WithUIOnFinish(func(text string) {
-		finished = text
+	StreamToWriter(sr, &buf, "msg-finish", WithUIOnEnd(func(text string) {
+		ended = text
 	}))
 
-	if finished != "hello" {
-		t.Errorf("expected onFinish text=%q, got %q", "hello", finished)
+	if ended != "hello" {
+		t.Errorf("expected onEnd text=%q, got %q", "hello", ended)
 	}
 }
 

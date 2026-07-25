@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // responsesChunk represents a single SSE event from the OpenAI Responses API stream.
@@ -21,9 +24,16 @@ type responsesChunk struct {
 		ID     string `json:"id"`
 		Status string `json:"status"`
 		Usage  *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-			TotalTokens  int `json:"total_tokens"`
+			InputTokens        int `json:"input_tokens"`
+			OutputTokens       int `json:"output_tokens"`
+			TotalTokens        int `json:"total_tokens"`
+			InputTokensDetails *struct {
+				CachedTokens     int `json:"cached_tokens"`
+				CacheWriteTokens int `json:"cache_write_tokens"`
+			} `json:"input_tokens_details,omitempty"`
+			OutputTokensDetails *struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"output_tokens_details,omitempty"`
 		} `json:"usage"`
 	} `json:"response"`
 
@@ -85,13 +95,25 @@ func decodeResponsesSSEStream(
 ) {
 	defer close(ch)
 	defer body.Close()
+	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
+	// watcher on normal completion.
+	defer httputil.CloseOnCancel(ctx, body)()
+	// Recover is deferred last so it runs first: a panic surfaces as an error
+	// event before the channel closes, instead of crashing the process.
+	defer safego.Recover(nil, func(err error) {
+		select {
+		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+		case <-ctx.Done():
+		}
+	})
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// bufio.Reader has no per-line size cap, so a single data: line larger than
+	// a Scanner's token limit (e.g. a base64 image) no longer kills the stream.
+	reader := bufio.NewReader(body)
 
 	state := &streamState{callsByItemID: make(map[string]*pendingCall)}
 
-	for scanner.Scan() {
+	for {
 		select {
 		case <-ctx.Done():
 			ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()}
@@ -99,33 +121,36 @@ func decodeResponsesSSEStream(
 		default:
 		}
 
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			return
-		}
-
-		var chunk responsesChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
 			ch <- ai.StreamEvent{
 				Type:  ai.StreamEventError,
-				Error: fmt.Errorf("openai: unmarshal responses chunk: %w", err),
+				Error: fmt.Errorf("openai: read stream: %w", err),
 			}
 			return
 		}
 
-		if done := dispatchChunk(chunk, state, ch, encodingWarnings); done {
-			return
+		line = strings.TrimRight(line, "\r\n")
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				return
+			}
+			var chunk responsesChunk
+			if jsonErr := json.Unmarshal([]byte(data), &chunk); jsonErr != nil {
+				ch <- ai.StreamEvent{
+					Type:  ai.StreamEventError,
+					Error: fmt.Errorf("openai: unmarshal responses chunk: %w", jsonErr),
+				}
+				return
+			}
+			if done := dispatchChunk(chunk, state, ch, encodingWarnings); done {
+				return
+			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		ch <- ai.StreamEvent{
-			Type:  ai.StreamEventError,
-			Error: fmt.Errorf("openai: read stream: %w", err),
+		if errors.Is(err, io.EOF) {
+			return
 		}
 	}
 }
@@ -204,10 +229,39 @@ func handleResponseCompleted(
 		state.responseID = chunk.Response.ID
 	}
 	if u := chunk.Response.Usage; u != nil {
+		var cachedTokens, cacheWriteTokens, reasoningTokens int
+		if u.InputTokensDetails != nil {
+			cachedTokens = u.InputTokensDetails.CachedTokens
+			cacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
+		}
+		if u.OutputTokensDetails != nil {
+			reasoningTokens = u.OutputTokensDetails.ReasoningTokens
+		}
+		// input_tokens already includes cached and cache-write tokens.
+		noCache := u.InputTokens - cachedTokens - cacheWriteTokens
+		if noCache < 0 {
+			noCache = 0
+		}
 		ch <- ai.StreamEvent{Type: ai.StreamEventUsage, Usage: &ai.Usage{
-			PromptTokens:     u.InputTokens,
-			CompletionTokens: u.OutputTokens,
-			TotalTokens:      u.TotalTokens,
+			InputTokens: u.InputTokens,
+			InputTokenDetails: ai.InputTokenDetails{
+				NoCacheTokens:    noCache,
+				CacheReadTokens:  cachedTokens,
+				CacheWriteTokens: cacheWriteTokens,
+			},
+			OutputTokens: u.OutputTokens,
+			OutputTokenDetails: ai.OutputTokenDetails{
+				TextTokens:      u.OutputTokens - reasoningTokens,
+				ReasoningTokens: reasoningTokens,
+			},
+			TotalTokens: u.TotalTokens,
+			Raw: map[string]any{
+				"input_tokens":     u.InputTokens,
+				"output_tokens":    u.OutputTokens,
+				"total_tokens":     u.TotalTokens,
+				"cached_tokens":    cachedTokens,
+				"reasoning_tokens": reasoningTokens,
+			},
 		}}
 	}
 	ch <- ai.StreamEvent{

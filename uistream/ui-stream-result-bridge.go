@@ -13,7 +13,7 @@ type UIStreamOption func(*uiStreamBridgeConfig)
 type uiStreamBridgeConfig struct {
 	toolResultHook     ToolResultHook
 	sourceHook         SourceHook
-	onFinish           func(text string)
+	onEnd              func(text string)
 	persistenceBuilder *PersistedMessageBuilder
 }
 
@@ -32,11 +32,11 @@ func WithUISourceHook(hook SourceHook) UIStreamOption {
 	}
 }
 
-// WithUIOnFinish sets a callback invoked when the stream completes.
+// WithUIOnEnd sets a callback invoked when the stream completes.
 // text is the full accumulated assistant response.
-func WithUIOnFinish(fn func(text string)) UIStreamOption {
+func WithUIOnEnd(fn func(text string)) UIStreamOption {
 	return func(c *uiStreamBridgeConfig) {
-		c.onFinish = fn
+		c.onEnd = fn
 	}
 }
 
@@ -60,7 +60,7 @@ func StreamToWriter(sr *ai.StreamResult, w io.Writer, msgID string, opts ...UISt
 	}
 
 	// Drain textCh and consumeCh so the fan-out goroutine doesn't deadlock.
-	// StreamToWriter only consumes Events().
+	// StreamToWriter only consumes Stream().
 	sr.DrainUnused()
 
 	adapter := NewAdapter(msgID)
@@ -73,9 +73,9 @@ func StreamToWriter(sr *ai.StreamResult, w io.Writer, msgID string, opts ...UISt
 		adapter.WithSourceHook(cfg.sourceHook)
 	}
 
-	if cfg.onFinish != nil {
-		fn := cfg.onFinish
-		adapter.WithOnFinish(func(text, _ string) {
+	if cfg.onEnd != nil {
+		fn := cfg.onEnd
+		adapter.WithOnEnd(func(text, _ string) {
 			fn(text)
 		})
 	}
@@ -84,5 +84,5 @@ func StreamToWriter(sr *ai.StreamResult, w io.Writer, msgID string, opts ...UISt
 		adapter.WithPersistenceBuilder(cfg.persistenceBuilder)
 	}
 
-	return adapter.Stream(sr.Events(), w)
+	return adapter.Stream(sr.Stream(), w)
 }

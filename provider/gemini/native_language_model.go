@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -41,7 +42,9 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 	return &NativeLanguageModel{
 		modelID: modelID,
 		cfg:     cfg,
-		client:  &http.Client{Timeout: timeout},
+		// Streaming path: no client-wide timeout (it would cap the whole SSE
+		// exchange); cfg.Timeout becomes a response-header deadline instead.
+		client: httputil.NewStreamingClient(timeout),
 	}
 }
 
@@ -81,44 +84,53 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", m.cfg.APIKey)
 
-	resp, err := m.client.Do(httpReq) //nolint:bodyclose // closed in goroutine or error path
+	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		respBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"gemini-native: unexpected status %d (failed to read body: %w)",
-				resp.StatusCode,
-				readErr,
-			)
-		}
-		return nil, fmt.Errorf("gemini-native: unexpected status %d: %s", resp.StatusCode, string(respBody))
+		// Typed error carrying status/code/message/request-ID/Retry-After; the
+		// raw body is parsed then discarded, never embedded.
+		return nil, httputil.APIErrorFromResponse(ctx, "gemini-native", resp)
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
+	raw := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer resp.Body.Close()
-		decodeNativeSSEStream(ctx, resp.Body, ch)
+		decodeNativeSSEStream(ctx, resp.Body, raw)
 	}()
 
 	if len(warnings) == 0 {
-		return ch, nil
+		return httputil.GuardStream(ctx, raw), nil
 	}
 
-	// Wrap channel to inject warnings into the first finish event.
+	// Wrap the channel to inject warnings into the first finish event. Sends are
+	// ctx-guarded and the upstream is drained on cancel, matching the Stream
+	// context contract.
 	out := make(chan ai.StreamEvent, 64)
 	go func() {
 		defer close(out)
+		// A panic while injecting warnings surfaces as an error event
+		// (ctx-guarded) before close instead of crashing the process.
+		defer safego.Recover(nil, func(err error) {
+			select {
+			case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
+			case <-ctx.Done():
+			}
+		})
 		finishInjected := false
-		for ev := range ch {
+		for ev := range raw {
 			if !finishInjected && ev.Type == ai.StreamEventFinish {
 				ev.Warnings = append(warnings, ev.Warnings...)
 				finishInjected = true
 			}
-			out <- ev
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				for range raw {
+				}
+				return
+			}
 		}
 	}()
 	return out, nil

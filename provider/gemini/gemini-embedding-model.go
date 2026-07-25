@@ -31,7 +31,9 @@ func NewEmbeddingModel(modelID string, cfg Config) *EmbeddingModel {
 		modelID:              modelID,
 		apiKey:               cfg.APIKey,
 		outputDimensionality: cfg.OutputDimensionality,
-		client:               &http.Client{Timeout: timeout},
+		// One-shot request/response (not a stream), so a client-wide timeout is
+		// safe here — it bounds the whole embed call rather than capping a stream.
+		client: &http.Client{Timeout: timeout},
 	}
 }
 
@@ -59,12 +61,16 @@ func (m *EmbeddingModel) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("gemini embed: build request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/models/%s:batchEmbedContents?key=%s", embedBaseURL, m.modelID, m.apiKey)
+	// The API key travels in the x-goog-api-key header, never the URL: a
+	// transport error wraps a *url.Error that renders the full URL into its
+	// message, which would leak a live key into consumer logs.
+	url := fmt.Sprintf("%s/models/%s:batchEmbedContents", embedBaseURL, m.modelID)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("gemini embed: build http request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", m.apiKey)
 
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
@@ -72,13 +78,22 @@ func (m *EmbeddingModel) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		// Bound the error body: it is attacker-influenced and only used for a message.
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if readErr != nil {
+			return nil, fmt.Errorf(
+				"gemini embed: unexpected status %d (failed to read body: %w)",
+				resp.StatusCode,
+				readErr,
+			)
+		}
+		return nil, fmt.Errorf("gemini embed: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("gemini embed: read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini embed: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
 	return parseBatchEmbedResponse(body, len(texts))
