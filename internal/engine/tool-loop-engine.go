@@ -21,9 +21,10 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	tracer := params.Tracer
 	tracingEnabled := tracer != nil
 	if !tracingEnabled {
-		// No OTel import, no global-provider lookup, no attribute-slice
-		// allocation at any call site below: a caller that configures nothing
-		// pays nothing for tracing, not even OTel's own no-op path.
+		// Defensive fallback for a nil Tracer (engine driven directly without
+		// wiring one). The public ai API always supplies tracing.NewTracer(),
+		// so real callers take the tracingEnabled path; that tracer is OTel's
+		// global no-op until the application registers a provider.
 		tracer = tracing.NoopTracer{}
 	}
 	if params.Logger != nil {

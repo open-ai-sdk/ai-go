@@ -70,7 +70,14 @@ func AgentHandler(a ai.Agent, opts ...ai.Option) http.Handler {
 		}
 		msgID := ResolveMessageIDFromEnvelope(env, newMessageID())
 		callOpts := append(append([]ai.Option{}, opts...), ai.WithMessages(ToAIMessages(env.Messages)...))
-		_ = PipeAgentStream(r.Context(), w, a, msgID, callOpts...)
+		// A custom Agent whose Stream fails before any bytes are written gets a
+		// proper 500; ToolLoopAgent never errors here (failures ride the stream).
+		chunks, err := AgentStream(r.Context(), a, msgID, callOpts...)
+		if err != nil {
+			http.Error(w, "stream error", http.StatusInternalServerError)
+			return
+		}
+		_ = WriteSSEStream(newFlushingSSEWriter(w), chunks)
 	})
 }
 

@@ -2,11 +2,14 @@ package tracing
 
 import "context"
 
-// NoopTracer starts no real span: Start is a plain function call that
-// returns ctx unchanged and a Span whose methods do nothing. internal/engine
-// falls back to this when no Tracer was configured, so a caller that never
-// opts into tracing pays no OTel cost at all — not even the global-provider
-// no-op path in tracer.go, since this file has no OTel import at all.
+// NoopTracer starts no real span: Start is a plain function call that returns
+// ctx unchanged and a Span whose methods do nothing. It has no OTel import.
+//
+// The engine falls back to it only when RunParams.Tracer is nil — i.e. when the
+// engine is driven directly (internal tests, custom callers) without wiring a
+// tracer. The public ai API always wires tracing.NewTracer() (OTel's global,
+// which is itself a no-op until the application registers a provider), so this
+// fallback is not on the public path; it is defensive nil-safety for the engine.
 type NoopTracer struct{}
 
 // Start implements Tracer.
