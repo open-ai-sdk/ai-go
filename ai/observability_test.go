@@ -114,7 +114,12 @@ func TestNoLoggerConfigured_NeverWritesToSlogDefault(t *testing.T) {
 // doesn't break the ordinary path.
 func TestNoOptionsConfigured_RunsCleanlyWithDefaultTracing(t *testing.T) {
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-		Model:    &stubLanguageModel{events: []ai.StreamEvent{{Type: ai.StreamEventTextDelta, TextDelta: "hi"}, {Type: ai.StreamEventFinish, FinishReason: ai.FinishReasonStop}}},
+		Model: &stubLanguageModel{
+			events: []ai.StreamEvent{
+				{Type: ai.StreamEventTextDelta, TextDelta: "hi"},
+				{Type: ai.StreamEventFinish, FinishReason: ai.FinishReasonStop},
+			},
+		},
 		Messages: []ai.Message{ai.UserMessage("go")},
 	})
 	if err != nil {

@@ -51,7 +51,10 @@ func TestGenerateTextRequest_OptionCompleteness(t *testing.T) {
 	for i := 0; i < typ.NumField(); i++ {
 		name := typ.Field(i).Name
 		if !optioned[name] && !exempt[name] {
-			t.Errorf("GenerateTextRequest.%s has no Option and no exemption — add a WithX option or add it to the exempt list with a reason", name)
+			t.Errorf(
+				"GenerateTextRequest.%s has no Option and no exemption — add a WithX option or add it to the exempt list with a reason",
+				name,
+			)
 		}
 	}
 

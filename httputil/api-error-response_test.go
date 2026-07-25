@@ -31,7 +31,9 @@ func TestAPIErrorFromResponse_ParsesHeadersAndBody(t *testing.T) {
 	h.Set("X-Request-Id", "req_abc")
 	body := `{"error":{"message":"Rate limit reached","code":"rate_limit_exceeded","type":"requests"}}`
 
-	err := APIErrorFromResponse(context.Background(), "openai", makeResp(429, h, body))
+	resp := makeResp(429, h, body)
+	defer resp.Body.Close()
+	err := APIErrorFromResponse(context.Background(), "openai", resp)
 
 	if err.StatusCode != 429 {
 		t.Errorf("StatusCode = %d, want 429", err.StatusCode)
@@ -57,7 +59,9 @@ func TestAPIErrorFromResponse_DoesNotEmbedRawBody(t *testing.T) {
 	// A body carrying a secret-looking token must not survive into the error text.
 	secret := "sk-live-SECRETTOKEN-should-not-leak"
 	body := `{"error":{"message":"bad","code":"x"},"debug":"` + secret + `"}`
-	err := APIErrorFromResponse(context.Background(), "openai", makeResp(400, nil, body))
+	resp := makeResp(400, nil, body)
+	defer resp.Body.Close()
+	err := APIErrorFromResponse(context.Background(), "openai", resp)
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("raw body leaked into error text: %q", err.Error())
 	}
@@ -82,7 +86,9 @@ func TestAPIErrorFromResponse_LogsDroppedBodyWhenLoggerConfigured(t *testing.T) 
 	rec := &recordingHandler{}
 	ctx := ctxlog.WithLogger(context.Background(), slog.New(rec))
 
-	_ = APIErrorFromResponse(ctx, "openai", makeResp(400, nil, body))
+	resp := makeResp(400, nil, body)
+	defer resp.Body.Close()
+	_ = APIErrorFromResponse(ctx, "openai", resp)
 
 	if len(rec.records) != 1 {
 		t.Fatalf("expected exactly one log record, got %d", len(rec.records))
@@ -103,7 +109,9 @@ func TestAPIErrorFromResponse_NoLoggerConfigured_NoOutput(t *testing.T) {
 	// The default (no logger attached to ctx) must discard silently — never
 	// touch slog.Default(), never panic on a nil ctx value.
 	body := `{"error":{"message":"bad","code":"x"}}`
-	err := APIErrorFromResponse(context.Background(), "openai", makeResp(400, nil, body))
+	resp := makeResp(400, nil, body)
+	defer resp.Body.Close()
+	err := APIErrorFromResponse(context.Background(), "openai", resp)
 	if err == nil {
 		t.Fatal("expected a non-nil *APIError")
 	}

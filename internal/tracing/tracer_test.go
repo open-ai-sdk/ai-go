@@ -43,7 +43,11 @@ type fakeTracer struct {
 	lastSpan *fakeSpan
 }
 
-func (t *fakeTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+func (t *fakeTracer) Start(
+	ctx context.Context,
+	name string,
+	opts ...trace.SpanStartOption,
+) (context.Context, trace.Span) {
 	t.lastName = name
 	cfg := trace.NewSpanStartConfig(opts...)
 	// The real otelTracer passes the Start-time attrs via trace.WithAttributes;
@@ -93,7 +97,7 @@ func TestNewTracer_EmitsSpanOnConfiguredProvider(t *testing.T) {
 
 	wantErr := errors.New("boom")
 	span.RecordError(wantErr)
-	if ft.lastSpan.recordedErr != wantErr {
+	if !errors.Is(ft.lastSpan.recordedErr, wantErr) {
 		t.Fatalf("recordedErr = %v, want %v", ft.lastSpan.recordedErr, wantErr)
 	}
 

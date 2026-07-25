@@ -154,11 +154,17 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 	}
 
 	raw := make(chan ai.StreamEvent, 64)
-	go DecodeSSEStream(ctx, respBody, raw, SSEDecodeParams{
-		ProviderName:      m.cfg.ProviderName,
-		MetadataExtractor: m.cfg.MetadataExtractor,
-		EncodeWarnings:    encodeWarnings,
-	})
+	// The deferred close guarantees resp.Body is released regardless of whether
+	// the (possibly TimeoutReader-wrapped) respBody close propagates, and keeps
+	// body ownership visible; a second Close is a safe no-op.
+	go func() {
+		defer resp.Body.Close()
+		DecodeSSEStream(ctx, respBody, raw, SSEDecodeParams{
+			ProviderName:      m.cfg.ProviderName,
+			MetadataExtractor: m.cfg.MetadataExtractor,
+			EncodeWarnings:    encodeWarnings,
+		})
+	}()
 	// GuardStream honours the Stream context contract: sends are ctx-guarded and
 	// the decoder is drained on cancel so its body is released.
 	return httputil.GuardStream(ctx, raw), nil

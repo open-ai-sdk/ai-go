@@ -94,11 +94,26 @@ func mergeUsage(prior, incoming *Usage) *Usage {
 	merged.InputTokens = takeInt(prior.InputTokens, incoming.InputTokens)
 	merged.OutputTokens = takeInt(prior.OutputTokens, incoming.OutputTokens)
 	merged.TotalTokens = takeInt(prior.TotalTokens, incoming.TotalTokens)
-	merged.InputTokenDetails.NoCacheTokens = takeInt(prior.InputTokenDetails.NoCacheTokens, incoming.InputTokenDetails.NoCacheTokens)
-	merged.InputTokenDetails.CacheReadTokens = takeInt(prior.InputTokenDetails.CacheReadTokens, incoming.InputTokenDetails.CacheReadTokens)
-	merged.InputTokenDetails.CacheWriteTokens = takeInt(prior.InputTokenDetails.CacheWriteTokens, incoming.InputTokenDetails.CacheWriteTokens)
-	merged.OutputTokenDetails.TextTokens = takeInt(prior.OutputTokenDetails.TextTokens, incoming.OutputTokenDetails.TextTokens)
-	merged.OutputTokenDetails.ReasoningTokens = takeInt(prior.OutputTokenDetails.ReasoningTokens, incoming.OutputTokenDetails.ReasoningTokens)
+	merged.InputTokenDetails.NoCacheTokens = takeInt(
+		prior.InputTokenDetails.NoCacheTokens,
+		incoming.InputTokenDetails.NoCacheTokens,
+	)
+	merged.InputTokenDetails.CacheReadTokens = takeInt(
+		prior.InputTokenDetails.CacheReadTokens,
+		incoming.InputTokenDetails.CacheReadTokens,
+	)
+	merged.InputTokenDetails.CacheWriteTokens = takeInt(
+		prior.InputTokenDetails.CacheWriteTokens,
+		incoming.InputTokenDetails.CacheWriteTokens,
+	)
+	merged.OutputTokenDetails.TextTokens = takeInt(
+		prior.OutputTokenDetails.TextTokens,
+		incoming.OutputTokenDetails.TextTokens,
+	)
+	merged.OutputTokenDetails.ReasoningTokens = takeInt(
+		prior.OutputTokenDetails.ReasoningTokens,
+		incoming.OutputTokenDetails.ReasoningTokens,
+	)
 	if incoming.Raw != nil {
 		merged.Raw = incoming.Raw
 	}

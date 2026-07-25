@@ -168,6 +168,55 @@ func DecodeSSEStream(
 	}
 }
 
+// emitUsageEvent emits a StreamEventUsage for a chunk that carries token counts.
+// Usage may arrive on a chunk with empty choices, so it is handled separately
+// from the choice-driven events below.
+func emitUsageEvent(chunk StreamChunk, ch chan<- ai.StreamEvent) {
+	if chunk.Usage == nil {
+		return
+	}
+	u := chunk.Usage
+	var cachedTokens, cacheWriteTokens int
+	if u.PromptTokensDetails != nil {
+		cachedTokens = u.PromptTokensDetails.CachedTokens
+		cacheWriteTokens = u.PromptTokensDetails.CacheWriteTokens
+	}
+	reasoningTokens := u.ThoughtsTokenCount
+	if u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens != 0 {
+		reasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+	// prompt_tokens already includes cached and cache-write tokens; the
+	// non-cached remainder is what is left after removing them.
+	noCache := u.PromptTokens - cachedTokens - cacheWriteTokens
+	if noCache < 0 {
+		noCache = 0
+	}
+	ch <- ai.StreamEvent{
+		Type: ai.StreamEventUsage,
+		Usage: &ai.Usage{
+			InputTokens: u.PromptTokens,
+			InputTokenDetails: ai.InputTokenDetails{
+				NoCacheTokens:    noCache,
+				CacheReadTokens:  cachedTokens,
+				CacheWriteTokens: cacheWriteTokens,
+			},
+			OutputTokens: u.CompletionTokens,
+			OutputTokenDetails: ai.OutputTokenDetails{
+				TextTokens:      u.CompletionTokens - reasoningTokens,
+				ReasoningTokens: reasoningTokens,
+			},
+			TotalTokens: u.TotalTokens,
+			Raw: map[string]any{
+				"prompt_tokens":     u.PromptTokens,
+				"completion_tokens": u.CompletionTokens,
+				"total_tokens":      u.TotalTokens,
+				"cached_tokens":     cachedTokens,
+				"reasoning_tokens":  reasoningTokens,
+			},
+		},
+	}
+}
+
 func emitChunkEvents(
 	chunk StreamChunk,
 	ch chan<- ai.StreamEvent,
@@ -178,48 +227,7 @@ func emitChunkEvents(
 	sourceExtractor := params.SourceExtractor
 
 	// Emit usage when present (may arrive on a chunk with empty choices).
-	if chunk.Usage != nil {
-		u := chunk.Usage
-		var cachedTokens, cacheWriteTokens int
-		if u.PromptTokensDetails != nil {
-			cachedTokens = u.PromptTokensDetails.CachedTokens
-			cacheWriteTokens = u.PromptTokensDetails.CacheWriteTokens
-		}
-		reasoningTokens := u.ThoughtsTokenCount
-		if u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens != 0 {
-			reasoningTokens = u.CompletionTokensDetails.ReasoningTokens
-		}
-		// prompt_tokens already includes cached and cache-write tokens; the
-		// non-cached remainder is what is left after removing them.
-		noCache := u.PromptTokens - cachedTokens - cacheWriteTokens
-		if noCache < 0 {
-			noCache = 0
-		}
-		ch <- ai.StreamEvent{
-			Type: ai.StreamEventUsage,
-			Usage: &ai.Usage{
-				InputTokens: u.PromptTokens,
-				InputTokenDetails: ai.InputTokenDetails{
-					NoCacheTokens:    noCache,
-					CacheReadTokens:  cachedTokens,
-					CacheWriteTokens: cacheWriteTokens,
-				},
-				OutputTokens: u.CompletionTokens,
-				OutputTokenDetails: ai.OutputTokenDetails{
-					TextTokens:      u.CompletionTokens - reasoningTokens,
-					ReasoningTokens: reasoningTokens,
-				},
-				TotalTokens: u.TotalTokens,
-				Raw: map[string]any{
-					"prompt_tokens":     u.PromptTokens,
-					"completion_tokens": u.CompletionTokens,
-					"total_tokens":      u.TotalTokens,
-					"cached_tokens":     cachedTokens,
-					"reasoning_tokens":  reasoningTokens,
-				},
-			},
-		}
-	}
+	emitUsageEvent(chunk, ch)
 
 	// Emit sources extracted from this chunk (e.g. Gemini grounding chunks).
 	if sourceExtractor != nil {

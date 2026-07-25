@@ -77,7 +77,11 @@ func AgentHandler(a ai.Agent, opts ...ai.Option) http.Handler {
 			http.Error(w, "stream error", http.StatusInternalServerError)
 			return
 		}
-		_ = WriteSSEStream(newFlushingSSEWriter(w), chunks)
+		if err := WriteSSEStream(newFlushingSSEWriter(w), chunks); err != nil {
+			// Client disconnected mid-stream; headers are already sent, so there
+			// is nothing left to recover — end the handler.
+			return
+		}
 	})
 }
 
@@ -109,7 +113,10 @@ func newFlushingSSEWriter(w http.ResponseWriter) io.Writer {
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
 	h.Set("x-vercel-ai-ui-message-stream", "v1")
-	f, _ := w.(http.Flusher)
+	var f http.Flusher
+	if flusher, ok := w.(http.Flusher); ok {
+		f = flusher
+	}
 	return &flushingSSEWriter{w: w, f: f}
 }
 

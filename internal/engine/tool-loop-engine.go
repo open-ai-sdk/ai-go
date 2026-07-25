@@ -89,31 +89,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			req.Tools = params.Tools.Definitions
 		}
 
-		if params.PrepareStep != nil {
-			psResult := params.PrepareStep(PrepareStepContext{
-				StepNumber:     step,
-				Steps:          completedSteps,
-				ToolsContext:   req.ToolsContext,
-				RuntimeContext: req.RuntimeContext,
-			})
-			if psResult != nil {
-				if psResult.Model != nil {
-					model = psResult.Model
-				}
-				if psResult.ToolChoice != nil {
-					req.ToolChoice = psResult.ToolChoice
-				}
-				if psResult.Instructions != "" {
-					req.Instructions = psResult.Instructions
-				}
-				if psResult.ProviderOptions != nil {
-					req.ProviderOptions = mergeProviderOptions(req.ProviderOptions, psResult.ProviderOptions)
-				}
-				if psResult.ActiveTools != nil {
-					req.Tools = filterTools(req.Tools, psResult.ActiveTools)
-				}
-			}
-		}
+		applyPrepareStep(params, step, completedSteps, &model, &req)
 
 		// Each step gets a child context so its provider stream can be released
 		// deterministically once the step's events are consumed, without waiting
@@ -144,7 +120,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		// pre-instrumentation baseline.
 		modelCtx, modelSpan := tracer.Start(stepCtx, "ai.model_call", spanAttrs...)
 		if r.traceContent {
-			modelSpan.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(req.Messages)})
+			modelSpan.SetAttributes(
+				tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(req.Messages)},
+			)
 		}
 
 		eventCh, err := model.Stream(modelCtx, req)
@@ -210,72 +188,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			return
 		}
 
-		toolCalls := acc.completed()
-		preparedToolCalls := prepareToolCalls(ctx, params.Tools, params.RepairToolCall, req, toolCalls)
-		history = append(
-			history,
-			buildAssistantToolCallMessage(fullText, sr.reasoning, preparedToolCallStates(preparedToolCalls)),
-		)
-
-		var toolNames []string
-		var stepToolCalls []ToolCallInfo
-		var stepToolResults []ToolResult
-		if params.ParallelToolExecution {
-			toolNames, stepToolCalls, stepToolResults = executeToolCallsParallel(
-				r,
-				params.Tools,
-				preparedToolCalls,
-				&history,
-				params.MaxParallelTools,
-				params.ToolApproval,
-				params.Approver,
-			)
-		} else {
-			toolNames, stepToolCalls, stepToolResults = executeToolCalls(
-				r, params.Tools, preparedToolCalls, &history, params.ToolApproval, params.Approver,
-			)
-		}
-
-		if tracingEnabled {
-			stepSpan.SetAttributes(stepAttrs(sr)...)
-		}
-		stepSpan.End()
-
-		if !r.emit(StepEvent{
-			Type:             StepEventStepEnd,
-			StepNumber:       step,
-			FinishReason:     sr.finish,
-			RawFinishReason:  sr.rawFinish,
-			ProviderMetadata: sr.providerMeta,
-			Warnings:         sr.warnings,
-		}) {
+		if r.executeToolStep(params, step, sr, fullText, acc, req, &history, &completedSteps, stepSpan) {
 			return
-		}
-		r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr) })
-
-		completedSteps = append(completedSteps, StepResultInfo{
-			StepNumber:       step,
-			HasToolCalls:     true,
-			ToolNames:        toolNames,
-			Text:             fullText,
-			Reasoning:        sr.reasoning,
-			ToolCalls:        stepToolCalls,
-			ToolResults:      stepToolResults,
-			Usage:            sr.usage,
-			FinishReason:     sr.finish,
-			RawFinishReason:  sr.rawFinish,
-			ProviderMetadata: sr.providerMeta,
-			Warnings:         sr.warnings,
-		})
-
-		if params.StopWhen != nil {
-			stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
-			if params.StopWhen(step+1, stopResult) {
-				emitStructuredOutput(r, params, history)
-				r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
-				r.emit(StepEvent{Type: StepEventDone})
-				return
-			}
 		}
 	}
 
@@ -289,6 +203,118 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	emitStructuredOutput(r, params, history)
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
 	r.emit(StepEvent{Type: StepEventDone})
+}
+
+// executeToolStep runs a step's tool calls, ends the step span, emits the
+// step-end event, records the completed step, and evaluates StopWhen. It returns
+// true when the run should stop — a control emit failed (consumer gone), or
+// StopWhen fired (in which case it has already emitted the terminal Done event).
+func (r *run) executeToolStep(
+	params RunParams,
+	step int,
+	sr streamResult,
+	fullText string,
+	acc *toolCallAccumulator,
+	req Request,
+	history *[]Message,
+	completedSteps *[]StepResultInfo,
+	stepSpan tracing.Span,
+) bool {
+	toolCalls := acc.completed()
+	preparedToolCalls := prepareToolCalls(r.ctx, params.Tools, params.RepairToolCall, req, toolCalls)
+	*history = append(
+		*history,
+		buildAssistantToolCallMessage(fullText, sr.reasoning, preparedToolCallStates(preparedToolCalls)),
+	)
+
+	var toolNames []string
+	var stepToolCalls []ToolCallInfo
+	var stepToolResults []ToolResult
+	if params.ParallelToolExecution {
+		toolNames, stepToolCalls, stepToolResults = executeToolCallsParallel(
+			r, params.Tools, preparedToolCalls, history,
+			params.MaxParallelTools, params.ToolApproval, params.Approver,
+		)
+	} else {
+		toolNames, stepToolCalls, stepToolResults = executeToolCalls(
+			r, params.Tools, preparedToolCalls, history, params.ToolApproval, params.Approver,
+		)
+	}
+
+	if r.tracingEnabled {
+		stepSpan.SetAttributes(stepAttrs(sr)...)
+	}
+	stepSpan.End()
+
+	if !r.emit(StepEvent{
+		Type:             StepEventStepEnd,
+		StepNumber:       step,
+		FinishReason:     sr.finish,
+		RawFinishReason:  sr.rawFinish,
+		ProviderMetadata: sr.providerMeta,
+		Warnings:         sr.warnings,
+	}) {
+		return true
+	}
+	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr) })
+
+	*completedSteps = append(*completedSteps, StepResultInfo{
+		StepNumber:       step,
+		HasToolCalls:     true,
+		ToolNames:        toolNames,
+		Text:             fullText,
+		Reasoning:        sr.reasoning,
+		ToolCalls:        stepToolCalls,
+		ToolResults:      stepToolResults,
+		Usage:            sr.usage,
+		FinishReason:     sr.finish,
+		RawFinishReason:  sr.rawFinish,
+		ProviderMetadata: sr.providerMeta,
+		Warnings:         sr.warnings,
+	})
+
+	if params.StopWhen != nil {
+		stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
+		if params.StopWhen(step+1, stopResult) {
+			emitStructuredOutput(r, params, *history)
+			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })
+			r.emit(StepEvent{Type: StepEventDone})
+			return true
+		}
+	}
+	return false
+}
+
+// applyPrepareStep runs the PrepareStep callback (if configured) and applies its
+// non-nil overrides to the current step's model and request in place.
+func applyPrepareStep(params RunParams, step int, completedSteps []StepResultInfo, model *Model, req *Request) {
+	if params.PrepareStep == nil {
+		return
+	}
+	psResult := params.PrepareStep(PrepareStepContext{
+		StepNumber:     step,
+		Steps:          completedSteps,
+		ToolsContext:   req.ToolsContext,
+		RuntimeContext: req.RuntimeContext,
+	})
+	if psResult == nil {
+		return
+	}
+	if psResult.Model != nil {
+		*model = psResult.Model
+	}
+	if psResult.ToolChoice != nil {
+		req.ToolChoice = psResult.ToolChoice
+	}
+	if psResult.Instructions != "" {
+		req.Instructions = psResult.Instructions
+	}
+	if psResult.ProviderOptions != nil {
+		req.ProviderOptions = mergeProviderOptions(req.ProviderOptions, psResult.ProviderOptions)
+	}
+	if psResult.ActiveTools != nil {
+		req.Tools = filterTools(req.Tools, psResult.ActiveTools)
+	}
 }
 
 // drainStreamEvents consumes any remaining events from an abandoned provider

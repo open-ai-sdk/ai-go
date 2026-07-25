@@ -75,8 +75,12 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 
 	ch := make(chan ai.StreamEvent, 64)
 	// Encoding warnings are merged onto the finish event so callers see them in
-	// GenerateTextResult.Warnings.
-	go decodeSSEStream(ctx, resp.Body, ch, encodeWarnings...)
+	// GenerateTextResult.Warnings. The deferred close mirrors the decoder's own
+	// (a second Close is a safe no-op) and keeps body ownership visible.
+	go func() {
+		defer resp.Body.Close()
+		decodeSSEStream(ctx, resp.Body, ch, encodeWarnings...)
+	}()
 	return ch, nil
 }
 

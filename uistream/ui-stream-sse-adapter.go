@@ -127,9 +127,13 @@ func (a *Adapter) interceptEvents(
 	return intercepted
 }
 
-// writeChunkWithHooks writes a non-finish, non-error chunk and fires registered hooks.
-func (a *Adapter) writeChunkWithHooks(wr *Writer, c Chunk, state *interceptState) {
-	wr.WriteChunk(c.Type, c.Fields)
+// writeChunkWithHooks writes a non-finish, non-error chunk and fires registered
+// hooks. It returns the chunk write error so the caller can stop writing once
+// the client has disconnected; hook writes are the consumer's to handle.
+func (a *Adapter) writeChunkWithHooks(wr *Writer, c Chunk, state *interceptState) error {
+	if err := wr.WriteChunk(c.Type, c.Fields); err != nil {
+		return err
+	}
 
 	if c.Type == ChunkSourceURL && a.sourceHook != nil {
 		sid, ok1 := c.Fields["sourceId"].(string)
@@ -154,6 +158,7 @@ func (a *Adapter) writeChunkWithHooks(wr *Writer, c Chunk, state *interceptState
 			}
 		}
 	}
+	return nil
 }
 
 // toolData stores raw tool result strings keyed by toolCallID.
@@ -201,9 +206,16 @@ func (a *Adapter) Stream(ch <-chan aitypes.StepEvent, w io.Writer) string {
 	wr := NewWriter(w)
 
 	var lastFinishReason string
+	// Once a write fails the client has disconnected; stop writing but keep
+	// draining cs.Chunks so the producer goroutine never blocks on an unread
+	// channel. Persistence observation continues regardless.
+	var writeErr error
 	for c := range cs.Chunks {
 		if a.persistenceBuilder != nil {
 			a.persistenceBuilder.ObserveChunk(c)
+		}
+		if writeErr != nil {
+			continue
 		}
 		switch c.Type {
 		case ChunkFinish:
@@ -213,15 +225,15 @@ func (a *Adapter) Stream(ch <-chan aitypes.StepEvent, w io.Writer) string {
 			state.mu.Lock()
 			usage := state.totalUsage
 			state.mu.Unlock()
-			wr.WriteFinishWithReason(lastFinishReason, usageMetadata(usage))
+			writeErr = wr.WriteFinishWithReason(lastFinishReason, usageMetadata(usage))
 		case ChunkError:
 			msg, ok := c.Fields["errorText"].(string)
 			if !ok {
 				msg = "stream error"
 			}
-			wr.WriteError(msg)
+			writeErr = wr.WriteError(msg)
 		default:
-			a.writeChunkWithHooks(wr, c, state)
+			writeErr = a.writeChunkWithHooks(wr, c, state)
 		}
 	}
 

@@ -192,7 +192,7 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 	if step == nil {
 		return nil
 	}
-	step.FinishReason = FinishReason(ev.FinishReason)
+	step.FinishReason = ev.FinishReason
 	step.RawFinishReason = ev.RawFinishReason
 	step.ProviderMetadata = ev.ProviderMetadata
 	step.Warnings = fromEngineWarnings(ev.Warnings)
@@ -201,7 +201,7 @@ func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOu
 	result.FinalStep = *step
 	result.Text = step.Text
 	result.Reasoning = step.Reasoning
-	result.FinishReason = FinishReason(ev.FinishReason)
+	result.FinishReason = ev.FinishReason
 	result.RawFinishReason = ev.RawFinishReason
 	result.ProviderMetadata = ev.ProviderMetadata
 	result.Warnings = append(result.Warnings, step.Warnings...)
@@ -414,7 +414,7 @@ func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
 				HasToolCalls: s.HasToolCalls,
 				ToolNames:    s.ToolNames,
 				Text:         s.Text,
-				FinishReason: FinishReason(s.FinishReason),
+				FinishReason: s.FinishReason,
 			})
 		}
 		result := prepare(aiCtx)
@@ -503,7 +503,7 @@ func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallba
 				Reasoning:        ev.Reasoning,
 				ToolCalls:        fromEngineToolCalls(ev.ToolCalls),
 				ToolResults:      fromEngineToolResults(ev.ToolResults),
-				FinishReason:     FinishReason(ev.FinishReason),
+				FinishReason:     ev.FinishReason,
 				Usage:            fromEngineUsagePtr(ev.Usage),
 				ProviderMetadata: ev.ProviderMetadata,
 				Warnings:         fromEngineWarnings(ev.Warnings),
@@ -525,7 +525,7 @@ func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallba
 				Reasoning:        ev.Reasoning,
 				Steps:            steps,
 				Usage:            fromEngineUsage(ev.Usage),
-				FinishReason:     FinishReason(ev.FinishReason),
+				FinishReason:     ev.FinishReason,
 				ProviderMetadata: ev.ProviderMetadata,
 			}
 			endEvent.Response = Response{Messages: ResponseMessagesForSteps(steps, req.Tools)}
@@ -613,9 +613,7 @@ func fromEngineToolResultContent(cs []engine.ToolResultContent) []ToolResultCont
 		return nil
 	}
 	out := make([]ToolResultContent, len(cs))
-	for i, c := range cs {
-		out[i] = ToolResultContent{Type: c.Type, Text: c.Text, Data: c.Data, MediaType: c.MediaType}
-	}
+	copy(out, cs)
 	return out
 }
 
@@ -667,7 +665,7 @@ func fromEngineStepInfos(steps []engine.StepResultInfo, tools *ToolSet) []StepOu
 			Reasoning:        s.Reasoning,
 			ToolCalls:        fromEngineToolCalls(s.ToolCalls),
 			ToolResults:      fromEngineToolResults(s.ToolResults),
-			FinishReason:     FinishReason(s.FinishReason),
+			FinishReason:     s.FinishReason,
 			RawFinishReason:  s.RawFinishReason,
 			ProviderMetadata: s.ProviderMetadata,
 			Warnings:         fromEngineWarnings(s.Warnings),
@@ -720,7 +718,7 @@ func toChunkEvent(ev engine.StepEvent) ChunkEvent {
 		ToolCallName:      ev.ToolCallName,
 		ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		StepNumber:        ev.StepNumber,
-		FinishReason:      FinishReason(ev.FinishReason),
+		FinishReason:      ev.FinishReason,
 		// Carry the typed payloads instead of dropping them. These are already
 		// the shared aitypes types (Usage/Source/ToolResult), so no conversion.
 		Usage:            ev.Usage,
@@ -792,14 +790,14 @@ func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-
 
 func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
 	e := engine.StreamEvent{
-		Type:              engine.StreamEventType(ev.Type),
+		Type:              ev.Type,
 		TextDelta:         ev.TextDelta,
 		ToolCallIndex:     ev.ToolCallIndex,
 		ToolCallID:        ev.ToolCallID,
 		ToolCallName:      ev.ToolCallName,
 		ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		ThoughtSignature:  ev.ThoughtSignature,
-		FinishReason:      engine.FinishReason(ev.FinishReason),
+		FinishReason:      ev.FinishReason,
 		RawFinishReason:   ev.RawFinishReason,
 		ProviderMetadata:  ev.ProviderMetadata,
 		FileData:          ev.FileData,
@@ -824,9 +822,7 @@ func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
 	}
 	if len(ev.Warnings) > 0 {
 		e.Warnings = make([]engine.Warning, len(ev.Warnings))
-		for i, w := range ev.Warnings {
-			e.Warnings[i] = engine.Warning{Type: w.Type, Message: w.Message, Setting: w.Setting}
-		}
+		copy(e.Warnings, ev.Warnings)
 	}
 	if ev.Source != nil {
 		e.Source = &engine.Source{
@@ -898,9 +894,7 @@ func fromEngineWarnings(ws []engine.Warning) []Warning {
 		return nil
 	}
 	out := make([]Warning, len(ws))
-	for i, w := range ws {
-		out[i] = Warning{Type: w.Type, Message: w.Message, Setting: w.Setting}
-	}
+	copy(out, ws)
 	return out
 }
 

@@ -149,6 +149,9 @@ func TestExecuteToolCallsParallel_CancelWhileQueued_StopsFurtherBodies(t *testin
 	}
 
 	if got := atomic.LoadInt32(&executor.bodyRuns); got != 1 {
-		t.Errorf("executor.bodyRuns = %d, want exactly 1 (queued calls must not run their body after cancellation)", got)
+		t.Errorf(
+			"executor.bodyRuns = %d, want exactly 1 (queued calls must not run their body after cancellation)",
+			got,
+		)
 	}
 }

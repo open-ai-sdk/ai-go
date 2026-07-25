@@ -116,9 +116,15 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 
 	cs := producer.Produce(producerCh)
 
+	// Once a write fails the client has disconnected; stop writing but keep
+	// draining so the producer never blocks, and keep observing for persistence.
+	var writeErr error
 	for c := range cs.Chunks {
 		if cfg.persistenceBuilder != nil {
 			cfg.persistenceBuilder.ObserveChunk(c)
+		}
+		if writeErr != nil {
+			continue
 		}
 		switch c.Type {
 		case ChunkFinish:
@@ -130,9 +136,9 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 			if !ok {
 				msg = "stream error"
 			}
-			wr.WriteError(msg)
+			writeErr = wr.WriteError(msg)
 		default:
-			wr.WriteChunk(c.Type, c.Fields)
+			writeErr = wr.WriteChunk(c.Type, c.Fields)
 
 			if c.Type == ChunkSourceURL && cfg.sourceHook != nil {
 				sid, ok1 := c.Fields["sourceId"].(string)

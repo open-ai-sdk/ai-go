@@ -20,6 +20,7 @@ func (erroringAgent) Tools() *ai.ToolSet { return nil }
 func (erroringAgent) Generate(context.Context, ...ai.Option) (*ai.GenerateTextResult, error) {
 	return nil, errors.New("boom")
 }
+
 func (erroringAgent) Stream(context.Context, ...ai.Option) (*ai.StreamResult, error) {
 	return nil, errors.New("boom")
 }

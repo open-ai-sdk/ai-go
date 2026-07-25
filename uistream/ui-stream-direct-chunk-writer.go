@@ -226,7 +226,12 @@ func applyToolOpts(fields map[string]any, opts *ToolChunkOpts) map[string]any {
 
 // WriteToolInputError emits a tool-input-error chunk when tool argument parsing fails.
 // opts may be nil.
-func (wr *Writer) WriteToolInputError(toolCallID, toolName string, input any, errorText string, opts *ToolChunkOpts) error {
+func (wr *Writer) WriteToolInputError(
+	toolCallID, toolName string,
+	input any,
+	errorText string,
+	opts *ToolChunkOpts,
+) error {
 	fields := applyToolOpts(map[string]any{
 		"toolCallId": toolCallID,
 		"toolName":   toolName,

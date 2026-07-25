@@ -143,7 +143,12 @@ func executeToolCallsParallel(
 			// complete and the model sees the failure, rather than crashing the
 			// process.
 			defer safego.Recover(r.logger, func(err error) {
-				results[idx].result = &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: invalidToolCallOutput(tc, err)}
+				results[idx].result = &ToolResult{
+					ID:     tc.id,
+					Name:   tc.name,
+					Args:   tc.args,
+					Output: invalidToolCallOutput(tc, err),
+				}
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
@@ -157,10 +162,14 @@ func executeToolCallsParallel(
 			return nil
 		})
 	}
-	// g.Go bodies always return nil (see doc comment above), so g.Wait's
-	// return is never a real error; it exists only to block until all queued
-	// calls finish.
-	_ = g.Wait()
+	// g.Go bodies always return nil (per-tool failures ride the results slice,
+	// so a sibling failure never cancels the group), so g.Wait blocks until all
+	// queued calls finish and its error is expected to be nil. The check is
+	// forward-defensive: if a future body ever returns an error, it surfaces
+	// instead of being silently dropped.
+	if err := g.Wait(); err != nil {
+		r.emit(StepEvent{Type: StepEventError, Error: err})
+	}
 
 	// Emit events and build history in original order.
 	toolNames = make([]string, 0, len(prepared))
@@ -203,7 +212,14 @@ func approvedToolCall(
 ) *ToolResult {
 	if policy := approval[tc.name]; policy != nil && policy(tc.name, tc.args) {
 		request := ApprovalRequest{ApprovalID: tc.id, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
-		r.emit(StepEvent{Type: StepEventToolApprovalRequest, ToolCallID: tc.id, ToolCallName: tc.name, ToolCallArgsDelta: tc.args})
+		r.emit(
+			StepEvent{
+				Type:              StepEventToolApprovalRequest,
+				ToolCallID:        tc.id,
+				ToolCallName:      tc.name,
+				ToolCallArgsDelta: tc.args,
+			},
+		)
 		if approver == nil {
 			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
 			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}

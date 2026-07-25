@@ -84,7 +84,7 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", m.cfg.APIKey)
 
-	resp, err := m.client.Do(httpReq) //nolint:bodyclose // closed in goroutine or error path
+	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: http request: %w", err)
 	}

@@ -103,6 +103,13 @@ linters:
       - linters:
           - noctx
         text: "os/exec.Command must not be called"
+      # Streaming provider Stream methods hand the response body to a decoder
+      # goroutine that closes it (or return it from a helper for the caller to
+      # own); bodyclose cannot trace a close across the goroutine/helper boundary
+      # and false-positives on these Do() calls. The bodies ARE closed.
+      - path: 'provider/(anthropic/anthropic-language-model|internal/openaichat/model|gemini/native_language_model|openai/openai-language-model-provider)\.go'
+        linters:
+          - bodyclose
 
 formatters:
   enable:

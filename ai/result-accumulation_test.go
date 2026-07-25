@@ -109,6 +109,10 @@ func TestGenerateText_ResultAccumulationAndFinalStep(t *testing.T) {
 		t.Errorf("FinalStep.FinishReason = %s, want stop", result.FinalStep.FinishReason)
 	}
 	if result.FinalStep.Usage.InputTokens != 20 || result.FinalStep.Usage.OutputTokens != 8 {
-		t.Errorf("FinalStep.Usage = %d/%d, want 20/8", result.FinalStep.Usage.InputTokens, result.FinalStep.Usage.OutputTokens)
+		t.Errorf(
+			"FinalStep.Usage = %d/%d, want 20/8",
+			result.FinalStep.Usage.InputTokens,
+			result.FinalStep.Usage.OutputTokens,
+		)
 	}
 }

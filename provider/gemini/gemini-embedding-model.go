@@ -82,7 +82,11 @@ func (m *EmbeddingModel) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 		// Bound the error body: it is attacker-influenced and only used for a message.
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		if readErr != nil {
-			return nil, fmt.Errorf("gemini embed: unexpected status %d (failed to read body: %w)", resp.StatusCode, readErr)
+			return nil, fmt.Errorf(
+				"gemini embed: unexpected status %d (failed to read body: %w)",
+				resp.StatusCode,
+				readErr,
+			)
 		}
 		return nil, fmt.Errorf("gemini embed: unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}

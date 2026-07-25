@@ -47,7 +47,7 @@ func TestRunLoop_LoggerReceivesRecoveredPanic(t *testing.T) {
 		MaxSteps: 3,
 		Logger:   logger,
 	})
-	for range ch { //nolint:revive // draining is the assertion; the panic path is covered elsewhere
+	for range ch {
 	}
 
 	if rec.count() == 0 {

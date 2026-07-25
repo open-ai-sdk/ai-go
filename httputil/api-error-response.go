@@ -36,10 +36,13 @@ func APIErrorFromResponse(ctx context.Context, provider string, resp *http.Respo
 	if ra := parseRetryAfterHeader(resp.Header.Get("Retry-After")); ra > 0 {
 		e.RetryAfter = ra
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, defaultErrorBodyLimit))
+	// A truncated read still yields a usable (possibly partial) body for
+	// best-effort code/message parsing; readErr is surfaced to the debug log
+	// rather than dropped, so a partial parse is diagnosable.
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, defaultErrorBodyLimit))
 	e.Code, e.Message = parseProviderErrorBody(body)
 	ctxlog.FromContext(ctx).DebugContext(ctx, "provider error response",
-		"provider", provider, "status", resp.StatusCode, "body", string(body))
+		"provider", provider, "status", resp.StatusCode, "body", string(body), "read_error", readErr)
 	return e
 }
 

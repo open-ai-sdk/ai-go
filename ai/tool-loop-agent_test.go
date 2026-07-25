@@ -29,6 +29,7 @@ func (m *minimalAgent) Generate(ctx context.Context, opts ...ai.Option) (*ai.Gen
 	}
 	return ai.GenerateText(ctx, req)
 }
+
 func (m *minimalAgent) Stream(ctx context.Context, opts ...ai.Option) (*ai.StreamResult, error) {
 	req := ai.GenerateTextRequest{Tools: m.tools}
 	for _, o := range opts {
