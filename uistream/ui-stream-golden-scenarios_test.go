@@ -166,8 +166,21 @@ func TestGolden_Error(t *testing.T) {
 	// Error text is redacted by default — the raw error must not reach the UI.
 	assertContains(t, output, "stream error")
 	assertNotContains(t, output, "connection reset")
-	// finish should NOT appear after an error
-	assertNotContains(t, output, `"type":"finish"`)
+	assertContains(t, output, `"type":"text-end"`)
+	assertContains(t, output, `"type":"finish"`)
+	assertContains(t, output, `"finishReason":"error"`)
+	assertContains(t, output, "data: [DONE]")
+}
+
+func TestGolden_ToolCallsFinishReasonUsesWireVocabulary(t *testing.T) {
+	output := runAdapter(
+		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
+		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
+		engine.StepEvent{Type: engine.StepEventDone},
+	)
+
+	assertContains(t, output, `"finishReason":"tool-calls"`)
+	assertNotContains(t, output, `"finishReason":"tool_calls"`)
 }
 
 // --- full text is returned ---

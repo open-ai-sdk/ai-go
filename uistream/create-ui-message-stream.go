@@ -35,11 +35,6 @@ func (sw *UIStreamWriter) WriteTransientData(name string, payload any) error {
 	return sw.writer.WriteTransientData(name, payload)
 }
 
-// WriteSource emits a source chunk.
-func (sw *UIStreamWriter) WriteSource(s Source) error {
-	return sw.writer.WriteSource(s)
-}
-
 // Merge pipes chunks from a ToUIMessageStream output into this stream.
 // The merge respects lifecycle: it skips the start chunk from the merged stream
 // (since the outer stream already emitted start) and captures the finish reason

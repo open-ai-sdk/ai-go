@@ -21,38 +21,18 @@ func TestWriter_WriteData(t *testing.T) {
 	assertContains(t, out, `"content":"Research AI trends"`)
 }
 
-// TestWriter_WriteSource verifies that WriteSource emits a valid source chunk.
-func TestWriter_WriteSource(t *testing.T) {
+// TestWriter_WriteSourceURL verifies that WriteSourceURL emits a valid source-url chunk.
+func TestWriter_WriteSourceURL(t *testing.T) {
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
 
-	wr.WriteSource(Source{
-		ID:    "src-1",
-		URL:   "https://example.com/article",
-		Title: "Example Article",
-	})
+	wr.WriteSourceURL("src-1", "https://example.com/article", "Example Article")
 
 	out := buf.String()
-	assertContains(t, out, `"type":"source"`)
+	assertContains(t, out, `"type":"source-url"`)
 	assertContains(t, out, `"url":"https://example.com/article"`)
 	assertContains(t, out, `"title":"Example Article"`)
-	assertContains(t, out, `"id":"src-1"`)
-}
-
-// TestWriter_WriteSources verifies that WriteSources emits a sources chunk with multiple entries.
-func TestWriter_WriteSources(t *testing.T) {
-	var buf bytes.Buffer
-	wr := NewWriter(&buf)
-
-	wr.WriteSources([]Source{
-		{URL: "https://a.com", Title: "Site A"},
-		{URL: "https://b.com", Title: "Site B"},
-	})
-
-	out := buf.String()
-	assertContains(t, out, `"type":"sources"`)
-	assertContains(t, out, `"https://a.com"`)
-	assertContains(t, out, `"https://b.com"`)
+	assertContains(t, out, `"sourceId":"src-1"`)
 }
 
 // TestWriter_WriteChunk verifies arbitrary chunk emission.
@@ -170,10 +150,8 @@ func TestGolden_DeepThinking_WithSourcesAndCustomData(t *testing.T) {
 	engineOut := engineBuf.String()
 
 	// 5. After engine stream: sources
-	wr.WriteSources([]Source{
-		{URL: "https://openai.com/gpt5", Title: "GPT-5 Released"},
-		{URL: "https://deepmind.com/gemini", Title: "Gemini 2.0"},
-	})
+	wr.WriteSourceURL("src-openai", "https://openai.com/gpt5", "GPT-5 Released")
+	wr.WriteSourceURL("src-gemini", "https://deepmind.com/gemini", "Gemini 2.0")
 
 	// 6. Custom data chunks for app-specific artifacts and questions
 	wr.WriteData("artifacts", map[string]any{
@@ -201,7 +179,7 @@ func TestGolden_DeepThinking_WithSourcesAndCustomData(t *testing.T) {
 	assertContains(t, writerOut, `"Researching AI trends in 2025"`)
 	assertContains(t, writerOut, `"type":"data-steps"`)
 	assertContains(t, writerOut, `"Research information"`)
-	assertContains(t, writerOut, `"type":"sources"`)
+	assertContains(t, writerOut, `"type":"source-url"`)
 	assertContains(t, writerOut, `"https://openai.com/gpt5"`)
 	assertContains(t, writerOut, `"GPT-5 Released"`)
 	assertContains(t, writerOut, `"type":"data-artifacts"`)

@@ -29,8 +29,7 @@ func TestFixture_ReasoningWithSources(t *testing.T) {
 	assertAnyLineContains(t, lines, `"type":"reasoning-end"`)
 	assertAnyLineContains(t, lines, `"type":"text-start"`)
 	assertAnyLineContains(t, lines, `"type":"text-delta"`)
-	assertAnyLineContains(t, lines, `"type":"source"`)
-	assertAnyLineContains(t, lines, `"type":"sources"`)
+	assertAnyLineContains(t, lines, `"type":"source-url"`)
 	assertAnyLineContains(t, lines, `"type":"finish"`)
 	assertAnyLineContains(t, lines, "[DONE]")
 }
@@ -62,22 +61,24 @@ func TestFixture_DeepThinkingFull(t *testing.T) {
 	assertAnyLineContains(t, lines, `"type":"tool-output-available"`)
 	assertAnyLineContains(t, lines, `"type":"text-start"`)
 	assertAnyLineContains(t, lines, `"type":"text-delta"`)
-	assertAnyLineContains(t, lines, `"type":"source"`)
-	assertAnyLineContains(t, lines, `"type":"sources"`)
+	assertAnyLineContains(t, lines, `"type":"source-url"`)
 	assertAnyLineContains(t, lines, `"type":"data-suggested-questions"`)
 	assertAnyLineContains(t, lines, `"type":"data-usage"`)
 	assertAnyLineContains(t, lines, `"type":"finish"`)
 	assertAnyLineContains(t, lines, "[DONE]")
 }
 
-// TestFixture_ErrorMidStream verifies the error fixture terminates with an error chunk and no finish.
+// TestFixture_ErrorMidStream verifies the error fixture closes its text block
+// and terminates with an error finish and [DONE].
 func TestFixture_ErrorMidStream(t *testing.T) {
 	lines := readFixtureLines(t, "testdata/error-mid-stream.jsonl")
 	assertAnyLineContains(t, lines, `"type":"start"`)
 	assertAnyLineContains(t, lines, `"type":"text-delta"`)
+	assertAnyLineContains(t, lines, `"type":"text-end"`)
 	assertAnyLineContains(t, lines, `"type":"error"`)
-	assertNoneContains(t, lines, `"type":"finish"`)
-	assertNoneContains(t, lines, "[DONE]")
+	assertAnyLineContains(t, lines, `"type":"finish"`)
+	assertAnyLineContains(t, lines, `"finishReason":"error"`)
+	assertAnyLineContains(t, lines, "[DONE]")
 }
 
 // --- helpers ---
@@ -112,14 +113,4 @@ func assertAnyLineContains(t *testing.T, lines []string, want string) {
 		}
 	}
 	t.Errorf("no fixture line contains %q", want)
-}
-
-func assertNoneContains(t *testing.T, lines []string, want string) {
-	t.Helper()
-	for _, l := range lines {
-		if strings.Contains(l, want) {
-			t.Errorf("fixture line contains %q but should not: %s", want, l)
-			return
-		}
-	}
 }

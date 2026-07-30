@@ -44,8 +44,6 @@ func TestChunkConstants_FrozenContractCoverage(t *testing.T) {
 		ChunkFinishStep,
 		ChunkFinish,
 		ChunkError,
-		ChunkSource,
-		ChunkSources,
 		ChunkSourceURL,
 		ChunkSourceDocument,
 		ChunkFile,
@@ -77,8 +75,6 @@ func TestChunkConstants_FrozenContractCoverage(t *testing.T) {
 		ChunkFinishStep:           "finish-step",
 		ChunkFinish:               "finish",
 		ChunkError:                "error",
-		ChunkSource:               "source",
-		ChunkSources:              "sources",
 		ChunkSourceURL:            "source-url",
 		ChunkSourceDocument:       "source-document",
 		ChunkFile:                 "file",
@@ -124,8 +120,11 @@ func TestWriter_ChunkTypeInSSEPayload(t *testing.T) {
 		ChunkFinishStep,
 		ChunkFinish,
 		ChunkError,
-		ChunkSource,
-		ChunkSources,
+		ChunkSourceURL,
+		ChunkSourceDocument,
+		ChunkFile,
+		ChunkAbort,
+		ChunkMessageMetadata,
 	}
 
 	for _, typ := range types {
@@ -213,32 +212,16 @@ func TestWriter_WriteError_NoFinish(t *testing.T) {
 	}
 }
 
-// TestWriter_WriteSource_Fields verifies source chunk shape.
-func TestWriter_WriteSource_Fields(t *testing.T) {
+// TestWriter_WriteSourceURL_Fields verifies source-url chunk shape.
+func TestWriter_WriteSourceURL_Fields(t *testing.T) {
 	output := captureWriterOutput(func(w *Writer) {
-		w.WriteSource(Source{ID: "src-1", URL: "https://example.com", Title: "Example"})
+		w.WriteSourceURL("src-1", "https://example.com", "Example")
 	})
-	if !strings.Contains(output, `"type":"source"`) {
-		t.Errorf("WriteSource: expected type=source\ngot: %s", output)
+	if !strings.Contains(output, `"type":"source-url"`) {
+		t.Errorf("WriteSourceURL: expected type=source-url\ngot: %s", output)
 	}
 	if !strings.Contains(output, `"url":"https://example.com"`) {
-		t.Errorf("WriteSource: expected url field\ngot: %s", output)
-	}
-}
-
-// TestWriter_WriteSources_BatchShape verifies sources chunk shape.
-func TestWriter_WriteSources_BatchShape(t *testing.T) {
-	output := captureWriterOutput(func(w *Writer) {
-		w.WriteSources([]Source{
-			{ID: "s1", URL: "https://a.com", Title: "A"},
-			{ID: "s2", URL: "https://b.com", Title: "B"},
-		})
-	})
-	if !strings.Contains(output, `"type":"sources"`) {
-		t.Errorf("WriteSources: expected type=sources\ngot: %s", output)
-	}
-	if !strings.Contains(output, `"sources":`) {
-		t.Errorf("WriteSources: expected sources array\ngot: %s", output)
+		t.Errorf("WriteSourceURL: expected url field\ngot: %s", output)
 	}
 }
 

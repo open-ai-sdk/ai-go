@@ -83,9 +83,9 @@ func (cp *ChunkProducer) Produce(ch <-chan aitypes.StepEvent) *ChunkStream {
 
 		for ev := range ch {
 			if ev.Type == aitypes.StepEventError {
-				// Redact unconditionally: raw provider error text can carry org/
-				// request IDs and attacker-echoed content into the browser.
-				out <- Chunk{Type: ChunkError, Fields: map[string]any{"errorText": redactStreamError(ev.Error)}}
+				for _, c := range cp.chunksError(ev.Error) {
+					out <- c
+				}
 				return
 			}
 			chunks, delta := cp.translateEvent(ev)
@@ -140,7 +140,15 @@ func (cp *ChunkProducer) translateEvent(ev aitypes.StepEvent) ([]Chunk, string) 
 	case aitypes.StepEventSource:
 		return cp.chunksSource(ev), ""
 	case aitypes.StepEventStepEnd:
-		cp.lastFinishReason = string(ev.FinishReason)
+		if ev.FinishReason == "" {
+			cp.lastFinishReason = ""
+			return cp.chunksStepEnd(), ""
+		}
+		finishReason, ok := wireFinishReason(ev.FinishReason)
+		if !ok {
+			finishReason = "other"
+		}
+		cp.lastFinishReason = finishReason
 		return cp.chunksStepEnd(), ""
 	case aitypes.StepEventDone:
 		fields := map[string]any{}
@@ -381,7 +389,7 @@ func (cp *ChunkProducer) chunksSource(ev aitypes.StepEvent) []Chunk {
 	return []Chunk{{Type: ChunkSourceURL, Fields: withProviderMetadata(fields, ev.Source.ProviderMetadata)}}
 }
 
-func (cp *ChunkProducer) chunksStepEnd() []Chunk {
+func (cp *ChunkProducer) chunksBlockEnd() []Chunk {
 	var out []Chunk
 	if cp.textStarted {
 		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
@@ -393,7 +401,27 @@ func (cp *ChunkProducer) chunksStepEnd() []Chunk {
 		}
 		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
 	}
+	return out
+}
+
+func (cp *ChunkProducer) chunksStepEnd() []Chunk {
+	out := cp.chunksBlockEnd()
 	out = append(out, Chunk{Type: ChunkFinishStep, Fields: nil})
+	return out
+}
+
+func (cp *ChunkProducer) chunksError(err error) []Chunk {
+	out := cp.chunksBlockEnd()
+	cp.textStarted = false
+	cp.reasoningStarted = false
+
+	// Redact unconditionally: raw provider error text can carry org/request
+	// IDs and attacker-echoed content into the browser.
+	out = append(out,
+		Chunk{Type: ChunkError, Fields: map[string]any{"errorText": redactStreamError(err)}},
+		Chunk{Type: ChunkFinish, Fields: map[string]any{"finishReason": "error"}},
+	)
+	cp.lastFinishReason = "error"
 	return out
 }
 

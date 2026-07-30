@@ -20,10 +20,6 @@ const (
 	ChunkFinish              = "finish"
 	ChunkError               = "error"
 
-	// Source chunks for web search results and citations.
-	ChunkSource  = "source"
-	ChunkSources = "sources"
-
 	// ChunkMessageMetadata is attached to the assistant message being built.
 	ChunkMessageMetadata = "message-metadata"
 

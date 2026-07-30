@@ -31,6 +31,7 @@ func TestNewSSEWriter_SetsRequiredHeaders(t *testing.T) {
 		{"Cache-Control", "no-cache"},
 		{"Connection", "keep-alive"},
 		{"x-vercel-ai-ui-message-stream", "v1"},
+		{"x-accel-buffering", "no"},
 	}
 	for _, c := range cases {
 		if got := h.Get(c.key); got != c.want {
@@ -76,6 +77,9 @@ func TestStreamToResponse_SetsHeadersAndStreams(t *testing.T) {
 	}
 	if hdr := rr.Header().Get("x-vercel-ai-ui-message-stream"); hdr != "v1" {
 		t.Errorf("expected x-vercel-ai-ui-message-stream=v1, got %q", hdr)
+	}
+	if accel := rr.Header().Get("x-accel-buffering"); accel != "no" {
+		t.Errorf("expected x-accel-buffering=no, got %q", accel)
 	}
 
 	// Text

@@ -90,6 +90,9 @@ func TestPipeAgentStream_SetsHeadersAndWritesSSE(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
 		t.Errorf("Content-Type = %q, want text/event-stream", ct)
 	}
+	if accel := rr.Header().Get("x-accel-buffering"); accel != "no" {
+		t.Errorf("x-accel-buffering = %q, want no", accel)
+	}
 	body := rr.Body.String()
 	if !strings.Contains(body, `"type":"start"`) {
 		t.Errorf("expected start chunk in body, got: %s", body)

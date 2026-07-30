@@ -108,11 +108,7 @@ type flushingSSEWriter struct {
 }
 
 func newFlushingSSEWriter(w http.ResponseWriter) io.Writer {
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("Connection", "keep-alive")
-	h.Set("x-vercel-ai-ui-message-stream", "v1")
+	SetUIMessageStreamHeaders(w.Header())
 	var f http.Flusher
 	if flusher, ok := w.(http.Flusher); ok {
 		f = flusher

@@ -47,27 +47,6 @@ func (wr *Writer) WriteData(name string, payload any) error {
 	return WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{"data": payload}})
 }
 
-// Source is a URL reference emitted as part of a source chunk.
-type Source struct {
-	ID    string `json:"id,omitempty"`
-	URL   string `json:"url"`
-	Title string `json:"title,omitempty"`
-}
-
-// WriteSource emits a source chunk for a single web reference.
-func (wr *Writer) WriteSource(s Source) error {
-	return WriteSSE(wr.w, Chunk{Type: ChunkSource, Fields: map[string]any{
-		"id":    s.ID,
-		"url":   s.URL,
-		"title": s.Title,
-	}})
-}
-
-// WriteSources emits a sources chunk containing multiple references.
-func (wr *Writer) WriteSources(sources []Source) error {
-	return WriteSSE(wr.w, Chunk{Type: ChunkSources, Fields: map[string]any{"sources": sources}})
-}
-
 // WriteMessageMetadata emits a message-metadata chunk with arbitrary metadata.
 func (wr *Writer) WriteMessageMetadata(metadata any) error {
 	return WriteSSE(wr.w, Chunk{Type: ChunkMessageMetadata, Fields: map[string]any{"messageMetadata": metadata}})

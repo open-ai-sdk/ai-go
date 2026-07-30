@@ -32,12 +32,9 @@ func (s *sseWriter) Write(p []byte) (int, error) {
 //   - Cache-Control: no-cache
 //   - Connection: keep-alive
 //   - x-vercel-ai-ui-message-stream: v1
+//   - x-accel-buffering: no
 func NewSSEWriter(w http.ResponseWriter) io.Writer {
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("Connection", "keep-alive")
-	h.Set("x-vercel-ai-ui-message-stream", "v1")
+	uistream.SetUIMessageStreamHeaders(w.Header())
 
 	var f http.Flusher
 	if flusher, ok := w.(http.Flusher); ok {

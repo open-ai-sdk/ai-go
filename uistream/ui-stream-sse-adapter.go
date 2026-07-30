@@ -30,7 +30,7 @@ type SourceHook func(wr *Writer, sourceID, url, title string)
 // It is transport-agnostic: callers can write to an http.ResponseWriter, a buffer, etc.
 //
 // For custom data-* chunks or source chunks between or after stream events,
-// obtain the Writer via adapter.Writer(w) and call WriteData / WriteSource directly.
+// obtain the Writer via adapter.Writer(w) and call WriteData / WriteSourceURL directly.
 type Adapter struct {
 	msgID              string
 	toolResultHook     ToolResultHook
@@ -75,7 +75,7 @@ func (a *Adapter) WithPersistenceBuilder(b *PersistedMessageBuilder) *Adapter {
 }
 
 // Writer returns a direct-write Writer bound to w for emitting custom chunks
-// alongside a stream (e.g. WriteData, WriteSource).
+// alongside a stream (e.g. WriteData, WriteSourceURL).
 func (a *Adapter) Writer(w io.Writer) *Writer {
 	return NewWriter(w)
 }
