@@ -137,20 +137,32 @@ jobs:
           deps=$(go list -deps ./aisdk/...)
           ! echo "$deps" | grep -qE 'cloudwego/eino|gin-gonic/gin'
 
-      # Widening the Eino surface should be a review event, not a drive-by import.
+      # Widening the shipped Eino surface should be a review event, not a drive-by import.
+      #
+      # Test files are excluded: a test for the adapter cannot avoid naming Eino types, and
+      # it ships nothing. Including them would mean every new test file needed an allowlist
+      # entry, which trains people to edit the list without reading it — the opposite of
+      # what the gate is for.
       - name: einoadapter Eino-import allowlist
         run: |
-          actual=$(grep -rl 'cloudwego/eino' einoadapter --include='*.go' | sort)
+          actual=$(grep -rl 'cloudwego/eino' einoadapter --include='*.go' \
+                     | grep -v '_test\.go$' | sort)
           expected=$(grep -v '^#' einoadapter/.eino-imports-allowlist | grep -v '^$' | sort)
           diff <(echo "$expected") <(echo "$actual")
 
-      # The whole point of the reset. Tests are deliberately excluded: the budget is
-      # about how much non-test code this adapter needs, and counting tests would
-      # create pressure to delete the safety net.
-      - name: Non-test LOC budget
+      # The whole point of the reset: this adapter must not re-grow into an SDK.
+      #
+      # Two exclusions, both deliberate. Tests are excluded because counting them would
+      # create pressure to delete the safety net. Comment and blank lines are excluded
+      # because the budget is about code volume, and the project rules ask for comments
+      # that explain invariants and trade-offs — measuring raw `wc -l` would tax exactly
+      # the thing those rules require. (Line comments and blanks only; no file here uses
+      # block comments, and adding one would show up as a jump rather than hide anything.)
+      - name: Non-test code-line budget
         run: |
-          loc=$(find . -name '*.go' -not -name '*_test.go' \
-                  -not -path './examples/*' -not -path './compat-test/*' \
-                  | xargs cat | wc -l | tr -d ' ')
-          echo "non-test LOC: $loc"
-          test "$loc" -lt 5500
+          files=$(find . -name '*.go' -not -name '*_test.go' \
+                    -not -path './examples/*' -not -path './compat-test/*')
+          total=$(echo "$files" | xargs cat | wc -l | tr -d ' ')
+          code=$(echo "$files" | xargs grep -hvE '^[[:space:]]*(//|$)' | wc -l | tr -d ' ')
+          echo "non-test lines: $total total, $code code (budget 5500 code lines)"
+          test "$code" -lt 5500

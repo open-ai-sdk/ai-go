@@ -6,8 +6,15 @@
 #
 # Paths are relative to the module root, sorted, one per line.
 #
+# Test files are NOT listed and are excluded by the CI check: a test for the adapter cannot
+# avoid naming Eino types, and it ships nothing. Requiring an entry per test file would
+# train people to edit this list without reading it.
+#
 # The design's earlier criterion — "Eino types appear in exactly one file" — was
 # withdrawn because it is not achievable: the conversion, the producer, the approval
 # gate, tool dispatch, and both message paths all need Eino types. This list is the
 # replacement.
 einoadapter/eino-version-guard.go
+einoadapter/from-agentic-message.go
+einoadapter/from-content-block.go
+einoadapter/stream-lifecycle.go
