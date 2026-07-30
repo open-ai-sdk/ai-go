@@ -42,6 +42,52 @@ Two boundaries are enforced in CI, not just documented:
   (`einoadapter/.eino-imports-allowlist`), so widening the Eino surface is a review
   event rather than an accident.
 
+## Tool approval signing — and what it does not prove
+
+Human-in-the-loop approvals are stateless: the request goes out to the browser, and the
+answer comes back inside the message history on the next POST. Nothing is stored
+server-side. To stop a client from forging an approval request, each one is HMAC-signed.
+
+Two payload formats:
+
+```
+v1  ["ai-sdk-tool-approval-v1", approvalId, toolCallId, toolName, hashCanonical(input)]
+v2  ["ai-go-tool-approval-v2",  approvalId, toolCallId, toolName, hashCanonical(input),
+     principalId, chatId, iat]
+```
+
+`v1` is the AI SDK v7 format, reproduced byte-for-byte and **verified** for interop with a
+TypeScript server. `v2` is what ai-go **emits**, adding the three terms v1 lacks.
+
+**Read this before relying on it.** `approved` is not in either payload. The client sets
+`approved` itself and passes the server's signature through unchanged, so a signature
+verifies whatever the answer says. Concretely: a user clicks **Deny**, and anything with
+client control — XSS, a hostile extension, devtools, curl — re-POSTs the same history with
+`approved: true`. The signature still verifies and the tool runs.
+
+So the signature proves *the server gated this tool with this input, for this principal, in
+this chat, at this time.* It does **not** make the browser's answer trustworthy. No signing
+scheme on this side of the wire can; only a server-side record of the decision would, which
+is exactly what the stateless design trades away. What `v2` buys over `v1` is that a
+signature stops being a permanent bearer capability replayable into any chat by anyone who
+obtains it.
+
+Deliberate divergences from the reference:
+
+- **No legacy newline-joined payload.** The reference accepts one as a verify-time
+  fallback for approvals signed by pre-JSON builds; a greenfield Go server never issued
+  one, and upstream schedules its removal. Accepting it would only widen what this server
+  trusts.
+- **Invalid UTF-8 is refused, not replaced.** Go's JSON encoder would substitute U+FFFD,
+  and that is a hash collision: `"\uD800"` and `"\uD801"` would produce one digest.
+  `HashCanonical` returns a typed error instead.
+- **A depth budget of 64** on `HashCanonical`. It is the first code to touch
+  attacker-supplied JSON on the approval path, and the reference's recursion is unguarded.
+
+Cross-language agreement is enforced by shared vectors in `aisdk/testdata/`, asserted from
+**both** Go and TypeScript — see `conformance/`. A one-directional check cannot catch the
+failure that matters, which is Go accepting a signature the real client would reject.
+
 ## Status
 
 Under active reconstruction. `aisdk` carries the protocol layer and its test suite;

@@ -89,11 +89,24 @@ jobs:
       - name: Fixtures are up to date
         run: go test ./aisdk/ -run TestConformanceFixtures -count=1
 
+      - name: Install conformance deps
+        run: cd conformance && pnpm install --frozen-lockfile
+
+      # The crypto vectors are generated from the TypeScript reference. If the generator
+      # and the committed vectors disagree, the Go tests are matching a stale expectation
+      # — which is exactly the "both suites green, both wrong" failure the two-directional
+      # check exists to prevent.
+      - name: Crypto vectors are up to date
+        run: |
+          cd conformance && node scripts/generate-crypto-vectors.mjs
+          cd .. && git diff --exit-code -- aisdk/testdata/canonical-vectors.json \
+                                            aisdk/testdata/approval-vectors.json
+
       # The real ai@7.0.35 client over Go-produced SSE: its own Zod schema (layer 1)
-      # and its own stream processor (layer 2). This is what makes a Go chunk change
-      # that breaks conformance fail the build.
+      # and its own stream processor (layer 2), plus the TypeScript half of the crypto
+      # vectors. This is what makes a Go change that breaks conformance fail the build.
       - name: Conformance suite
-        run: cd conformance && pnpm install --frozen-lockfile && pnpm test
+        run: cd conformance && pnpm test
 
   boundaries:
     name: Boundaries

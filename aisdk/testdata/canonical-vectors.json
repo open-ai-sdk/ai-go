@@ -1,0 +1,309 @@
+[
+  {
+    "name": "empty-object",
+    "input": {},
+    "canonicalJSON": "{}",
+    "hashCanonical": "RBNvo1WzZ4oRRq0W9-hknpT7T8If536DEMBg9hyq_4o"
+  },
+  {
+    "name": "empty-array",
+    "input": [],
+    "canonicalJSON": "[]",
+    "hashCanonical": "T1PNoYwrqgwDVLtfmj7L5e0Sq02OEbqHPC8RFhICuUU"
+  },
+  {
+    "name": "null",
+    "input": null,
+    "canonicalJSON": "null",
+    "hashCanonical": "dCNOmK_nSY-12vHzasLXiswzlGT5UHA7jAGYkvmCuQs"
+  },
+  {
+    "name": "scalar-string",
+    "input": "hello",
+    "canonicalJSON": "\"hello\"",
+    "hashCanonical": "Wqdirjg_u3J688ejbUlApbjECpiUUtIwT8lY_z81Tno"
+  },
+  {
+    "name": "scalar-number",
+    "input": 42,
+    "canonicalJSON": "42",
+    "hashCanonical": "c0dctApWjo2ooEXO0RATfhWfiQrE2og7axfcZRs6gEk"
+  },
+  {
+    "name": "scalar-bool",
+    "input": true,
+    "canonicalJSON": "true",
+    "hashCanonical": "tb6kG2xiP3wJ8b8k3K5Y66s8DN2QrZZrxDpFtEhn4Ss"
+  },
+  {
+    "name": "ascii-keys-sorted",
+    "input": {
+      "b": 1,
+      "a": 2,
+      "C": 3,
+      "A": 4
+    },
+    "canonicalJSON": "{\"A\":4,\"C\":3,\"a\":2,\"b\":1}",
+    "hashCanonical": "tR8KW0yeeLEq2DlkY1EtLuFg0ROwjdWVxpNiQXB4QC4"
+  },
+  {
+    "name": "nonbmp-key-vs-private-use-key",
+    "note": "the vector that actually detects the sort divergence: U+1F600 vs U+E000",
+    "input": {
+      "😀": 1,
+      "": 2,
+      "a": 3
+    },
+    "canonicalJSON": "{\"a\":3,\"😀\":1,\"\":2}",
+    "hashCanonical": "qQHVyTQASLdoGD_W-4Ln0Pd5IEmgqvqdLHzNhF2YStM"
+  },
+  {
+    "name": "nonbmp-key-vs-fullwidth-key",
+    "note": "U+1F600 vs U+FF21 — same class of divergence, inside BMP",
+    "input": {
+      "😀": 1,
+      "Ａ": 2
+    },
+    "canonicalJSON": "{\"😀\":1,\"Ａ\":2}",
+    "hashCanonical": "0yqdjPn8KUOqgflirzJLiPPLMuS7nUDR0NZ6fSexp9g"
+  },
+  {
+    "name": "nonbmp-key-vs-latin1-key",
+    "note": "agrees in both languages; included to prove the sort fix does not break it",
+    "input": {
+      "😀": 1,
+      "é": 2
+    },
+    "canonicalJSON": "{\"é\":2,\"😀\":1}",
+    "hashCanonical": "h8V2kZjUVQQzVr4A6MrlZ-rVnOawr28B1SdSdS_JLQo"
+  },
+  {
+    "name": "html-chars-in-value",
+    "note": "JSON.stringify does not escape < > &; Go must use SetEscapeHTML(false)",
+    "input": {
+      "html": "<a href=\"x\">&amp;</a>",
+      "cmp": "a < b && c > d"
+    },
+    "canonicalJSON": "{\"cmp\":\"a < b && c > d\",\"html\":\"<a href=\\\"x\\\">&amp;</a>\"}",
+    "hashCanonical": "uXuRdd41KttnP2VScFOzcK8TXQa_kzXt0dVUJIZXHqY"
+  },
+  {
+    "name": "html-chars-in-key",
+    "input": {
+      "<k&y>": 1
+    },
+    "canonicalJSON": "{\"<k&y>\":1}",
+    "hashCanonical": "TVYfMc_TDp2GOt9rnFgkPhiorSoN6WsZ2Pl4WtONLT8"
+  },
+  {
+    "name": "lone-surrogate-key",
+    "note": "JSON.stringify emits \\ud800 as-is; Go replaces invalid UTF-8 with U+FFFD",
+    "input": {
+      "\ud800": 1,
+      "ok": 2
+    },
+    "canonicalJSON": "{\"ok\":2,\"\\ud800\":1}",
+    "hashCanonical": "SGe3Fg08Z95tI5G41xDC-RquX1HsM7VsxYxSHmLX7G8"
+  },
+  {
+    "name": "lone-surrogate-value",
+    "input": {
+      "v": "\ud800"
+    },
+    "canonicalJSON": "{\"v\":\"\\ud800\"}",
+    "hashCanonical": "0qomtCWllVc9bOT83W1YvWbgw1qP8UzBx97YT99yaIY"
+  },
+  {
+    "name": "floats",
+    "note": "identical in both when Go uses encoding/json rather than strconv",
+    "input": [
+      1e+21,
+      1e-7,
+      1e-21,
+      100000000000000000000,
+      1.5e+300,
+      5e-324,
+      0.1,
+      12345678901234567000,
+      0
+    ],
+    "canonicalJSON": "[1e+21,1e-7,1e-21,100000000000000000000,1.5e+300,5e-324,0.1,12345678901234567000,0]",
+    "hashCanonical": "1U4g1yqrOjGS9nNgwYmFOeoIkSh6s2Vij9-fGZZfQGE"
+  },
+  {
+    "name": "nested",
+    "input": {
+      "z": [
+        1,
+        {
+          "b": 2,
+          "a": [
+            3,
+            {
+              "d": 4,
+              "c": 5
+            }
+          ]
+        }
+      ],
+      "y": null
+    },
+    "canonicalJSON": "{\"y\":null,\"z\":[1,{\"a\":[3,{\"c\":5,\"d\":4}],\"b\":2}]}",
+    "hashCanonical": "giXhUFRTyIDivySXh5z4-pBS_p_Gb3wIk0x8nI6sVcc"
+  },
+  {
+    "name": "unicode-values",
+    "input": {
+      "vi": "Tiếng Việt",
+      "jp": "日本語",
+      "emoji": "🇻🇳👍🏽"
+    },
+    "canonicalJSON": "{\"emoji\":\"🇻🇳👍🏽\",\"jp\":\"日本語\",\"vi\":\"Tiếng Việt\"}",
+    "hashCanonical": "tQT8G70DRsWYLvNbdlJCY3KMiVY10N6QpeCSowqZmmo"
+  },
+  {
+    "name": "deep-64",
+    "input": {
+      "a": {
+        "a": {
+          "a": {
+            "a": {
+              "a": {
+                "a": {
+                  "a": {
+                    "a": {
+                      "a": {
+                        "a": {
+                          "a": {
+                            "a": {
+                              "a": {
+                                "a": {
+                                  "a": {
+                                    "a": {
+                                      "a": {
+                                        "a": {
+                                          "a": {
+                                            "a": {
+                                              "a": {
+                                                "a": {
+                                                  "a": {
+                                                    "a": {
+                                                      "a": {
+                                                        "a": {
+                                                          "a": {
+                                                            "a": {
+                                                              "a": {
+                                                                "a": {
+                                                                  "a": {
+                                                                    "a": {
+                                                                      "a": {
+                                                                        "a": {
+                                                                          "a": {
+                                                                            "a": {
+                                                                              "a": {
+                                                                                "a": {
+                                                                                  "a": {
+                                                                                    "a": {
+                                                                                      "a": {
+                                                                                        "a": {
+                                                                                          "a": {
+                                                                                            "a": {
+                                                                                              "a": {
+                                                                                                "a": {
+                                                                                                  "a": {
+                                                                                                    "a": {
+                                                                                                      "a": {
+                                                                                                        "a": {
+                                                                                                          "a": {
+                                                                                                            "a": {
+                                                                                                              "a": {
+                                                                                                                "a": {
+                                                                                                                  "a": {
+                                                                                                                    "a": {
+                                                                                                                      "a": {
+                                                                                                                        "a": {
+                                                                                                                          "a": {
+                                                                                                                            "a": {
+                                                                                                                              "a": {
+                                                                                                                                "a": {
+                                                                                                                                  "a": {
+                                                                                                                                    "a": 1
+                                                                                                                                  }
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            }
+                                                                                                                          }
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              }
+                                                                                                            }
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "canonicalJSON": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
+    "hashCanonical": "p0H3k0Wx84hqvmPGaeIfeqai8xR2AMYfbA1s7hOAKts"
+  },
+  {
+    "name": "array-with-null",
+    "note": "null inside an array is \"null\", distinct from an absent element",
+    "input": [
+      1,
+      null,
+      "x"
+    ],
+    "canonicalJSON": "[1,null,\"x\"]",
+    "hashCanonical": "ghuiAcHkoP7KCMpJJNN9EhYChFJkAwpY2uhKRG2c7bI"
+  }
+]

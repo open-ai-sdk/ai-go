@@ -1,0 +1,338 @@
+[
+  {
+    "name": "v1-valid",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "accept"
+  },
+  {
+    "name": "v1-valid-padded-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No=",
+    "expect": "accept",
+    "note": "trailing = padding; TS atob accepts it, Go RawURLEncoding does not"
+  },
+  {
+    "name": "v1-valid-standard-base64-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX+NsMxolleMbDej3E9No=",
+    "expect": "accept",
+    "note": "+ and / instead of - and _; TS maps them back before atob"
+  },
+  {
+    "name": "v1-tampered-input-same-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/etc/passwd",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "reject",
+    "note": "signature was issued for /tmp/x — this is why hashCanonical(input) is in the payload"
+  },
+  {
+    "name": "v1-tampered-toolname",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "sendEmail",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "reject"
+  },
+  {
+    "name": "v1-swapped-approval-and-call-id",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "call_1",
+    "toolCallId": "appr_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "reject",
+    "note": "the JSON array payload keeps field boundaries unambiguous"
+  },
+  {
+    "name": "v1-wrong-secret",
+    "version": "v1",
+    "secret": "secret-bravo-9876543210",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "reject",
+    "note": "key isolation"
+  },
+  {
+    "name": "v1-empty-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "",
+    "expect": "reject"
+  },
+  {
+    "name": "v1-garbage-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "!!!not-base64!!!",
+    "expect": "reject",
+    "note": "must return false, never an error a caller could mistake for success"
+  },
+  {
+    "name": "v1-truncated-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5w",
+    "expect": "reject"
+  },
+  {
+    "name": "v1-oversized-signature",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "reject"
+  },
+  {
+    "name": "v1-legacy-newline-payload-must-not-verify",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "LX78DxrNfK9-HvDqrd_sWIet4dNl6Ar6hKSFh7d4z3A",
+    "expect": "reject",
+    "note": "ai-go deliberately drops the legacy fallback the reference still accepts"
+  },
+  {
+    "name": "v1-unicode-toolname",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_✓",
+    "toolCallId": "call_日本",
+    "toolName": "xoá_tệp",
+    "input": {
+      "đường_dẫn": "/tmp/x"
+    },
+    "signature": "3xSMSi6cO5urScWXrbZVAE2CPPlYxYABR8OXjtc64Lg",
+    "expect": "accept"
+  },
+  {
+    "name": "v1-newline-in-fields",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "a\n1",
+    "toolCallId": "c\n1",
+    "toolName": "del\nete",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "signature": "XUHONkfaLm3aqHFf2wINE0jizP0tZoOO86bo9r0tWIU",
+    "expect": "accept",
+    "note": "the JSON payload is injective, so newlines in fields are fine"
+  },
+  {
+    "name": "v1-null-input",
+    "version": "v1",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": null,
+    "signature": "QfuLajo9C0kSe0b99LQKHf_1bILcPMLJuNBSmrp03Hc",
+    "expect": "accept"
+  },
+  {
+    "name": "v2-valid",
+    "version": "v2",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "principalId": "user_42",
+    "chatId": "chat_7",
+    "iat": 1785000000,
+    "signature": "y6vv55TsUKg_9M8k_0RnR8W6NmP2SwyZxmscBN6qCp0",
+    "expect": "accept"
+  },
+  {
+    "name": "v2-tampered-principal",
+    "version": "v2",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "principalId": "user_99",
+    "chatId": "chat_7",
+    "iat": 1785000000,
+    "signature": "y6vv55TsUKg_9M8k_0RnR8W6NmP2SwyZxmscBN6qCp0",
+    "expect": "reject",
+    "note": "the term v1 lacks: a signature cannot be replayed as another principal"
+  },
+  {
+    "name": "v2-tampered-chat",
+    "version": "v2",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "principalId": "user_42",
+    "chatId": "chat_other",
+    "iat": 1785000000,
+    "signature": "y6vv55TsUKg_9M8k_0RnR8W6NmP2SwyZxmscBN6qCp0",
+    "expect": "reject",
+    "note": "cross-chat replay"
+  },
+  {
+    "name": "v2-tampered-iat",
+    "version": "v2",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "principalId": "user_42",
+    "chatId": "chat_7",
+    "iat": 1785000001,
+    "signature": "y6vv55TsUKg_9M8k_0RnR8W6NmP2SwyZxmscBN6qCp0",
+    "expect": "reject"
+  },
+  {
+    "name": "v2-tampered-input",
+    "version": "v2",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/etc/passwd",
+      "force": false
+    },
+    "principalId": "user_42",
+    "chatId": "chat_7",
+    "iat": 1785000000,
+    "signature": "y6vv55TsUKg_9M8k_0RnR8W6NmP2SwyZxmscBN6qCp0",
+    "expect": "reject"
+  },
+  {
+    "name": "v2-wrong-secret",
+    "version": "v2",
+    "secret": "secret-bravo-9876543210",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "principalId": "user_42",
+    "chatId": "chat_7",
+    "iat": 1785000000,
+    "signature": "y6vv55TsUKg_9M8k_0RnR8W6NmP2SwyZxmscBN6qCp0",
+    "expect": "reject"
+  },
+  {
+    "name": "v1-signature-accepted-by-v2-verifier",
+    "version": "v1-via-v2",
+    "secret": "secret-alpha-0123456789",
+    "approvalId": "appr_1",
+    "toolCallId": "call_1",
+    "toolName": "deleteFile",
+    "input": {
+      "path": "/tmp/x",
+      "force": false
+    },
+    "principalId": "user_42",
+    "chatId": "chat_7",
+    "iat": 1785000000,
+    "signature": "8FBPZ5b0On3pI6URIx5wT7PX-NsMxolleMbDej3E9No",
+    "expect": "accept",
+    "note": "interop: verify accepts v2 first, then falls back to v1"
+  }
+]
