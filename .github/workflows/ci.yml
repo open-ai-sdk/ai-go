@@ -10,6 +10,41 @@ env:
   GO_VERSION: "1.25"
 
 jobs:
+  conformance:
+    name: AI SDK v7 conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+
+      - name: Install conformance dependencies
+        run: npm ci --prefix conformance
+
+      - name: Install Chromium
+        run: npx --prefix conformance playwright install --with-deps chromium
+
+      - name: Run schema, semantic, and live-server gates
+        run: npm test --prefix conformance
+
+      - name: Type-check conformance harness
+        run: npm run typecheck --prefix conformance
+
+      - name: Run useChat browser conformance
+        run: npm run test:browser --prefix conformance
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

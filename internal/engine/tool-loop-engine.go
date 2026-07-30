@@ -126,11 +126,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		}
 
 		eventCh, err := model.Stream(modelCtx, req)
-		// Release the provider: on the normal path it has already closed; on an
-		// early/fatal return, cancelling the child ctx unblocks its ctx-guarded
-		// send and the drain lets its goroutine finish and close the body.
-		cancelStep()
 		if err != nil {
+			// Stream startup failed before there is a channel to consume.
+			cancelStep()
 			modelSpan.RecordError(err)
 			modelSpan.End()
 			stepSpan.RecordError(err)
@@ -141,6 +139,10 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 
 		acc := newToolCallAccumulator()
 		sr, fatalErr := consumeStream(r, eventCh, acc, params.Callbacks)
+		// Release the provider only after its normal stream has closed. On a
+		// fatal event consumeStream returns early, so cancellation unblocks any
+		// remaining ctx-guarded sends before the drain below.
+		cancelStep()
 		if tracingEnabled {
 			modelSpan.SetAttributes(stepAttrs(sr)...)
 		}

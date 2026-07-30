@@ -5,53 +5,49 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// These literals mirror ui-message-chunks.ts in ai@7.0.35. Phase 01 replaces
-// this temporary copy with a list generated from the installed package.
-var uiMessageChunkTypes = map[string]struct{}{
-	ChunkTextStart:            {},
-	ChunkTextDelta:            {},
-	ChunkTextEnd:              {},
-	ChunkError:                {},
-	ChunkToolInputStart:       {},
-	ChunkToolInputDelta:       {},
-	ChunkToolInputAvailable:   {},
-	ChunkToolInputError:       {},
-	ChunkToolApprovalRequest:  {},
-	ChunkToolApprovalResponse: {},
-	ChunkToolOutputAvailable:  {},
-	ChunkToolOutputError:      {},
-	ChunkToolOutputDenied:     {},
-	ChunkReasoningStart:       {},
-	ChunkReasoningDelta:       {},
-	ChunkReasoningEnd:         {},
-	ChunkCustom:               {},
-	ChunkSourceURL:            {},
-	ChunkSourceDocument:       {},
-	ChunkFile:                 {},
-	ChunkReasoningFile:        {},
-	ChunkStartStep:            {},
-	ChunkFinishStep:           {},
-	ChunkStart:                {},
-	ChunkFinish:               {},
-	ChunkAbort:                {},
-	ChunkMessageMetadata:      {},
+type uiMessageChunkUnion struct {
+	LiteralTypes []string `json:"literalTypes"`
+	PrefixTypes  []string `json:"prefixTypes"`
 }
 
-func isUIMessageChunkType(typ string) bool {
-	if strings.HasPrefix(typ, "data-") {
-		return true
+func loadUIMessageChunkUnion(t *testing.T) uiMessageChunkUnion {
+	t.Helper()
+	path := filepath.Join("..", "conformance", "src", "ui_message_chunk_types.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated UI message chunk union %s: %v", path, err)
 	}
-	_, ok := uiMessageChunkTypes[typ]
-	return ok
+	var union uiMessageChunkUnion
+	if err := json.Unmarshal(data, &union); err != nil {
+		t.Fatalf("decode generated UI message chunk union: %v", err)
+	}
+	if len(union.LiteralTypes) != 27 {
+		t.Fatalf("generated union has %d literal types, want 27", len(union.LiteralTypes))
+	}
+	if len(union.PrefixTypes) != 1 || union.PrefixTypes[0] != "data-" {
+		t.Fatalf("generated union prefix types = %v, want [data-]", union.PrefixTypes)
+	}
+	return union
+}
+
+func (union uiMessageChunkUnion) contains(typ string) bool {
+	for _, prefix := range union.PrefixTypes {
+		if strings.HasPrefix(typ, prefix) {
+			return true
+		}
+	}
+	return slices.Contains(union.LiteralTypes, typ)
 }
 
 func TestUIMessageChunkTypeGuard(t *testing.T) {
-	for typ := range uiMessageChunkTypes {
-		if !isUIMessageChunkType(typ) {
+	union := loadUIMessageChunkUnion(t)
+	for _, typ := range union.LiteralTypes {
+		if !union.contains(typ) {
 			t.Errorf("known UI message chunk type %q was rejected", typ)
 		}
 	}
@@ -64,19 +60,20 @@ func TestUIMessageChunkTypeGuard(t *testing.T) {
 		"data-suggested-questions",
 		"data-structured-output",
 	} {
-		if !isUIMessageChunkType(typ) {
+		if !union.contains(typ) {
 			t.Errorf("custom data chunk type %q was rejected", typ)
 		}
 	}
 
 	for _, typ := range []string{"source", "sources", "unknown"} {
-		if isUIMessageChunkType(typ) {
+		if union.contains(typ) {
 			t.Errorf("non-protocol chunk type %q was accepted", typ)
 		}
 	}
 }
 
 func TestFixturesContainOnlyUIMessageChunkTypes(t *testing.T) {
+	union := loadUIMessageChunkUnion(t)
 	fixtures, err := filepath.Glob("testdata/*.jsonl")
 	if err != nil {
 		t.Fatalf("find fixtures: %v", err)
@@ -105,7 +102,7 @@ func TestFixturesContainOnlyUIMessageChunkTypes(t *testing.T) {
 				if err := json.Unmarshal([]byte(payload), &frame); err != nil {
 					t.Fatalf("line %d: decode frame: %v", line, err)
 				}
-				if !isUIMessageChunkType(frame.Type) {
+				if !union.contains(frame.Type) {
 					t.Errorf("line %d: non-protocol chunk type %q", line, frame.Type)
 				}
 			}

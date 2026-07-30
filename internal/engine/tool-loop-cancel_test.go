@@ -32,6 +32,48 @@ func (m *ctxAwareModel) Stream(ctx context.Context, _ Request) (<-chan StreamEve
 	return ch, nil
 }
 
+type delayedStreamModel struct{}
+
+func (delayedStreamModel) ModelID() string { return "delayed-stream" }
+
+func (delayedStreamModel) Stream(ctx context.Context, _ Request) (<-chan StreamEvent, error) {
+	ch := make(chan StreamEvent)
+	go func() {
+		defer close(ch)
+		time.Sleep(10 * time.Millisecond)
+		for _, event := range []StreamEvent{
+			{Type: StreamEventTextDelta, TextDelta: "delayed"},
+			{Type: StreamEventFinish, FinishReason: FinishReasonStop},
+		} {
+			select {
+			case ch <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch, nil
+}
+
+// TestRun_DoesNotCancelBeforeAsyncStreamIsConsumed protects providers that
+// return their event channel before the first network event is available.
+func TestRun_DoesNotCancelBeforeAsyncStreamIsConsumed(t *testing.T) {
+	ch := Run(context.Background(), RunParams{
+		Model:    delayedStreamModel{},
+		MaxSteps: 1,
+	})
+
+	var text string
+	for event := range ch {
+		if event.Type == StepEventTextDelta {
+			text += event.TextDelta
+		}
+	}
+	if text != "delayed" {
+		t.Fatalf("streamed text = %q, want delayed", text)
+	}
+}
+
 // TestRun_CancelMidStream_ClosesChannelAndReleasesProvider verifies that
 // cancelling the run's context mid-stream promptly closes the output channel and
 // the provider stream goroutine observes the cancellation (releases its body).

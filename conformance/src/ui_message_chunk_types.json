@@ -1,0 +1,35 @@
+{
+  "source": "ai@7.0.35/src/ui-message-stream/ui-message-chunks.ts",
+  "literalTypes": [
+    "abort",
+    "custom",
+    "error",
+    "file",
+    "finish",
+    "finish-step",
+    "message-metadata",
+    "reasoning-delta",
+    "reasoning-end",
+    "reasoning-file",
+    "reasoning-start",
+    "source-document",
+    "source-url",
+    "start",
+    "start-step",
+    "text-delta",
+    "text-end",
+    "text-start",
+    "tool-approval-request",
+    "tool-approval-response",
+    "tool-input-available",
+    "tool-input-delta",
+    "tool-input-error",
+    "tool-input-start",
+    "tool-output-available",
+    "tool-output-denied",
+    "tool-output-error"
+  ],
+  "prefixTypes": [
+    "data-"
+  ]
+}
