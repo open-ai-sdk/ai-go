@@ -20,9 +20,9 @@ data: {"type":"text-end","id":"text_1"}
 
 data: {"type":"finish-step"}
 
-data: {"type":"source","id":"src-1","url":"https://example.com/ai-trends-2025","title":"AI Trends 2025"}
+data: {"type":"source-url","sourceId":"src-1","url":"https://example.com/ai-trends-2025","title":"AI Trends 2025"}
 
-data: {"type":"sources","sources":[{"id":"src-1","url":"https://example.com/ai-trends-2025","title":"AI Trends 2025"},{"id":"src-2","url":"https://example.com/llm-survey","title":"LLM Survey 2025"}]}
+data: {"type":"source-url","sourceId":"src-2","url":"https://example.com/llm-survey","title":"LLM Survey 2025"}
 
 data: {"type":"finish"}
 

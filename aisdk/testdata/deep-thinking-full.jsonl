@@ -38,9 +38,9 @@ data: {"type":"text-end","id":"text_2"}
 
 data: {"type":"finish-step"}
 
-data: {"type":"source","id":"s1","url":"https://openai.com/gpt5","title":"GPT-5 Announcement"}
+data: {"type":"source-url","sourceId":"s1","url":"https://openai.com/gpt5","title":"GPT-5 Announcement"}
 
-data: {"type":"sources","sources":[{"id":"s1","url":"https://openai.com/gpt5","title":"GPT-5 Announcement"},{"id":"s2","url":"https://deepmind.google/gemini","title":"Gemini 2.0 Ultra"}]}
+data: {"type":"source-url","sourceId":"s2","url":"https://deepmind.google/gemini","title":"Gemini 2.0 Ultra"}
 
 data: {"type":"data-suggested-questions","data":{"questions":["How does GPT-5 compare to Gemini 2.0?","What are the main use cases for Claude 4?","Which model is best for coding tasks?"]}}
 
