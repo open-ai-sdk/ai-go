@@ -47,3 +47,62 @@ jobs:
 
       - name: Verify dependencies
         run: go mod verify
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./... -count=1
+
+      - name: Compat test (external consumer of the public surface)
+        run: cd compat-test && go test ./... -count=1
+
+  boundaries:
+    name: Boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # The agentic API does not exist below v0.9.0-beta.1, and every ref/eino line
+      # number the design cites was read at v0.9.13. A drifted pin invalidates them
+      # silently, so fail loudly here.
+      - name: Eino version pin
+        run: |
+          got=$(go list -m github.com/cloudwego/eino)
+          echo "$got"
+          test "$got" = "github.com/cloudwego/eino v0.9.13"
+
+      # aisdk is the protocol layer. A consumer importing only aisdk must never
+      # compile an agent framework or a router.
+      - name: aisdk imports neither Eino nor Gin
+        run: |
+          deps=$(go list -deps ./aisdk/...)
+          ! echo "$deps" | grep -qE 'cloudwego/eino|gin-gonic/gin'
+
+      # Widening the Eino surface should be a review event, not a drive-by import.
+      - name: einoadapter Eino-import allowlist
+        run: |
+          actual=$(grep -rl 'cloudwego/eino' einoadapter --include='*.go' | sort)
+          expected=$(grep -v '^#' einoadapter/.eino-imports-allowlist | grep -v '^$' | sort)
+          diff <(echo "$expected") <(echo "$actual")
+
+      # The whole point of the reset. Tests are deliberately excluded: the budget is
+      # about how much non-test code this adapter needs, and counting tests would
+      # create pressure to delete the safety net.
+      - name: Non-test LOC budget
+        run: |
+          loc=$(find . -name '*.go' -not -name '*_test.go' \
+                  -not -path './examples/*' -not -path './compat-test/*' \
+                  | xargs cat | wc -l | tr -d ' ')
+          echo "non-test LOC: $loc"
+          test "$loc" -lt 5500

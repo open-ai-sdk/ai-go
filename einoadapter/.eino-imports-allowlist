@@ -1,0 +1,13 @@
+# Files under einoadapter/ permitted to import github.com/cloudwego/eino.
+#
+# CI diffs this list against reality, so adding an Eino import to a new file fails
+# the build until the file is listed here. That makes widening the Eino surface a
+# deliberate review event rather than something that happens by accident.
+#
+# Paths are relative to the module root, sorted, one per line.
+#
+# The design's earlier criterion — "Eino types appear in exactly one file" — was
+# withdrawn because it is not achievable: the conversion, the producer, the approval
+# gate, tool dispatch, and both message paths all need Eino types. This list is the
+# replacement.
+einoadapter/eino-version-guard.go

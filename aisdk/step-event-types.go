@@ -1,0 +1,87 @@
+// StepEvent and friends are the normalized event vocabulary the chunk producer
+// consumes. Promoted here from the former leaf package aitypes when the tool-loop
+// engine and provider layer were deleted: with only one consumer left there is no
+// longer a cycle to break, and keeping a separate package would have meant two
+// vocabularies bridged by converters — the exact thing aitypes existed to avoid.
+//
+// The Eino adapter extends this rather than defining a parallel event type.
+package aisdk
+
+import "encoding/json"
+
+// StepEventType identifies the kind of event emitted by the engine during a run.
+type StepEventType int
+
+const (
+	StepEventTextDelta StepEventType = iota
+	StepEventReasoningDelta
+	StepEventToolCallStart // first delta for a new tool call
+	StepEventToolCallDelta // subsequent argument fragment
+	StepEventToolCallReady // tool call complete, about to execute
+	StepEventToolResult    // tool execution result
+	StepEventToolApprovalRequest
+	StepEventToolOutputDenied
+	StepEventUsage
+	StepEventStepStart
+	StepEventStepEnd
+	StepEventToolCallInvalid // tool call had invalid JSON args, skipped execution
+	StepEventStructuredOutput
+	StepEventDone
+	StepEventError
+	// StepEventSource carries a source reference from a provider-native tool.
+	StepEventSource
+	// StepEventFileDelta carries a file/image output part from the model.
+	StepEventFileDelta
+)
+
+// StepEvent is a single event emitted by the engine's Run goroutine.
+type StepEvent struct {
+	Type StepEventType
+
+	// Text/reasoning fields.
+	TextDelta      string
+	ReasoningDelta string
+
+	// Tool call fields.
+	ToolCallIndex     int
+	ToolCallID        string
+	ToolCallName      string
+	ToolCallArgsDelta string
+	ThoughtSignature  string
+
+	// Approval fields (set for StepEventToolApprovalRequest). ApprovalIsAutomatic
+	// marks an approval that was granted without human input; ApprovalSignature
+	// carries a provider-supplied signature for the approval. Both are optional
+	// and omitted from the UI chunk when unset.
+	ApprovalIsAutomatic bool
+	ApprovalSignature   string
+
+	// Tool result.
+	ToolResult *StepToolResult
+
+	// Usage.
+	Usage *Usage
+
+	// Step metadata.
+	StepNumber   int
+	FinishReason FinishReason
+	// RawFinishReason is the unmodified finish reason string from the provider.
+	RawFinishReason string
+	// ProviderMetadata carries provider-specific metadata.
+	ProviderMetadata map[string]any
+	// Warnings carries non-fatal advisories.
+	Warnings []Warning
+
+	// Source is set for StepEventSource events.
+	Source *Source
+
+	// File fields are set for StepEventFileDelta.
+	FileData      []byte
+	FileMediaType string
+
+	// Structured output (final step only).
+	StructuredOutput json.RawMessage
+
+	// Error.
+	Error error
+}
