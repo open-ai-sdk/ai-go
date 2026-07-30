@@ -1,0 +1,14 @@
+data: {"messageId":"msg-approval-req","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"input":{"to":"a@b.c"},"toolCallId":"call_3","toolName":"sendEmail","type":"tool-input-available"}
+
+data: {"approvalId":"appr_1","signature":"sig-approval-1","toolCallId":"call_3","type":"tool-approval-request"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"tool-calls","type":"finish"}
+
+data: [DONE]
+

@@ -1,0 +1,24 @@
+data: {"messageId":"msg-reasoning","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"id":"r0","type":"reasoning-start"}
+
+data: {"delta":"Thinking about it. ","id":"r0","type":"reasoning-delta"}
+
+data: {"delta":"Done thinking.","id":"r0","type":"reasoning-delta"}
+
+data: {"id":"r0","providerMetadata":{"anthropic":{"signature":"sig-abc123"}},"type":"reasoning-end"}
+
+data: {"id":"t0","type":"text-start"}
+
+data: {"delta":"Answer.","id":"t0","type":"text-delta"}
+
+data: {"id":"t0","type":"text-end"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

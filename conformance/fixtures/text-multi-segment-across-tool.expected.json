@@ -1,0 +1,29 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "text",
+    "text": "Let me check.",
+    "state": "done"
+  },
+  {
+    "type": "tool-getWeather",
+    "toolCallId": "call_1",
+    "state": "output-available",
+    "input": {
+      "city": "Hanoi"
+    },
+    "output": {
+      "tempC": 31
+    }
+  },
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "text",
+    "text": "It is 31C.",
+    "state": "done"
+  }
+]

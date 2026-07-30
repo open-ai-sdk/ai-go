@@ -1,0 +1,14 @@
+data: {"messageId":"msg-tool-provider","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"input":{"q":"hanoi"},"providerExecuted":true,"toolCallId":"call_2","toolName":"web_search","type":"tool-input-available"}
+
+data: {"output":"3 results","providerExecuted":true,"toolCallId":"call_2","type":"tool-output-available"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"tool-calls","type":"finish"}
+
+data: [DONE]
+

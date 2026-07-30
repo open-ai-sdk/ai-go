@@ -1,0 +1,16 @@
+data: {"messageId":"msg-tool-input-err","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"toolCallId":"call_4","toolName":"getWeather","type":"tool-input-start"}
+
+data: {"inputTextDelta":"{\"city\":","toolCallId":"call_4","type":"tool-input-delta"}
+
+data: {"errorText":"provider error (status 500)","input":"{\"city\":","toolCallId":"call_4","toolName":"getWeather","type":"tool-input-error"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"error","type":"finish"}
+
+data: [DONE]
+

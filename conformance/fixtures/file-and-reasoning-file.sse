@@ -1,0 +1,14 @@
+data: {"messageId":"msg-files","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"mediaType":"image/png","type":"file","url":"data:image/png;base64,iVBORw0KGgo="}
+
+data: {"mediaType":"text/plain","type":"reasoning-file","url":"data:text/plain;base64,dGhvdWdodHM="}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

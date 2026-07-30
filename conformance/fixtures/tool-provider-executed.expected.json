@@ -1,0 +1,15 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "tool-web_search",
+    "toolCallId": "call_2",
+    "state": "output-available",
+    "input": {
+      "q": "hanoi"
+    },
+    "output": "3 results",
+    "providerExecuted": true
+  }
+]

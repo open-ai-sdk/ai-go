@@ -1,0 +1,12 @@
+data: {"messageId":"msg-bad-tool-input","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"inputTextDelta":"{\"a\":1}","toolCallId":"call_1","type":"tool-input-delta"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

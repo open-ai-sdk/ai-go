@@ -1,0 +1,18 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "tool-sendEmail",
+    "toolCallId": "call_3",
+    "state": "output-available",
+    "input": {
+      "to": "a@b.c"
+    },
+    "output": "sent",
+    "approval": {
+      "id": "appr_1",
+      "approved": true
+    }
+  }
+]

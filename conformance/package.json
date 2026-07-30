@@ -1,0 +1,15 @@
+{
+  "name": "ai-go-conformance",
+  "private": true,
+  "type": "module",
+  "description": "Validates ai-go's SSE output against the real AI SDK v7 client.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider-utils": "5.0.12",
+    "ai": "7.0.35",
+    "vitest": "3.2.4",
+    "zod": "4.1.8"
+  }
+}

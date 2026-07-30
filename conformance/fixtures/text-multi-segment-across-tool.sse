@@ -1,0 +1,36 @@
+data: {"messageId":"msg-multi-seg","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"id":"t0","type":"text-start"}
+
+data: {"delta":"Let me check.","id":"t0","type":"text-delta"}
+
+data: {"id":"t0","type":"text-end"}
+
+data: {"toolCallId":"call_1","toolName":"getWeather","type":"tool-input-start"}
+
+data: {"inputTextDelta":"{\"city\":","toolCallId":"call_1","type":"tool-input-delta"}
+
+data: {"inputTextDelta":"\"Hanoi\"}","toolCallId":"call_1","type":"tool-input-delta"}
+
+data: {"input":{"city":"Hanoi"},"toolCallId":"call_1","toolName":"getWeather","type":"tool-input-available"}
+
+data: {"output":{"tempC":31},"toolCallId":"call_1","type":"tool-output-available"}
+
+data: {"type":"finish-step"}
+
+data: {"type":"start-step"}
+
+data: {"id":"t1","type":"text-start"}
+
+data: {"delta":"It is 31C.","id":"t1","type":"text-delta"}
+
+data: {"id":"t1","type":"text-end"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

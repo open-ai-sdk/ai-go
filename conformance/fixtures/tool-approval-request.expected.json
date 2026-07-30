@@ -1,0 +1,17 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "tool-sendEmail",
+    "toolCallId": "call_3",
+    "state": "approval-requested",
+    "input": {
+      "to": "a@b.c"
+    },
+    "approval": {
+      "id": "appr_1",
+      "signature": "sig-approval-1"
+    }
+  }
+]

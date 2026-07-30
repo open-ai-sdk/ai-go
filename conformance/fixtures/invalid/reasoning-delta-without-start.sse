@@ -1,0 +1,12 @@
+data: {"messageId":"msg-bad-reasoning","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"delta":"orphan","id":"r0","type":"reasoning-delta"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

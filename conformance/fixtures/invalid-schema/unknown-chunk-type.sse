@@ -1,0 +1,12 @@
+data: {"messageId":"msg-unknown-type","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"id":"t0","suffix":"!","type":"text-suffix"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

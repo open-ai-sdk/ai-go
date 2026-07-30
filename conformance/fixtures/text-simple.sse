@@ -1,0 +1,18 @@
+data: {"messageId":"msg-text-simple","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"id":"t0","type":"text-start"}
+
+data: {"delta":"Hello ","id":"t0","type":"text-delta"}
+
+data: {"delta":"world","id":"t0","type":"text-delta"}
+
+data: {"id":"t0","type":"text-end"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

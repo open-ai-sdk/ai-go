@@ -1,0 +1,10 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "text",
+    "text": "Partial answer",
+    "state": "streaming"
+  }
+]

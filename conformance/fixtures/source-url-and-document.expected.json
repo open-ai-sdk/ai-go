@@ -1,0 +1,28 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "text",
+    "text": "Per two sources.",
+    "state": "done"
+  },
+  {
+    "type": "source-url",
+    "sourceId": "src_1",
+    "url": "https://example.com/a",
+    "title": "Article A"
+  },
+  {
+    "type": "source-url",
+    "sourceId": "src_2",
+    "url": "https://example.com/b"
+  },
+  {
+    "type": "source-document",
+    "sourceId": "doc_1",
+    "mediaType": "application/pdf",
+    "title": "Spec v3",
+    "filename": "spec-v3.pdf"
+  }
+]

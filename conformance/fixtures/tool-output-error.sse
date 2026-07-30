@@ -1,0 +1,14 @@
+data: {"messageId":"msg-tool-output-err","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"input":{"city":"Nowhere"},"toolCallId":"call_5","toolName":"getWeather","type":"tool-input-available"}
+
+data: {"errorText":"provider error (status 500)","toolCallId":"call_5","type":"tool-output-error"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"error","type":"finish"}
+
+data: [DONE]
+

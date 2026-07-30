@@ -1,0 +1,18 @@
+data: {"messageId":"msg-approval-ok","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"input":{"to":"a@b.c"},"toolCallId":"call_3","toolName":"sendEmail","type":"tool-input-available"}
+
+data: {"approvalId":"appr_1","toolCallId":"call_3","type":"tool-approval-request"}
+
+data: {"approvalId":"appr_1","approved":true,"type":"tool-approval-response"}
+
+data: {"output":"sent","toolCallId":"call_3","type":"tool-output-available"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

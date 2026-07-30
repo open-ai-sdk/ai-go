@@ -1,0 +1,18 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "tool-sendEmail",
+    "toolCallId": "call_3",
+    "state": "output-denied",
+    "input": {
+      "to": "a@b.c"
+    },
+    "approval": {
+      "id": "appr_1",
+      "approved": false,
+      "reason": "user declined"
+    }
+  }
+]

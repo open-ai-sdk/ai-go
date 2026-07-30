@@ -1,0 +1,22 @@
+data: {"messageId":"msg-sources","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"id":"t0","type":"text-start"}
+
+data: {"delta":"Per two sources.","id":"t0","type":"text-delta"}
+
+data: {"id":"t0","type":"text-end"}
+
+data: {"sourceId":"src_1","title":"Article A","type":"source-url","url":"https://example.com/a"}
+
+data: {"sourceId":"src_2","type":"source-url","url":"https://example.com/b"}
+
+data: {"filename":"spec-v3.pdf","mediaType":"application/pdf","sourceId":"doc_1","title":"Spec v3","type":"source-document"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+

@@ -1,0 +1,18 @@
+data: {"messageId":"msg-tool-server","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"providerExecuted":false,"toolCallId":"call_1","toolName":"getWeather","type":"tool-input-start"}
+
+data: {"inputTextDelta":"{\"city\":\"Hanoi\"}","toolCallId":"call_1","type":"tool-input-delta"}
+
+data: {"input":{"city":"Hanoi"},"providerExecuted":false,"toolCallId":"call_1","toolName":"getWeather","type":"tool-input-available"}
+
+data: {"output":{"tempC":31},"providerExecuted":false,"toolCallId":"call_1","type":"tool-output-available"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"tool-calls","type":"finish"}
+
+data: [DONE]
+

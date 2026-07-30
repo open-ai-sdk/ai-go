@@ -1,0 +1,12 @@
+data: {"messageId":"msg-error","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"id":"t0","type":"text-start"}
+
+data: {"delta":"Partial answer","id":"t0","type":"text-delta"}
+
+data: {"errorText":"provider error (status 500)","type":"error"}
+
+data: [DONE]
+

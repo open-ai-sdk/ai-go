@@ -1,0 +1,17 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "tool-getWeather",
+    "toolCallId": "call_1",
+    "state": "output-available",
+    "input": {
+      "city": "Hanoi"
+    },
+    "output": {
+      "tempC": 31
+    },
+    "providerExecuted": false
+  }
+]

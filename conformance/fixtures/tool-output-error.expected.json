@@ -1,0 +1,14 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "tool-getWeather",
+    "toolCallId": "call_5",
+    "state": "output-error",
+    "input": {
+      "city": "Nowhere"
+    },
+    "errorText": "provider error (status 500)"
+  }
+]

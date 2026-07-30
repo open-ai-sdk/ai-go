@@ -1,0 +1,20 @@
+[
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "reasoning",
+    "text": "Thinking about it. Done thinking.",
+    "providerMetadata": {
+      "anthropic": {
+        "signature": "sig-abc123"
+      }
+    },
+    "state": "done"
+  },
+  {
+    "type": "text",
+    "text": "Answer.",
+    "state": "done"
+  }
+]

@@ -60,6 +60,41 @@ jobs:
       - name: Compat test (external consumer of the public surface)
         run: cd compat-test && go test ./... -count=1
 
+  conformance:
+    name: Conformance (real AI SDK v7 client)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: conformance/pnpm-lock.yaml
+
+      # The committed fixtures must match what the constructors produce. A Go-side
+      # chunk change that forgets to regenerate them fails here, before the TS suite
+      # gets a chance to pass against stale bytes.
+      - name: Fixtures are up to date
+        run: go test ./aisdk/ -run TestConformanceFixtures -count=1
+
+      # The real ai@7.0.35 client over Go-produced SSE: its own Zod schema (layer 1)
+      # and its own stream processor (layer 2). This is what makes a Go chunk change
+      # that breaks conformance fail the build.
+      - name: Conformance suite
+        run: cd conformance && pnpm install --frozen-lockfile && pnpm test
+
   boundaries:
     name: Boundaries
     runs-on: ubuntu-latest

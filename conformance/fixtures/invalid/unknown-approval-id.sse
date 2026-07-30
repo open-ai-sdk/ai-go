@@ -1,0 +1,14 @@
+data: {"messageId":"msg-bad-approval","type":"start"}
+
+data: {"type":"start-step"}
+
+data: {"input":{"to":"a@b.c"},"toolCallId":"call_3","toolName":"sendEmail","type":"tool-input-available"}
+
+data: {"approvalId":"appr_does_not_exist","approved":true,"type":"tool-approval-response"}
+
+data: {"type":"finish-step"}
+
+data: {"finishReason":"stop","type":"finish"}
+
+data: [DONE]
+
