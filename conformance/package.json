@@ -2,6 +2,9 @@
   "name": "ai-go-conformance",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+  },
   "scripts": {
     "check": "vp check",
     "test": "bun run union:check && vp test",
