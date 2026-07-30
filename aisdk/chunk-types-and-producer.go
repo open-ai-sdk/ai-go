@@ -139,16 +139,15 @@ func (cp *ChunkProducer) translateEvent(ev StepEvent) ([]Chunk, string) {
 	case StepEventSource:
 		return cp.chunksSource(ev), ""
 	case StepEventStepEnd:
-		cp.lastFinishReason = string(ev.FinishReason)
+		// Mapped to the wire enum here, not on emission. The internal vocabulary
+		// spells these with underscores (tool_calls, content_filter) and has
+		// `unknown`; the client validates against a hyphenated enum with `other` and
+		// its transport throws on a miss. Passing the internal value straight through
+		// made every tool-calling conversation fail in the browser.
+		cp.lastFinishReason = string(ToWireFinishReason(ev.FinishReason))
 		return cp.chunksStepEnd(), ""
 	case StepEventDone:
-		fields := map[string]any{}
-		if cp.lastFinishReason != "" {
-			fields["finishReason"] = cp.lastFinishReason
-		}
-		return []Chunk{
-			{Type: ChunkFinish, Fields: fields},
-		}, ""
+		return []Chunk{FinishChunk(WireFinishReason(cp.lastFinishReason))}, ""
 	}
 	return nil, ""
 }

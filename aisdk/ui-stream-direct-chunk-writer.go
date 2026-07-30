@@ -47,18 +47,18 @@ func (wr *Writer) WriteData(name string, payload any) error {
 	return WriteSSE(wr.w, Chunk{Type: "data-" + name, Fields: map[string]any{"data": payload}})
 }
 
-// WriteSource emits a source chunk for a single web reference.
+// WriteSource emits a source-url chunk for a single web reference.
+//
+// This previously emitted type "source" with an "id" field. Neither exists in v7: the
+// chunk is "source-url" and the identifier field is "sourceId", so the old output was
+// rejected by the client's schema gate before it could render. There is also no
+// batch "sources" chunk in the protocol — a caller with several references emits one
+// source-url each, which is why the former WriteSources is gone.
 func (wr *Writer) WriteSource(s Source) error {
-	return WriteSSE(wr.w, Chunk{Type: ChunkSource, Fields: map[string]any{
-		"id":    s.ID,
-		"url":   s.URL,
-		"title": s.Title,
-	}})
-}
-
-// WriteSources emits a sources chunk containing multiple references.
-func (wr *Writer) WriteSources(sources []Source) error {
-	return WriteSSE(wr.w, Chunk{Type: ChunkSources, Fields: map[string]any{"sources": sources}})
+	return WriteSSE(wr.w, SourceURL(s.ID, s.URL,
+		WithSourceTitle(s.Title),
+		WithProviderMetadata(s.ProviderMetadata),
+	))
 }
 
 // WriteMessageMetadata emits a message-metadata chunk with arbitrary metadata.

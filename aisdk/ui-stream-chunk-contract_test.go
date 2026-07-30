@@ -44,8 +44,6 @@ func TestChunkConstants_FrozenContractCoverage(t *testing.T) {
 		ChunkFinishStep,
 		ChunkFinish,
 		ChunkError,
-		ChunkSource,
-		ChunkSources,
 		ChunkSourceURL,
 		ChunkSourceDocument,
 		ChunkFile,
@@ -77,8 +75,6 @@ func TestChunkConstants_FrozenContractCoverage(t *testing.T) {
 		ChunkFinishStep:           "finish-step",
 		ChunkFinish:               "finish",
 		ChunkError:                "error",
-		ChunkSource:               "source",
-		ChunkSources:              "sources",
 		ChunkSourceURL:            "source-url",
 		ChunkSourceDocument:       "source-document",
 		ChunkFile:                 "file",
@@ -124,8 +120,6 @@ func TestWriter_ChunkTypeInSSEPayload(t *testing.T) {
 		ChunkFinishStep,
 		ChunkFinish,
 		ChunkError,
-		ChunkSource,
-		ChunkSources,
 	}
 
 	for _, typ := range types {
@@ -213,32 +207,52 @@ func TestWriter_WriteError_NoFinish(t *testing.T) {
 	}
 }
 
-// TestWriter_WriteSource_Fields verifies source chunk shape.
+// TestWriter_WriteSource_Fields verifies the source-url chunk shape. It formerly
+// expected type "source" with an "id" field; neither exists in the v7 union.
 func TestWriter_WriteSource_Fields(t *testing.T) {
 	output := captureWriterOutput(func(w *Writer) {
 		w.WriteSource(Source{ID: "src-1", URL: "https://example.com", Title: "Example"})
 	})
-	if !strings.Contains(output, `"type":"source"`) {
-		t.Errorf("WriteSource: expected type=source\ngot: %s", output)
-	}
-	if !strings.Contains(output, `"url":"https://example.com"`) {
-		t.Errorf("WriteSource: expected url field\ngot: %s", output)
+	for _, want := range []string{
+		`"type":"source-url"`,
+		`"sourceId":"src-1"`,
+		`"url":"https://example.com"`,
+		`"title":"Example"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("WriteSource: missing %s\ngot: %s", want, output)
+		}
 	}
 }
 
-// TestWriter_WriteSources_BatchShape verifies sources chunk shape.
-func TestWriter_WriteSources_BatchShape(t *testing.T) {
+// TestWriter_MultipleSources_EmitsOneSourceURLEach replaces a former test that
+// asserted a batch `sources` chunk. No such chunk type exists in v7 — the union has
+// only source-url and source-document — so several references are several chunks.
+func TestWriter_MultipleSources_EmitsOneSourceURLEach(t *testing.T) {
 	output := captureWriterOutput(func(w *Writer) {
-		w.WriteSources([]Source{
+		for _, s := range []Source{
 			{ID: "s1", URL: "https://a.com", Title: "A"},
 			{ID: "s2", URL: "https://b.com", Title: "B"},
-		})
+		} {
+			if err := w.WriteSource(s); err != nil {
+				t.Fatalf("WriteSource: %v", err)
+			}
+		}
 	})
-	if !strings.Contains(output, `"type":"sources"`) {
-		t.Errorf("WriteSources: expected type=sources\ngot: %s", output)
+	if n := strings.Count(output, `"type":"source-url"`); n != 2 {
+		t.Errorf("expected 2 source-url chunks, got %d\ngot: %s", n, output)
 	}
-	if !strings.Contains(output, `"sources":`) {
-		t.Errorf("WriteSources: expected sources array\ngot: %s", output)
+	if strings.Contains(output, `"type":"sources"`) {
+		t.Errorf("emitted a batch sources chunk, which is not in the v7 union\ngot: %s", output)
+	}
+	// sourceId, not id — the client's source-url member requires sourceId.
+	for _, want := range []string{`"sourceId":"s1"`, `"sourceId":"s2"`} {
+		if !strings.Contains(output, want) {
+			t.Errorf("missing %s\ngot: %s", want, output)
+		}
+	}
+	if strings.Contains(output, `"id":"s1"`) {
+		t.Errorf("emitted id instead of sourceId\ngot: %s", output)
 	}
 }
 

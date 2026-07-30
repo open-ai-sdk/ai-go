@@ -19,36 +19,52 @@ func TestWriter_WriteData(t *testing.T) {
 	assertContains(t, out, `"content":"Research AI trends"`)
 }
 
-// TestWriter_WriteSource verifies that WriteSource emits a valid source chunk.
+// TestWriter_WriteSource verifies WriteSource emits a conformant source-url chunk.
+//
+// Previously asserted type "source" and field "id". Neither is in the v7 union: the
+// chunk is source-url and the field is sourceId, so the old output failed the client's
+// schema gate. The assertions below are the corrected contract.
 func TestWriter_WriteSource(t *testing.T) {
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
 
-	wr.WriteSource(Source{
+	if err := wr.WriteSource(Source{
 		ID:    "src-1",
 		URL:   "https://example.com/article",
 		Title: "Example Article",
-	})
+	}); err != nil {
+		t.Fatalf("WriteSource: %v", err)
+	}
 
 	out := buf.String()
-	assertContains(t, out, `"type":"source"`)
+	assertContains(t, out, `"type":"source-url"`)
 	assertContains(t, out, `"url":"https://example.com/article"`)
 	assertContains(t, out, `"title":"Example Article"`)
-	assertContains(t, out, `"id":"src-1"`)
+	assertContains(t, out, `"sourceId":"src-1"`)
+	if strings.Contains(out, `"id":"src-1"`) {
+		t.Errorf("emitted id instead of sourceId\ngot: %s", out)
+	}
 }
 
-// TestWriter_WriteSources verifies that WriteSources emits a sources chunk with multiple entries.
-func TestWriter_WriteSources(t *testing.T) {
+// TestWriter_MultipleSources verifies several references emit one source-url chunk
+// each. It formerly asserted a batch `sources` chunk, which is not a v7 chunk type.
+func TestWriter_MultipleSources(t *testing.T) {
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
 
-	wr.WriteSources([]Source{
-		{URL: "https://a.com", Title: "Site A"},
-		{URL: "https://b.com", Title: "Site B"},
-	})
+	for _, s := range []Source{
+		{ID: "s1", URL: "https://a.com", Title: "Site A"},
+		{ID: "s2", URL: "https://b.com", Title: "Site B"},
+	} {
+		if err := wr.WriteSource(s); err != nil {
+			t.Fatalf("WriteSource: %v", err)
+		}
+	}
 
 	out := buf.String()
-	assertContains(t, out, `"type":"sources"`)
+	if n := strings.Count(out, `"type":"source-url"`); n != 2 {
+		t.Errorf("expected 2 source-url chunks, got %d\ngot: %s", n, out)
+	}
 	assertContains(t, out, `"https://a.com"`)
 	assertContains(t, out, `"https://b.com"`)
 }
@@ -167,11 +183,15 @@ func TestGolden_DeepThinking_WithSourcesAndCustomData(t *testing.T) {
 	// For the golden test we validate each portion separately.
 	engineOut := engineBuf.String()
 
-	// 5. After engine stream: sources
-	wr.WriteSources([]Source{
-		{URL: "https://openai.com/gpt5", Title: "GPT-5 Released"},
-		{URL: "https://deepmind.com/gemini", Title: "Gemini 2.0"},
-	})
+	// 5. After engine stream: sources, one source-url chunk each
+	for _, s := range []Source{
+		{ID: "src-gpt5", URL: "https://openai.com/gpt5", Title: "GPT-5 Released"},
+		{ID: "src-gemini", URL: "https://deepmind.com/gemini", Title: "Gemini 2.0"},
+	} {
+		if err := wr.WriteSource(s); err != nil {
+			t.Fatalf("WriteSource: %v", err)
+		}
+	}
 
 	// 6. Custom data chunks for app-specific artifacts and questions
 	wr.WriteData("artifacts", map[string]any{
@@ -199,7 +219,8 @@ func TestGolden_DeepThinking_WithSourcesAndCustomData(t *testing.T) {
 	assertContains(t, writerOut, `"Researching AI trends in 2025"`)
 	assertContains(t, writerOut, `"type":"data-steps"`)
 	assertContains(t, writerOut, `"Research information"`)
-	assertContains(t, writerOut, `"type":"sources"`)
+	assertContains(t, writerOut, `"type":"source-url"`)
+	assertContains(t, writerOut, `"sourceId":"src-gpt5"`)
 	assertContains(t, writerOut, `"https://openai.com/gpt5"`)
 	assertContains(t, writerOut, `"GPT-5 Released"`)
 	assertContains(t, writerOut, `"type":"data-artifacts"`)
