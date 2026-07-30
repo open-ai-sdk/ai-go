@@ -1,6 +1,7 @@
 package aisdk
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -108,81 +109,82 @@ func TestIntegration_PersistedMessageBuilder_FullConversation(t *testing.T) {
 	}
 }
 
-// TestIntegration_EnvelopeRoundTrip_WithAllPartTypes verifies a full ChatRequestEnvelope
-// with text/image/file/tool-invocation parts and v6 fields survives JSON round-trip
-// and converts correctly to AI messages.
-func TestIntegration_EnvelopeRoundTrip_WithAllPartTypes(t *testing.T) {
-	original := ChatRequestEnvelope{
-		ID:        "sess-rt-1",
-		Trigger:   "submit-message",
-		MessageID: "",
-		Messages: []EnvelopeMessage{
-			{
-				ID:   "msg-user-1",
-				Role: "user",
-				Parts: []EnvelopePartUnion{
-					{Type: EnvelopePartTypeText, Text: "What is 2+2?"},
-					{Type: EnvelopePartTypeImage, URL: "https://example.com/img.png", MediaType: "image/png"},
-				},
-				Metadata: map[string]any{"clientTime": "08:00"},
-			},
-			{
-				ID:   "msg-asst-1",
-				Role: "assistant",
-				Parts: []EnvelopePartUnion{
-					{
-						Type:       EnvelopePartTypeToolInvocation,
-						ToolCallID: "tc-rt-1",
-						ToolName:   "add",
-						Input:      json.RawMessage(`{"a":2,"b":2}`),
-						Output:     "4",
-						State:      "result",
-					},
-					{Type: EnvelopePartTypeText, Text: "The answer is 4."},
-				},
-			},
-		},
-		Body:     map[string]any{"modelId": "openai:gpt-4o", "maxSteps": float64(3)},
-		Metadata: map[string]any{"userId": "user-42"},
-	}
+// TestIntegration_ChatRequestRoundTrip_WithAllPartTypes replaces a test written against
+// the v6-era ChatRequestEnvelope, which useChat never sent. The scenario is the same — a
+// two-message history with text, file, and a completed tool call — retargeted at the real
+// v7 body shape.
+//
+// The old version also asserted ToAIContentParts' fan-out counts. Those move to the
+// einoadapter conversion tests, since the target is now *schema.AgenticMessage.
+func TestIntegration_ChatRequestRoundTrip_WithAllPartTypes(t *testing.T) {
+	body := []byte(`{
+	  "id": "sess-rt-1",
+	  "trigger": "submit-message",
+	  "modelId": "openai:gpt-4o",
+	  "maxSteps": 3,
+	  "messages": [
+	    {"id":"msg-user-1","role":"user","metadata":{"clientTime":"08:00"},"parts":[
+	      {"type":"text","text":"What is 2+2?"},
+	      {"type":"file","url":"https://example.com/img.png","mediaType":"image/png"}
+	    ]},
+	    {"id":"msg-asst-1","role":"assistant","parts":[
+	      {"type":"step-start"},
+	      {"type":"tool-add","toolCallId":"tc-rt-1","state":"output-available",
+	       "input":{"a":2,"b":2},"output":"4"},
+	      {"type":"text","text":"The answer is 4."}
+	    ]}
+	  ]
+	}`)
 
-	// Round-trip via JSON.
-	raw, err := json.Marshal(original)
+	req, err := DecodeChatRequest(bytes.NewReader(body), DefaultDecodeLimits())
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var decoded ChatRequestEnvelope
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+		t.Fatalf("DecodeChatRequest: %v", err)
 	}
 
-	// Verify v6 fields survived.
-	if decoded.Trigger != "submit-message" {
-		t.Errorf("Trigger: got %q", decoded.Trigger)
+	if req.ID != "sess-rt-1" {
+		t.Errorf("ID: got %q", req.ID)
 	}
-	if decoded.Messages[0].Metadata["clientTime"] != "08:00" {
-		t.Errorf("per-message metadata: got %v", decoded.Messages[0].Metadata)
+	if req.Trigger != TriggerSubmitMessage {
+		t.Errorf("Trigger: got %q", req.Trigger)
 	}
-
-	// Verify tool-invocation part decoded correctly.
-	toolPart := decoded.Messages[1].Parts[0]
-	if toolPart.Type != EnvelopePartTypeToolInvocation {
-		t.Errorf("tool part type: got %q", toolPart.Type)
-	}
-	if toolPart.ToolCallID != "tc-rt-1" {
-		t.Errorf("ToolCallID: got %q", toolPart.ToolCallID)
-	}
-	if toolPart.State != "result" {
-		t.Errorf("State: got %q", toolPart.State)
+	if len(req.Messages) != 2 {
+		t.Fatalf("messages: got %d, want 2", len(req.Messages))
 	}
 
-	// The inbound-conversion half of this scenario is intentionally absent. It
-	// asserted ToAIContentParts, whose fan-out counts (user parts → 2; assistant
-	// tool-invocation with state=result → tool-call + tool-result + text = 3) were
-	// the contract. The replacement converts UIMessage parts to
-	// *schema.AgenticMessage instead, so the same counts must be re-asserted
-	// against that target rather than ported. Tracked as a requirement on the
-	// inbound conversion, not as a gap here.
+	// Application fields ride alongside the known keys and stay raw.
+	if _, ok := req.Body["modelId"]; !ok {
+		t.Errorf("application body fields lost: %v", req.Body)
+	}
+	for _, known := range []string{"id", "messages", "trigger"} {
+		if _, ok := req.Body[known]; ok {
+			t.Errorf("protocol key %q leaked into Body", known)
+		}
+	}
+
+	// Per-message metadata survives as raw JSON — ai-go has no opinion about its shape.
+	if len(req.Messages[0].Metadata) == 0 {
+		t.Error("per-message metadata was dropped")
+	}
+
+	tool := req.Messages[1].Parts[1]
+	if !tool.IsToolPart() {
+		t.Fatalf("part 1 is not a tool part: %+v", tool)
+	}
+	if tool.ToolNameOf() != "add" {
+		t.Errorf("tool name: got %q, want add", tool.ToolNameOf())
+	}
+	if tool.ToolCallID != "tc-rt-1" {
+		t.Errorf("ToolCallID: got %q", tool.ToolCallID)
+	}
+	if tool.ToolStateOf() != UIToolOutputAvailable {
+		t.Errorf("state: got %q", tool.ToolStateOf())
+	}
+
+	// The last message is assistant-role, so the response continues it rather than
+	// starting a new one.
+	if got := req.ResolveResponseMessageID(); got != "msg-asst-1" {
+		t.Errorf("ResolveResponseMessageID = %q, want msg-asst-1", got)
+	}
 }
 
 // TestIntegration_SendStartFalse_SendFinishFalse_ForMergePattern verifies that

@@ -18,3 +18,5 @@ einoadapter/eino-version-guard.go
 einoadapter/from-agentic-message.go
 einoadapter/from-content-block.go
 einoadapter/stream-lifecycle.go
+einoadapter/ui-message-assistant-blocks.go
+einoadapter/ui-message-to-agentic.go
