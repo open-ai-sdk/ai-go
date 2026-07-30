@@ -14,16 +14,19 @@ Go SDK for building AI-powered applications with a unified provider interface.
 
 ## AI SDK v7 conformance
 
-The `conformance/` harness pins `ai@7.0.35` and checks every recorded Go SSE
+The Bun-managed `conformance/` harness pins `ai@7.0.35` and uses Vite+ on its
+Vite 8 core to check every recorded Go SSE
 fixture against the real UI-message-chunk schema and `readUIMessageStream`.
 It also starts a live Go server and drives text, tool, approval, and denial
 flows through a real React `useChat` client in Chromium.
 
 ```sh
-npm ci --prefix conformance
-npm test --prefix conformance
-npx --prefix conformance playwright install chromium
-npm run test:browser --prefix conformance
+cd conformance
+bun install --frozen-lockfile
+bun run check
+bun run test
+bunx playwright install chromium
+bun run test:browser
 ```
 
 Run both conformance commands whenever changing `uistream`, response headers,

@@ -23,27 +23,34 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: conformance/package-lock.json
+          bun-version: "1.3.13"
 
       - name: Install conformance dependencies
-        run: npm ci --prefix conformance
+        run: bun install --frozen-lockfile
+        working-directory: conformance
 
       - name: Install Chromium
-        run: npx --prefix conformance playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium
+        working-directory: conformance
 
       - name: Run schema, semantic, and live-server gates
-        run: npm test --prefix conformance
+        run: bun run test
+        working-directory: conformance
 
       - name: Type-check conformance harness
-        run: npm run typecheck --prefix conformance
+        run: bun run typecheck
+        working-directory: conformance
+
+      - name: Check conformance formatting and lint
+        run: bun run check
+        working-directory: conformance
 
       - name: Run useChat browser conformance
-        run: npm run test:browser --prefix conformance
+        run: bun run test:browser
+        working-directory: conformance
 
   lint:
     name: Lint

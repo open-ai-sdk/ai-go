@@ -12,22 +12,20 @@ export type Fixture = {
 };
 
 export async function loadFixtures(): Promise<Fixture[]> {
-  const names = (await readdir(fixturesDir))
-    .filter(name => name.endsWith('.jsonl'))
-    .sort();
+  const names = (await readdir(fixturesDir)).filter((name) => name.endsWith('.jsonl')).sort();
 
   return Promise.all(
-    names.map(async name => {
+    names.map(async (name) => {
       const path = join(fixturesDir.pathname, name);
       const raw = await readFile(path, 'utf8');
       return {
         name: basename(name, '.jsonl'),
         chunks: raw
           .split(/\r?\n/)
-          .filter(line => line.startsWith('data: '))
-          .map(line => line.slice('data: '.length))
-          .filter(payload => payload !== '[DONE]')
-          .map(payload => JSON.parse(payload)),
+          .filter((line) => line.startsWith('data: '))
+          .map((line) => line.slice('data: '.length))
+          .filter((payload) => payload !== '[DONE]')
+          .map((payload) => JSON.parse(payload)),
         raw,
       };
     }),

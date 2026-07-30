@@ -1,5 +1,5 @@
 import { readUIMessageStream, type UIMessage } from 'ai';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 import { chunkStream, loadFixtures } from './fixtures.js';
 
@@ -76,7 +76,7 @@ const expectedParts: Record<string, PartSummary[]> = {
 };
 
 function summarize(message: UIMessage): PartSummary[] {
-  return message.parts.map(part => {
+  return message.parts.map((part) => {
     const value = part as { type: string; state?: string; text?: string };
     return {
       type: value.type,
@@ -94,7 +94,7 @@ describe('readUIMessageStream fixture replay', async () => {
 
       for await (const message of readUIMessageStream({
         stream: chunkStream(fixture.chunks),
-        onError: error => errors.push(error),
+        onError: (error) => errors.push(error),
       })) {
         finalMessage = message;
       }

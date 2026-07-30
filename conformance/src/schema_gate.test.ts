@@ -1,5 +1,5 @@
 import { validateTypes } from '@ai-sdk/provider-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 
 import { loadFixtures } from './fixtures.js';
 import { installedUIMessageChunkSchema } from './union.js';

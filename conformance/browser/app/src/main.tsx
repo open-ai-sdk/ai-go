@@ -20,37 +20,26 @@ type ConformanceTools = {
   };
 };
 
-type ConformanceMessage = UIMessage<
-  unknown,
-  Record<string, unknown>,
-  ConformanceTools
->;
+type ConformanceMessage = UIMessage<unknown, Record<string, unknown>, ConformanceTools>;
 
-const scenario =
-  new URLSearchParams(window.location.search).get('scenario') ?? 'text';
+const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 'text';
 
 function App() {
   const [input, setInput] = useState('hello');
-  const {
-    addToolApprovalResponse,
-    addToolOutput,
-    error,
-    messages,
-    sendMessage,
-    status,
-  } = useChat<ConformanceMessage>({
-    transport: new DefaultChatTransport({
-      api: `/chat?scenario=${encodeURIComponent(scenario)}`,
-    }),
-    sendAutomaticallyWhen: options =>
-      lastAssistantMessageIsCompleteWithApprovalResponses(options) ||
-      lastAssistantMessageIsCompleteWithToolCalls(options),
-  });
+  const { addToolApprovalResponse, addToolOutput, error, messages, sendMessage, status } =
+    useChat<ConformanceMessage>({
+      transport: new DefaultChatTransport({
+        api: `/chat?scenario=${encodeURIComponent(scenario)}`,
+      }),
+      sendAutomaticallyWhen: (options) =>
+        lastAssistantMessageIsCompleteWithApprovalResponses(options) ||
+        lastAssistantMessageIsCompleteWithToolCalls(options),
+    });
 
   return (
     <main>
       <form
-        onSubmit={event => {
+        onSubmit={(event) => {
           event.preventDefault();
           void sendMessage({ text: input });
         }}
@@ -58,7 +47,7 @@ function App() {
         <input
           aria-label="Message"
           value={input}
-          onChange={event => setInput(event.target.value)}
+          onChange={(event) => setInput(event.target.value)}
         />
         <button type="submit">Send</button>
       </form>
@@ -67,7 +56,7 @@ function App() {
       {error && <p role="alert">{error.message}</p>}
 
       <section data-testid="messages">
-        {messages.map(message => (
+        {messages.map((message) => (
           <article key={message.id} data-role={message.role}>
             {message.parts.map((part, index) => {
               if (part.type === 'text') {

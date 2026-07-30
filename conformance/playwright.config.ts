@@ -18,7 +18,7 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'vite --host 127.0.0.1 --port 4173',
+      command: 'vp dev --host 127.0.0.1 --port 4173',
       port: 4173,
       reuseExistingServer: false,
       timeout: 120_000,

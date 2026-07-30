@@ -1,15 +1,11 @@
-import {
-  execFileSync,
-  spawn,
-  type ChildProcess,
-} from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { UI_MESSAGE_STREAM_HEADERS } from 'ai';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 
 let server: ChildProcess;
 let serverURL: string;
@@ -18,31 +14,25 @@ let serverDir: string;
 beforeAll(async () => {
   serverDir = mkdtempSync(join(tmpdir(), 'ai-go-conformance-'));
   const serverPath = join(serverDir, 'server');
-  execFileSync(
-    'go',
-    ['build', '-o', serverPath, './cmd/conformance-server'],
-    { cwd: new URL('..', import.meta.url) },
-  );
-  server = spawn(
-    serverPath,
-    ['-addr', '127.0.0.1:0'],
-    {
-      cwd: new URL('..', import.meta.url),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  execFileSync('go', ['build', '-o', serverPath, './cmd/conformance-server'], {
+    cwd: new URL('..', import.meta.url),
+  });
+  server = spawn(serverPath, ['-addr', '127.0.0.1:0'], {
+    cwd: new URL('..', import.meta.url),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
   serverURL = await new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(
       () => reject(new Error('Go conformance server did not start')),
       60_000,
     );
-    server.once('exit', code => {
+    server.once('exit', (code) => {
       clearTimeout(timeout);
       reject(new Error(`Go conformance server exited with code ${code}`));
     });
-    server.stderr!.on('data', data => process.stderr.write(data));
-    server.stdout!.on('data', data => {
+    server.stderr!.on('data', (data) => process.stderr.write(data));
+    server.stdout!.on('data', (data) => {
       const match = String(data).match(/LISTEN (http:\/\/\S+)/);
       if (match) {
         clearTimeout(timeout);
