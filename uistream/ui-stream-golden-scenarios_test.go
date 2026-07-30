@@ -172,6 +172,52 @@ func TestGolden_Error(t *testing.T) {
 	assertContains(t, output, "data: [DONE]")
 }
 
+func TestGolden_ErrorAfterStepEndDoesNotCloseBlockTwice(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   engine.StepEvent
+		endType string
+	}{
+		{
+			name:    "text",
+			event:   engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "partial"},
+			endType: ChunkTextEnd,
+		},
+		{
+			name:    "reasoning",
+			event:   engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: "thinking"},
+			endType: ChunkReasoningEnd,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := runAdapter(
+				engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
+				tt.event,
+				engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
+				engine.StepEvent{Type: engine.StepEventError, Error: fmt.Errorf("structured output failed")},
+			)
+
+			endChunk := `"type":"` + tt.endType + `"`
+			if got := strings.Count(output, endChunk); got != 1 {
+				t.Fatalf("%s count = %d, want 1\n%s", endChunk, got, output)
+			}
+			finishStep := strings.Index(output, `"type":"finish-step"`)
+			errorChunk := strings.Index(output, `"type":"error"`)
+			finish := strings.Index(output, `"type":"finish"`)
+			if finishStep == -1 || errorChunk == -1 || finish == -1 {
+				t.Fatalf("missing terminal chunks\n%s", output)
+			}
+			if finishStep >= errorChunk || errorChunk >= finish {
+				t.Fatalf("terminal chunks out of order\n%s", output)
+			}
+			assertContains(t, output, `"finishReason":"error"`)
+			assertContains(t, output, "data: [DONE]")
+		})
+	}
+}
+
 func TestGolden_ToolCallsFinishReasonUsesWireVocabulary(t *testing.T) {
 	output := runAdapter(
 		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},

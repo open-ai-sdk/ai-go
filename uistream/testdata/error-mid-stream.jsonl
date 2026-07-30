@@ -10,7 +10,7 @@ data: {"type":"text-delta","id":"text_1","delta":"First, I need to look up some 
 
 data: {"type":"text-end","id":"text_1"}
 
-data: {"type":"error","errorText":"stream error: connection reset by peer"}
+data: {"type":"error","errorText":"stream error"}
 
 data: {"type":"finish","finishReason":"error"}
 

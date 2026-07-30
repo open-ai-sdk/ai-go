@@ -393,6 +393,7 @@ func (cp *ChunkProducer) chunksBlockEnd() []Chunk {
 	var out []Chunk
 	if cp.textStarted {
 		out = append(out, Chunk{Type: ChunkTextEnd, Fields: map[string]any{"id": cp.textBlockID}})
+		cp.textStarted = false
 	}
 	if cp.reasoningStarted {
 		reasoningEndFields := map[string]any{"id": cp.textBlockID}
@@ -400,6 +401,7 @@ func (cp *ChunkProducer) chunksBlockEnd() []Chunk {
 			reasoningEndFields["signature"] = cp.lastThoughtSignature
 		}
 		out = append(out, Chunk{Type: ChunkReasoningEnd, Fields: reasoningEndFields})
+		cp.reasoningStarted = false
 	}
 	return out
 }
@@ -412,8 +414,6 @@ func (cp *ChunkProducer) chunksStepEnd() []Chunk {
 
 func (cp *ChunkProducer) chunksError(err error) []Chunk {
 	out := cp.chunksBlockEnd()
-	cp.textStarted = false
-	cp.reasoningStarted = false
 
 	// Redact unconditionally: raw provider error text can carry org/request
 	// IDs and attacker-echoed content into the browser.
