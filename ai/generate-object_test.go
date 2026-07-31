@@ -78,3 +78,15 @@ func TestGenerateObject_InvalidJSON_ReturnsError(t *testing.T) {
 		t.Fatal("expected an error for a non-JSON model response")
 	}
 }
+
+func TestGenerateObject_SchemaViolationReturnsError(t *testing.T) {
+	model := &objectJSONModel{json: `{"name":"Ada","age":"thirty-six","address":{"city":"London","zip":"E1"}}`}
+
+	_, err := ai.GenerateObject[generateObjectPerson](context.Background(), ai.GenerateObjectRequest{
+		Model:    model,
+		Messages: []ai.Message{ai.UserMessage("describe Ada")},
+	})
+	if err == nil {
+		t.Fatal("expected an error when generated JSON violates the schema derived from T")
+	}
+}

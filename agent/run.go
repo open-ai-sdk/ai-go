@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -292,7 +293,7 @@ func (r *run) executeToolStep(
 			params.MaxParallelTools, params.ToolApproval, params.Approver,
 		)
 	} else {
-		toolNames, stepToolCalls, stepToolResults = executeToolCalls(
+		toolNames, stepToolCalls, stepToolResults, controlErr = executeToolCalls(
 			r, params.Tools, preparedToolCalls, history, params.ToolApproval, params.Approver,
 		)
 	}
@@ -300,6 +301,27 @@ func (r *run) executeToolStep(
 	if controlErr != nil {
 		stepSpan.RecordError(controlErr)
 		stepSpan.End()
+		if errors.Is(controlErr, errApprovalPending) {
+			r.emit(StepEvent{
+				Type:         StepEventStepEnd,
+				StepNumber:   step,
+				FinishReason: FinishReasonToolCalls,
+			})
+			r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr) })
+			*completedSteps = append(*completedSteps, StepResultInfo{
+				StepNumber:   step,
+				HasToolCalls: true,
+				ToolNames:    toolNames,
+				Text:         fullText,
+				Reasoning:    sr.reasoning,
+				ToolCalls:    stepToolCalls,
+				ToolResults:  stepToolResults,
+				Usage:        sr.usage,
+				FinishReason: FinishReasonToolCalls,
+			})
+			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })
+			r.emit(StepEvent{Type: StepEventDone})
+		}
 		return true
 	}
 

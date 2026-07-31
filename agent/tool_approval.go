@@ -1,6 +1,11 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var errApprovalPending = errors.New("agent: tool approval pending")
 
 // ApprovalRequest describes a suspended tool call awaiting a decision.
 // ApprovalID correlates the request with its response.

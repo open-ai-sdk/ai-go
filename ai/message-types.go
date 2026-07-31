@@ -26,6 +26,7 @@ const (
 	ContentPartTypeFile       = aikit.ContentPartTypeFile
 	ContentPartTypeToolCall   = aikit.ContentPartTypeToolCall
 	ContentPartTypeToolResult = aikit.ContentPartTypeToolResult
+	ContentPartTypeToolApprovalResponse = aikit.ContentPartTypeToolApprovalResponse
 	ContentPartTypeReasoning  = aikit.ContentPartTypeReasoning
 )
 
@@ -123,6 +124,18 @@ func ToolResultPart(id, name, output string) ContentPart {
 		ToolResultID:     id,
 		ToolResultName:   name,
 		ToolResultOutput: output,
+	}
+}
+
+// ToolApprovalResponsePart carries a decision for a previously emitted tool
+// approval request. Add it to the next request's message history; the agent
+// resolves the matching pending tool call without retaining server state.
+func ToolApprovalResponsePart(approvalID string, approved bool, reason string) ContentPart {
+	return ContentPart{
+		Type:                 ContentPartTypeToolApprovalResponse,
+		ToolApprovalID:       approvalID,
+		ToolApprovalApproved: approved,
+		ToolApprovalReason:   reason,
 	}
 }
 

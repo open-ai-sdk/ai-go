@@ -20,6 +20,9 @@ const (
 	ContentPartTypeFile       ContentPartType = "file"
 	ContentPartTypeToolCall   ContentPartType = "tool_call"
 	ContentPartTypeToolResult ContentPartType = "tool_result"
+	// ContentPartTypeToolApprovalResponse carries a human approval decision
+	// back to the stateless agent runtime in conversation history.
+	ContentPartTypeToolApprovalResponse ContentPartType = "tool_approval_response"
 	ContentPartTypeReasoning  ContentPartType = "reasoning"
 )
 
@@ -43,6 +46,10 @@ type ContentPart struct {
 	ToolResultID     string
 	ToolResultName   string
 	ToolResultOutput string
+
+	ToolApprovalID       string
+	ToolApprovalApproved bool
+	ToolApprovalReason   string
 
 	ReasoningText string
 }

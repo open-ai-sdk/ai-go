@@ -78,6 +78,47 @@ func TestStructuredOutput_InvalidJSON(t *testing.T) {
 	if ok {
 		t.Error("expected no StepEventStructuredOutput for invalid JSON")
 	}
+	assertStructuredOutputFailure(t, events)
+}
+
+func TestStructuredOutput_SchemaViolationTerminatesWithoutDone(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{textEvt("analysis complete"), finishEvt(FinishReasonStop)},
+		{textEvt(`{"age":"not-an-integer"}`), finishEvt(FinishReasonStop)},
+	}}
+	events := collectRunEvents(RunParams{
+		Model: model,
+		Request: Request{Output: &OutputSchema{
+			Type: "object",
+			Schema: map[string]any{
+				"type":     "object",
+				"required": []string{"name", "age"},
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string"},
+					"age":  map[string]any{"type": "integer"},
+				},
+			},
+		}},
+	})
+	assertStructuredOutputFailure(t, events)
+}
+
+func assertStructuredOutputFailure(t *testing.T, events []StepEvent) {
+	t.Helper()
+	var schemaErr *StructuredOutputError
+	var sawDone bool
+	for _, event := range events {
+		if event.Type == StepEventError {
+			errors.As(event.Error, &schemaErr)
+		}
+		sawDone = sawDone || event.Type == StepEventDone
+	}
+	if schemaErr == nil {
+		t.Fatalf("events = %#v, want StructuredOutputError", events)
+	}
+	if sawDone {
+		t.Fatal("structured-output validation failure must not be followed by Done")
+	}
 }
 
 func TestStructuredOutput_ProviderErrorTerminatesWithoutDone(t *testing.T) {

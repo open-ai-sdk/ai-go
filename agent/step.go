@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
@@ -16,7 +17,7 @@ func executeToolCalls(
 	prepared []preparedToolCall,
 	history *[]Message,
 	approval map[string]func(string, string) bool, approver ApprovalResponder,
-) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult) {
+) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult, controlErr error) {
 	toolNames = make([]string, 0, len(prepared))
 	for _, preparedCall := range prepared {
 		tc := preparedCall.tc
@@ -41,7 +42,10 @@ func executeToolCalls(
 			ThoughtSignature:  tc.thoughtSignature,
 		})
 
-		result := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
+		result, approvalErr := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
+		if approvalErr != nil {
+			return toolNames, stepToolCalls, stepToolResults, approvalErr
+		}
 		// The invocation result is caller-visible even if the history-only
 		// transform below fails. Emit it before crossing that user callback
 		// boundary so a later panic cannot erase completed work.
@@ -66,7 +70,7 @@ func executeToolCalls(
 		})
 		stepToolResults = append(stepToolResults, *result)
 	}
-	return toolNames, stepToolCalls, stepToolResults
+	return toolNames, stepToolCalls, stepToolResults, nil
 }
 
 // executeToolCallsParallel processes tool calls concurrently, bounded by
@@ -169,7 +173,11 @@ func executeToolCallsParallel(
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			result := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			result, approvalErr := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			if approvalErr != nil {
+				results[idx].controlErr = approvalErr
+				return nil
+			}
 			results[idx].result = result
 			modelOutput := result.Output
 			if def.ToModelOutput != nil {
@@ -204,8 +212,10 @@ func executeToolCallsParallel(
 			continue
 		}
 
-		r.emit(StepEvent{Type: StepEventToolResult, ToolResult: res.result})
-		*history = append(*history, buildToolResultMessage(res.tc.id, res.tc.name, res.modelOutput))
+		if res.result != nil {
+			r.emit(StepEvent{Type: StepEventToolResult, ToolResult: res.result})
+			*history = append(*history, buildToolResultMessage(res.tc.id, res.tc.name, res.modelOutput))
+		}
 		toolNames = append(toolNames, res.tc.name)
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
 			ID:               res.tc.id,
@@ -214,12 +224,14 @@ func executeToolCallsParallel(
 			ArgsSet:          true,
 			ThoughtSignature: res.tc.thoughtSignature,
 		})
-		stepToolResults = append(stepToolResults, *res.result)
+		if res.result != nil {
+			stepToolResults = append(stepToolResults, *res.result)
+		}
 		if controlErr == nil && res.controlErr != nil {
 			controlErr = res.controlErr
 		}
 	}
-	if controlErr != nil {
+	if controlErr != nil && !errors.Is(controlErr, errApprovalPending) {
 		r.emitError(controlErr)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
@@ -233,7 +245,7 @@ func approvedToolCall(
 	def ToolDefinition,
 	approval map[string]func(string, string) bool,
 	approver ApprovalResponder,
-) *ToolResult {
+) (*ToolResult, error) {
 	if policy := approval[tc.name]; policy != nil && policy(tc.name, tc.args) {
 		request := ApprovalRequest{ApprovalID: tc.id, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
 		r.emit(
@@ -245,13 +257,12 @@ func approvedToolCall(
 			},
 		)
 		if approver == nil {
-			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
-			return deniedToolResult(tc, "approval responder unavailable", nil)
+			return nil, errApprovalPending
 		}
 		response, err := approver.RequestApproval(ctx, request)
 		if err != nil || !response.Approved {
 			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
-			return deniedToolResult(tc, response.Reason, err)
+			return deniedToolResult(tc, response.Reason, err), nil
 		}
 	}
 
@@ -270,7 +281,7 @@ func approvedToolCall(
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.output", Value: result.Output})
 	}
-	return result
+	return result, nil
 }
 
 func deniedToolResult(
