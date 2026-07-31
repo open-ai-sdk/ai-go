@@ -37,7 +37,7 @@ jobs:
         working-directory: conformance
 
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        run: vp exec playwright install --with-deps chromium
         working-directory: conformance
 
       - name: Run schema, semantic, and live-server gates
