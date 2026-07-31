@@ -16,23 +16,23 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 func TestChunksToolCallStart_EndsActiveReasoningBlock(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 
 	// Open a step + start reasoning — same setup the engine produces.
-	cp.translateEvent(engine.StepEvent{Type: engine.StepEventStepStart})
-	cp.translateEvent(engine.StepEvent{
-		Type:           engine.StepEventReasoningDelta,
+	cp.translateEvent(aikit.StepEvent{Type: aikit.StepEventStepStart})
+	cp.translateEvent(aikit.StepEvent{
+		Type:           aikit.StepEventReasoningDelta,
 		ReasoningDelta: "Thinking about the user's request...",
 	})
 
 	// Now a tool call starts BEFORE any text or step-end. The producer must
 	// emit ChunkReasoningEnd before ChunkToolInputStart.
-	chunks, _ := cp.translateEvent(engine.StepEvent{
-		Type:              engine.StepEventToolCallStart,
+	chunks, _ := cp.translateEvent(aikit.StepEvent{
+		Type:              aikit.StepEventToolCallStart,
 		ToolCallID:        "call_1",
 		ToolCallName:      "painter",
 		ToolCallArgsDelta: `{"prompt":"a cat"}`,
@@ -58,10 +58,10 @@ func TestChunksToolCallStart_NoReasoningEndWhenInactive(t *testing.T) {
 	// Sanity check: when no reasoning is active, chunksToolCallStart should
 	// emit only tool-related chunks (no spurious reasoning-end).
 	cp := NewChunkProducer("msg-1")
-	cp.translateEvent(engine.StepEvent{Type: engine.StepEventStepStart})
+	cp.translateEvent(aikit.StepEvent{Type: aikit.StepEventStepStart})
 
-	chunks, _ := cp.translateEvent(engine.StepEvent{
-		Type:              engine.StepEventToolCallStart,
+	chunks, _ := cp.translateEvent(aikit.StepEvent{
+		Type:              aikit.StepEventToolCallStart,
 		ToolCallID:        "call_1",
 		ToolCallName:      "bash",
 		ToolCallArgsDelta: `{"cmd":"ls"}`,
@@ -83,20 +83,20 @@ func TestChunksToolCallStart_PartOrderInPersistedBuilder(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 	builder := NewPersistedMessageBuilder()
 
-	events := []engine.StepEvent{
-		{Type: engine.StepEventStepStart},
-		{Type: engine.StepEventReasoningDelta, ReasoningDelta: "I should call the painter."},
+	events := []aikit.StepEvent{
+		{Type: aikit.StepEventStepStart},
+		{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "I should call the painter."},
 		{
-			Type:              engine.StepEventToolCallStart,
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "call_1",
 			ToolCallName:      "painter",
 			ToolCallArgsDelta: `{"prompt":"cat"}`,
 		},
-		{Type: engine.StepEventToolCallReady, ToolCallID: "call_1", ToolCallName: "painter"},
-		{Type: engine.StepEventToolResult, ToolResult: &engine.ToolResult{
+		{Type: aikit.StepEventToolCallReady, ToolCallID: "call_1", ToolCallName: "painter"},
+		{Type: aikit.StepEventToolResult, ToolResult: &aikit.ToolResult{
 			ID: "call_1", Name: "painter", Args: `{"prompt":"cat"}`, Output: `{"kind":"painter","status":"completed"}`,
 		}},
-		{Type: engine.StepEventStepEnd},
+		{Type: aikit.StepEventStepEnd},
 	}
 	for _, ev := range events {
 		chunks, _ := cp.translateEvent(ev)

@@ -3,17 +3,17 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // mockStreamEventer implements StreamEventer for testing without importing package ai.
 type mockStreamEventer struct {
-	ch      chan engine.StepEvent
+	ch      chan aikit.StepEvent
 	drained bool
 }
 
-func newMockStreamEventer(evs ...engine.StepEvent) *mockStreamEventer {
-	ch := make(chan engine.StepEvent, len(evs))
+func newMockStreamEventer(evs ...aikit.StepEvent) *mockStreamEventer {
+	ch := make(chan aikit.StepEvent, len(evs))
 	for _, e := range evs {
 		ch <- e
 	}
@@ -21,8 +21,8 @@ func newMockStreamEventer(evs ...engine.StepEvent) *mockStreamEventer {
 	return &mockStreamEventer{ch: ch}
 }
 
-func (m *mockStreamEventer) Stream() <-chan engine.StepEvent { return m.ch }
-func (m *mockStreamEventer) DrainUnused()                    { m.drained = true }
+func (m *mockStreamEventer) Stream() <-chan aikit.StepEvent { return m.ch }
+func (m *mockStreamEventer) DrainUnused()                   { m.drained = true }
 
 // drainChunks reads all chunks from ch into a slice.
 func drainChunks(ch <-chan Chunk) []Chunk {
@@ -57,11 +57,11 @@ func collectChunks(chunks []Chunk, typ string) []Chunk {
 // TestToUIMessageStream_TextDeltas verifies text deltas become text-delta chunks.
 func TestToUIMessageStream_TextDeltas(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello "},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "world"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-1", ToUIStreamOptions{SendReasoning: true, SendSources: true})
@@ -94,11 +94,11 @@ func TestToUIMessageStream_TextDeltas(t *testing.T) {
 // TestToUIMessageStream_SendReasoningTrue forwards reasoning chunks.
 func TestToUIMessageStream_SendReasoningTrue(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-2", ToUIStreamOptions{SendReasoning: true, SendSources: true})
@@ -118,11 +118,11 @@ func TestToUIMessageStream_SendReasoningTrue(t *testing.T) {
 // TestToUIMessageStream_SendReasoningFalse suppresses reasoning events.
 func TestToUIMessageStream_SendReasoningFalse(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-3", ToUIStreamOptions{SendReasoning: false, SendSources: true})
@@ -143,13 +143,13 @@ func TestToUIMessageStream_SendReasoningFalse(t *testing.T) {
 // TestToUIMessageStream_SendSourcesTrue forwards source events.
 func TestToUIMessageStream_SendSourcesTrue(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventSource, Source: &engine.Source{
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventSource, Source: &aikit.Source{
 			ID: "src-1", URL: "https://example.com", Title: "Example",
 		}},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "text"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "text"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-4", ToUIStreamOptions{SendReasoning: true, SendSources: true})
@@ -163,13 +163,13 @@ func TestToUIMessageStream_SendSourcesTrue(t *testing.T) {
 // TestToUIMessageStream_SendSourcesFalse suppresses source events.
 func TestToUIMessageStream_SendSourcesFalse(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventSource, Source: &engine.Source{
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventSource, Source: &aikit.Source{
 			ID: "src-1", URL: "https://example.com", Title: "Example",
 		}},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "text"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "text"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-5", ToUIStreamOptions{SendReasoning: true, SendSources: false})
@@ -186,16 +186,16 @@ func TestToUIMessageStream_SendSourcesFalse(t *testing.T) {
 // TestToUIMessageStream_MessageMetadata attaches metadata to finish chunk.
 func TestToUIMessageStream_MessageMetadata(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
-		engine.StepEvent{Type: engine.StepEventUsage, Usage: &engine.Usage{
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
+		aikit.StepEvent{Type: aikit.StepEventUsage, Usage: &aikit.Usage{
 			InputTokens:        10,
 			OutputTokens:       5,
 			TotalTokens:        15,
-			OutputTokenDetails: engine.OutputTokenDetails{ReasoningTokens: 3},
+			OutputTokenDetails: aikit.OutputTokenDetails{ReasoningTokens: 3},
 		}},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var capturedInfo MessageMetadataInfo
@@ -240,10 +240,10 @@ func TestToUIMessageStream_MessageMetadata(t *testing.T) {
 // TestToUIMessageStream_ChannelCloses verifies the output channel closes when the stream completes.
 func TestToUIMessageStream_ChannelCloses(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "x"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "x"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-7", ToUIStreamOptions{SendReasoning: true, SendSources: true})
@@ -264,10 +264,10 @@ func boolPtr(b bool) *bool { return &b }
 // TestToUIMessageStream_SendStartFalse suppresses the start chunk.
 func TestToUIMessageStream_SendStartFalse(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-sf1", ToUIStreamOptions{
@@ -288,10 +288,10 @@ func TestToUIMessageStream_SendStartFalse(t *testing.T) {
 // TestToUIMessageStream_SendFinishFalse suppresses the finish chunk.
 func TestToUIMessageStream_SendFinishFalse(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-sf2", ToUIStreamOptions{
@@ -312,10 +312,10 @@ func TestToUIMessageStream_SendFinishFalse(t *testing.T) {
 // TestToUIMessageStream_DefaultSendStartFinish verifies both are emitted by default.
 func TestToUIMessageStream_DefaultSendStartFinish(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-sf3", ToUIStreamOptions{
@@ -336,10 +336,10 @@ func TestToUIMessageStream_DefaultSendStartFinish(t *testing.T) {
 // TestToUIMessageStream_NilMetadataCallback uses default path without metadata.
 func TestToUIMessageStream_NilMetadataCallback(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "plain"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "plain"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-8", ToUIStreamOptions{

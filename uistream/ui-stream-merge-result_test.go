@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestMergeStreamResult_BasicText verifies model stream events are written to the Writer.
 func TestMergeStreamResult_BasicText(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var buf bytes.Buffer
@@ -36,10 +36,10 @@ func TestMergeStreamResult_BasicText(t *testing.T) {
 // stream interleaving pattern works correctly.
 func TestMergeStreamResult_CustomDataInterleaving(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var buf bytes.Buffer
@@ -97,27 +97,27 @@ func TestMergeStreamResult_CustomDataInterleaving(t *testing.T) {
 // TestMergeStreamResult_ToolResultHook verifies the hook fires during merge.
 func TestMergeStreamResult_ToolResultHook(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallStart,
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "tc2",
 			ToolCallName:      "lookup",
 			ToolCallArgsDelta: `{"key":"val"}`,
 		},
-		engine.StepEvent{
-			Type: engine.StepEventToolResult,
-			ToolResult: &engine.ToolResult{
+		aikit.StepEvent{
+			Type: aikit.StepEventToolResult,
+			ToolResult: &aikit.ToolResult{
 				ID:     "tc2",
 				Name:   "lookup",
 				Args:   `{"key":"val"}`,
 				Output: `"found"`,
 			},
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "result"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "result"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var hookFired bool
@@ -142,10 +142,10 @@ func TestMergeStreamResult_ToolResultHook(t *testing.T) {
 // TestMergeStreamResult_OnEnd verifies the on-end callback fires.
 func TestMergeStreamResult_OnEnd(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "done"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "done"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var endedText string

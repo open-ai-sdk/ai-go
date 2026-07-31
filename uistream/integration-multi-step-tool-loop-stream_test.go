@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // toolResultEvent builds a StepEventToolResult with optional provider metadata.
-func toolResultEvent(id, name, args, output string, pm map[string]any) engine.StepEvent {
-	return engine.StepEvent{
-		Type: engine.StepEventToolResult,
-		ToolResult: &engine.ToolResult{
+func toolResultEvent(id, name, args, output string, pm map[string]any) aikit.StepEvent {
+	return aikit.StepEvent{
+		Type: aikit.StepEventToolResult,
+		ToolResult: &aikit.ToolResult{
 			ID:     id,
 			Name:   name,
 			Args:   args,
@@ -27,16 +27,16 @@ func toolResultEvent(id, name, args, output string, pm map[string]any) engine.St
 func TestIntegration_MultiStepToolLoop_ChunkSequence(t *testing.T) {
 	sr := newMockStreamEventer(
 		// Step 1: model calls tool_A, gets result
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventToolCallStart, ToolCallID: "tc-1", ToolCallName: "search"},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventToolCallStart, ToolCallID: "tc-1", ToolCallName: "search"},
 		toolResultEvent("tc-1", "search", `{"q":"go"}`, `["result1"]`, nil),
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
 
 		// Step 2: model produces final answer
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "The answer is 42."},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "The answer is 42."},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-loop-1", ToUIStreamOptions{SendReasoning: true, SendSources: true})
@@ -78,15 +78,15 @@ func TestIntegration_MultiStepToolLoop_ChunkSequence(t *testing.T) {
 // accumulates tool-invocation and text parts correctly from a tool-loop stream.
 func TestIntegration_MultiStepToolLoop_PersistedParts(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventToolCallStart, ToolCallID: "tc-2", ToolCallName: "lookup"},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventToolCallStart, ToolCallID: "tc-2", ToolCallName: "lookup"},
 		toolResultEvent("tc-2", "lookup", `{"key":"x"}`, `"found"`, nil),
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
 
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Done."},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Done."},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-loop-2", ToUIStreamOptions{SendReasoning: true, SendSources: true})

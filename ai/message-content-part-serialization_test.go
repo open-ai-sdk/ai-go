@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/agent"
 )
 
 func sharedContentPartRoundTrip(parts []ContentPart) []ContentPart {
-	var engineParts []engine.ContentPart = parts
+	var engineParts []agent.ContentPart = parts
 	var publicParts []ContentPart = engineParts
 	return publicParts
 }

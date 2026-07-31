@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-func makeEvents(evs ...engine.StepEvent) <-chan engine.StepEvent {
-	ch := make(chan engine.StepEvent, len(evs))
+func makeEvents(evs ...aikit.StepEvent) <-chan aikit.StepEvent {
+	ch := make(chan aikit.StepEvent, len(evs))
 	for _, e := range evs {
 		ch <- e
 	}
@@ -18,7 +18,7 @@ func makeEvents(evs ...engine.StepEvent) <-chan engine.StepEvent {
 	return ch
 }
 
-func runAdapter(evs ...engine.StepEvent) string {
+func runAdapter(evs ...aikit.StepEvent) string {
 	a := NewAdapter("msg-test")
 	var buf bytes.Buffer
 	a.Stream(makeEvents(evs...), &buf)
@@ -43,11 +43,11 @@ func assertNotContains(t *testing.T, output, want string) {
 
 func TestGolden_TextOnly(t *testing.T) {
 	output := runAdapter(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello "},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "world"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	assertContains(t, output, `"type":"start"`)
@@ -66,11 +66,11 @@ func TestGolden_TextOnly(t *testing.T) {
 
 func TestGolden_Reasoning(t *testing.T) {
 	output := runAdapter(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	assertContains(t, output, `"type":"reasoning-start"`)
@@ -85,33 +85,33 @@ func TestGolden_Reasoning(t *testing.T) {
 
 func TestGolden_ToolCall(t *testing.T) {
 	output := runAdapter(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallStart,
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "tc1",
 			ToolCallName:      "search",
 			ToolCallArgsDelta: `{"q":"go"}`,
 		},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallReady,
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallReady,
 			ToolCallID:        "tc1",
 			ToolCallName:      "search",
 			ToolCallArgsDelta: `{"q":"go"}`,
 		},
-		engine.StepEvent{
-			Type: engine.StepEventToolResult,
-			ToolResult: &engine.ToolResult{
+		aikit.StepEvent{
+			Type: aikit.StepEventToolResult,
+			ToolResult: &aikit.ToolResult{
 				ID:     "tc1",
 				Name:   "search",
 				Args:   `{"q":"go"}`,
 				Output: `{"results":[]}`,
 			},
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 1},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Found nothing."},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 1},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Found nothing."},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	assertContains(t, output, `"type":"tool-input-start"`)
@@ -132,15 +132,15 @@ func TestGolden_ToolCall(t *testing.T) {
 
 func TestGolden_ToolCallReadyEmitsRunningInputBeforeSlowResult(t *testing.T) {
 	output := runAdapter(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallStart,
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "tc-slow",
 			ToolCallName:      "painter",
 			ToolCallArgsDelta: `{"prompt":"cat"}`,
 		},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallReady,
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallReady,
 			ToolCallID:        "tc-slow",
 			ToolCallName:      "painter",
 			ToolCallArgsDelta: `{"prompt":"cat"}`,
@@ -157,9 +157,9 @@ func TestGolden_ToolCallReadyEmitsRunningInputBeforeSlowResult(t *testing.T) {
 
 func TestGolden_Error(t *testing.T) {
 	output := runAdapter(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "partial"},
-		engine.StepEvent{Type: engine.StepEventError, Error: fmt.Errorf("connection reset")},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "partial"},
+		aikit.StepEvent{Type: aikit.StepEventError, Error: fmt.Errorf("connection reset")},
 	)
 
 	assertContains(t, output, `"type":"error"`)
@@ -175,17 +175,17 @@ func TestGolden_Error(t *testing.T) {
 func TestGolden_ErrorAfterStepEndDoesNotCloseBlockTwice(t *testing.T) {
 	tests := []struct {
 		name    string
-		event   engine.StepEvent
+		event   aikit.StepEvent
 		endType string
 	}{
 		{
 			name:    "text",
-			event:   engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "partial"},
+			event:   aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "partial"},
 			endType: ChunkTextEnd,
 		},
 		{
 			name:    "reasoning",
-			event:   engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: "thinking"},
+			event:   aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "thinking"},
 			endType: ChunkReasoningEnd,
 		},
 	}
@@ -193,10 +193,10 @@ func TestGolden_ErrorAfterStepEndDoesNotCloseBlockTwice(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := runAdapter(
-				engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
+				aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
 				tt.event,
-				engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-				engine.StepEvent{Type: engine.StepEventError, Error: fmt.Errorf("structured output failed")},
+				aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+				aikit.StepEvent{Type: aikit.StepEventError, Error: fmt.Errorf("structured output failed")},
 			)
 
 			endChunk := `"type":"` + tt.endType + `"`
@@ -220,9 +220,9 @@ func TestGolden_ErrorAfterStepEndDoesNotCloseBlockTwice(t *testing.T) {
 
 func TestGolden_ToolCallsFinishReasonUsesWireVocabulary(t *testing.T) {
 	output := runAdapter(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	assertContains(t, output, `"finishReason":"tool-calls"`)
@@ -235,11 +235,11 @@ func TestStream_ReturnsFullText(t *testing.T) {
 	a := NewAdapter("msg-1")
 	var buf bytes.Buffer
 	text := a.Stream(makeEvents(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello "},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "world"},
-		engine.StepEvent{Type: engine.StepEventStepEnd},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	), &buf)
 
 	if text != "Hello world" {

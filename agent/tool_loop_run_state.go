@@ -1,4 +1,4 @@
-package engine
+package agent
 
 import (
 	"context"
@@ -51,6 +51,9 @@ func (r *run) safeObserver(fn func()) {
 // dropping the remaining events on a false return is correct, not a truncation
 // bug — the consumer asked to stop receiving.
 func (r *run) emit(ev StepEvent) bool {
+	if r.ctx.Err() != nil {
+		return false
+	}
 	select {
 	case r.out <- snapshotStepEvent(ev):
 		return true

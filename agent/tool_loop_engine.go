@@ -1,4 +1,4 @@
-package engine
+package agent
 
 import (
 	"context"
@@ -9,12 +9,32 @@ import (
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// Run executes the tool loop and streams StepEvents onto the returned channel.
-// The channel is closed when the run completes or encounters an unrecoverable error.
-func Run(ctx context.Context, params RunParams) <-chan StepEvent {
+// Stream executes the tool loop and streams StepEvents onto the returned
+// channel. The channel is closed when the run completes, the context is
+// cancelled, or an unrecoverable error occurs.
+func Stream(ctx context.Context, params RunParams) <-chan StepEvent {
 	ch := make(chan StepEvent, 64)
-	go runLoop(ctx, ch, params)
+	go func() {
+		// This is the package's outer ownership boundary. It deliberately wraps
+		// tracer/logger initialization and every deferred cleanup in runLoop so a
+		// panic anywhere in the goroutine still reports an error and closes ch.
+		defer close(ch)
+		defer safego.Recover(params.Logger, func(err error) {
+			select {
+			case ch <- StepEvent{Type: StepEventError, Error: err}:
+			case <-ctx.Done():
+			}
+		}, "phase", "tool-loop")
+		runLoop(ctx, ch, params)
+	}()
 	return ch
+}
+
+// Run executes the tool loop and returns its event stream. It is equivalent
+// to [Stream]; both names are kept because callers commonly describe the
+// blocking aggregation path as a run and the live path as a stream.
+func Run(ctx context.Context, params RunParams) <-chan StepEvent {
+	return Stream(ctx, params)
 }
 
 func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
@@ -59,15 +79,6 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		ctx: ctx, out: out, logger: params.Logger,
 		tracer: tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
 	}
-	// close(out) is deferred first so it runs last: on a panic in a control
-	// callback (PrepareStep, StopWhen, ToModelOutput, RepairToolCall, tool
-	// Execute) the error event is emitted before the channel closes, so the
-	// consumer sees a *PanicError instead of a cleanly closed empty stream.
-	defer close(out)
-	defer safego.Recover(r.logger, func(err error) {
-		r.emit(StepEvent{Type: StepEventError, Error: err})
-	}, "phase", "tool-loop")
-
 	if err := params.Tools.Validate(); err != nil {
 		r.emit(StepEvent{Type: StepEventError, Error: err})
 		return
@@ -143,7 +154,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		}
 
 		acc := newToolCallAccumulator()
-		sr, fatalErr := consumeStream(r, eventCh, acc, params.Callbacks)
+		sr, interrupted := consumeStream(r, eventCh, acc, params.Callbacks)
 		// Release the provider only after its normal stream has closed. On a
 		// fatal event consumeStream returns early, so cancellation unblocks any
 		// remaining ctx-guarded sends before the drain below.
@@ -155,9 +166,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			modelSpan.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})
 		}
 		modelSpan.End()
-		if fatalErr {
+		if interrupted {
 			stepSpan.End()
-			go drainStreamEvents(eventCh)
 			return
 		}
 		lastSR = sr
@@ -189,7 +199,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				ProviderMetadata: sr.providerMeta,
 				Warnings:         sr.warnings,
 			})
-			emitStructuredOutput(r, params, history)
+			if !emitStructuredOutput(r, params, history) {
+				return
+			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
 			r.emit(StepEvent{Type: StepEventDone})
 			return
@@ -207,7 +219,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
 	// Matches ai-sdk-node semantics (see packages/ai generate-text.ts:1008).
-	emitStructuredOutput(r, params, history)
+	if !emitStructuredOutput(r, params, history) {
+		return
+	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
 	r.emit(StepEvent{Type: StepEventDone})
 }
@@ -283,7 +297,9 @@ func (r *run) executeToolStep(
 	if params.StopWhen != nil {
 		stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
 		if params.StopWhen(step+1, stopResult) {
-			emitStructuredOutput(r, params, *history)
+			if !emitStructuredOutput(r, params, *history) {
+				return true
+			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })
 			r.emit(StepEvent{Type: StepEventDone})
 			return true
@@ -321,12 +337,5 @@ func applyPrepareStep(params RunParams, step int, completedSteps []StepResultInf
 	}
 	if psResult.ActiveTools != nil {
 		req.Tools = filterTools(req.Tools, psResult.ActiveTools)
-	}
-}
-
-// drainStreamEvents consumes any remaining events from an abandoned provider
-// stream so its decoder goroutine can finish and close the HTTP response body.
-func drainStreamEvents(ch <-chan StreamEvent) {
-	for range ch {
 	}
 }

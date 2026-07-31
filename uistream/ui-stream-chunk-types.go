@@ -1,4 +1,4 @@
-// Package uistream provides an SSE adapter that translates engine.StepEvents into
+// Package uistream provides an SSE adapter that translates aikit.StepEvents into
 // the AI SDK UI message stream wire format.
 package uistream
 

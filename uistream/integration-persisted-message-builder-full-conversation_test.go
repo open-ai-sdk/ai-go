@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestIntegration_PersistedMessageBuilder_FullConversation verifies that a realistic
@@ -195,10 +195,10 @@ func TestIntegration_EnvelopeRoundTrip_WithAllPartTypes(t *testing.T) {
 // suppressing both lifecycle chunks leaves only step content, suitable for merging.
 func TestIntegration_SendStartFalse_SendFinishFalse_ForMergePattern(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "merged content"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "merged content"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-merge", ToUIStreamOptions{

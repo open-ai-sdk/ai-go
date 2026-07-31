@@ -1,4 +1,4 @@
-package engine
+package agent
 
 import (
 	"context"
@@ -42,6 +42,10 @@ func executeToolCalls(
 		})
 
 		result := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
+		// The invocation result is caller-visible even if the history-only
+		// transform below fails. Emit it before crossing that user callback
+		// boundary so a later panic cannot erase completed work.
+		r.emit(StepEvent{Type: StepEventToolResult, ToolResult: result})
 
 		// Apply ToModelOutput transform for history; event keeps original output.
 		// def was resolved once during validation (prepareToolCalls), so no
@@ -52,7 +56,6 @@ func executeToolCalls(
 		}
 
 		*history = append(*history, buildToolResultMessage(tc.id, tc.name, modelOutput))
-		r.emit(StepEvent{Type: StepEventToolResult, ToolResult: result})
 		toolNames = append(toolNames, tc.name)
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
 			ID:               tc.id,
@@ -89,6 +92,7 @@ func executeToolCallsParallel(
 		tc          toolCallState
 		result      *ToolResult
 		modelOutput string
+		controlErr  error
 		valid       bool
 	}
 
@@ -147,22 +151,25 @@ func executeToolCallsParallel(
 			// complete and the model sees the failure, rather than crashing the
 			// process.
 			defer safego.Recover(r.logger, func(err error) {
-				results[idx].result = &ToolResult{
-					ID:     tc.id,
-					Name:   tc.name,
-					Args:   tc.args,
-					Output: invalidToolCallOutput(tc, err),
-					Error:  classifyToolError(tc.name, err),
+				results[idx].controlErr = err
+				if results[idx].result == nil {
+					results[idx].result = &ToolResult{
+						ID:     tc.id,
+						Name:   tc.name,
+						Args:   tc.args,
+						Output: invalidToolCallOutput(tc, err),
+						Error:  classifyToolError(tc.name, err),
+					}
 				}
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
 			result := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			results[idx].result = result
 			modelOutput := result.Output
 			if def.ToModelOutput != nil {
 				modelOutput = def.ToModelOutput(result.Output)
 			}
-			results[idx].result = result
 			results[idx].modelOutput = modelOutput
 			return nil
 		})
@@ -176,8 +183,10 @@ func executeToolCallsParallel(
 		r.emit(StepEvent{Type: StepEventError, Error: err})
 	}
 
-	// Emit events and build history in original order.
+	// Emit events and build history in original order. A recovered control
+	// panic is reported only after the original tool result is visible.
 	toolNames = make([]string, 0, len(prepared))
+	var controlErr error
 	for _, res := range results {
 		if !res.valid {
 			r.emit(StepEvent{
@@ -202,6 +211,12 @@ func executeToolCallsParallel(
 			ThoughtSignature: res.tc.thoughtSignature,
 		})
 		stepToolResults = append(stepToolResults, *res.result)
+		if controlErr == nil && res.controlErr != nil {
+			controlErr = res.controlErr
+		}
+	}
+	if controlErr != nil {
+		r.emit(StepEvent{Type: StepEventError, Error: controlErr})
 	}
 	return toolNames, stepToolCalls, stepToolResults
 }

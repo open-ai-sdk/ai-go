@@ -15,24 +15,24 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 func TestChunksToolCallStart_EndsActiveTextBlock(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 
 	// Open a step + start text — same setup the engine produces.
-	cp.translateEvent(engine.StepEvent{Type: engine.StepEventStepStart})
-	cp.translateEvent(engine.StepEvent{
-		Type:      engine.StepEventTextDelta,
+	cp.translateEvent(aikit.StepEvent{Type: aikit.StepEventStepStart})
+	cp.translateEvent(aikit.StepEvent{
+		Type:      aikit.StepEventTextDelta,
 		TextDelta: "Let me check the weather...",
 	})
 	textIDBefore := cp.textBlockID
 
 	// Now a tool call starts BEFORE step-end. The producer must emit
 	// ChunkTextEnd before ChunkToolInputStart and advance the text block id.
-	chunks, _ := cp.translateEvent(engine.StepEvent{
-		Type:              engine.StepEventToolCallStart,
+	chunks, _ := cp.translateEvent(aikit.StepEvent{
+		Type:              aikit.StepEventToolCallStart,
 		ToolCallID:        "call_1",
 		ToolCallName:      "weather",
 		ToolCallArgsDelta: `{"city":"Hanoi"}`,
@@ -63,10 +63,10 @@ func TestChunksToolCallStart_NoTextEndWhenInactive(t *testing.T) {
 	// Sanity check: when no text is active, chunksToolCallStart should NOT
 	// emit a spurious text-end (only tool-related chunks).
 	cp := NewChunkProducer("msg-1")
-	cp.translateEvent(engine.StepEvent{Type: engine.StepEventStepStart})
+	cp.translateEvent(aikit.StepEvent{Type: aikit.StepEventStepStart})
 
-	chunks, _ := cp.translateEvent(engine.StepEvent{
-		Type:              engine.StepEventToolCallStart,
+	chunks, _ := cp.translateEvent(aikit.StepEvent{
+		Type:              aikit.StepEventToolCallStart,
 		ToolCallID:        "call_1",
 		ToolCallName:      "bash",
 		ToolCallArgsDelta: `{"cmd":"ls"}`,
@@ -88,16 +88,16 @@ func TestChunksToolCallStart_PostToolTextHasNewBlockID(t *testing.T) {
 	// separate parts in chronological order [text_A, tool, text_B].
 	cp := NewChunkProducer("msg-1")
 
-	events := []engine.StepEvent{
-		{Type: engine.StepEventStepStart},
-		{Type: engine.StepEventTextDelta, TextDelta: "Checking..."},
+	events := []aikit.StepEvent{
+		{Type: aikit.StepEventStepStart},
+		{Type: aikit.StepEventTextDelta, TextDelta: "Checking..."},
 		{
-			Type:              engine.StepEventToolCallStart,
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "call_1",
 			ToolCallName:      "lookup",
 			ToolCallArgsDelta: `{"q":"x"}`,
 		},
-		{Type: engine.StepEventTextDelta, TextDelta: "Found it."},
+		{Type: aikit.StepEventTextDelta, TextDelta: "Found it."},
 	}
 
 	var allChunks []Chunk

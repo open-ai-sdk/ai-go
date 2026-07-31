@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestWriter_WriteData verifies that WriteData emits a valid data-* chunk.
@@ -109,31 +109,31 @@ func TestGolden_DeepThinking_WithSourcesAndCustomData(t *testing.T) {
 
 	// 4. Engine stream: reasoning step + web search tool + text answer
 	engineCh := makeEvents(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: "I need to find recent AI trends..."},
-		engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: " Let me search the web."},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallStart,
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "I need to find recent AI trends..."},
+		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: " Let me search the web."},
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "ws-1",
 			ToolCallName:      "web_search",
 			ToolCallArgsDelta: `{"query":"AI trends 2025"}`,
 		},
-		engine.StepEvent{
-			Type: engine.StepEventToolResult,
-			ToolResult: &engine.ToolResult{
+		aikit.StepEvent{
+			Type: aikit.StepEventToolResult,
+			ToolResult: &aikit.ToolResult{
 				ID:     "ws-1",
 				Name:   "web_search",
 				Args:   `{"query":"AI trends 2025"}`,
 				Output: `{"results":["GPT-5 released","Gemini 2.0 released"]}`,
 			},
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
 
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 1},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "AI in 2025 saw major releases "},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "from Google and OpenAI."},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 1},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "AI in 2025 saw major releases "},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "from Google and OpenAI."},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	// Merge the engine stream (without emitting its own start/finish; we drive those manually).
@@ -212,11 +212,11 @@ func TestGolden_DefaultChat(t *testing.T) {
 	a := NewAdapter("msg-default-1")
 
 	text := a.Stream(makeEvents(
-		engine.StepEvent{Type: engine.StepEventStepStart, StepNumber: 0},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello! "},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "How can I help you today?"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart, StepNumber: 0},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello! "},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "How can I help you today?"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	), &buf)
 
 	out := buf.String()

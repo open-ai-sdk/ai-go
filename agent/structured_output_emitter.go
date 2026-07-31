@@ -1,4 +1,4 @@
-package engine
+package agent
 
 import (
 	"context"
@@ -9,10 +9,12 @@ import (
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
-// emitStructuredOutput makes a final constrained LLM call when an OutputSchema is configured.
-func emitStructuredOutput(r *run, params RunParams, history []Message) {
+// emitStructuredOutput makes a final constrained LLM call when an OutputSchema
+// is configured. It returns false when the run was cancelled or the provider
+// failed, in which case the caller must not emit OnEnd or Done.
+func emitStructuredOutput(r *run, params RunParams, history []Message) bool {
 	if params.Request.Output == nil || params.Request.Output.Type == "text" {
-		return
+		return true
 	}
 
 	msgs := make([]Message, len(history)+1)
@@ -52,28 +54,39 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) {
 	if err != nil {
 		span.RecordError(err)
 		r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)})
-		return
+		return false
 	}
 
 	var b strings.Builder
-	for ev := range eventCh {
-		if ev.Type == StreamEventTextDelta {
-			b.WriteString(ev.TextDelta)
-		}
-		if ev.Type == StreamEventError {
-			span.RecordError(ev.Error)
-			return
+	for {
+		select {
+		case <-r.ctx.Done():
+			return false
+		case ev, ok := <-eventCh:
+			if !ok {
+				goto complete
+			}
+			if ev.Type == StreamEventTextDelta {
+				b.WriteString(ev.TextDelta)
+			}
+			if ev.Type == StreamEventError {
+				span.RecordError(ev.Error)
+				r.emit(StepEvent{Type: StepEventError, Error: ev.Error})
+				return false
+			}
 		}
 	}
 
+complete:
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: b.String()})
 	}
 
 	parsed := parseStructuredOutput(b.String())
 	if parsed != nil {
-		r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
+		return r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
 	}
+	return true
 }
 
 // parseStructuredOutput extracts valid JSON from content, stripping markdown fences if present.

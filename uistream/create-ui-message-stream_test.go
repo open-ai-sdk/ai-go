@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestCreateUIMessageStream_BasicLifecycle verifies start → custom data → finish → [DONE].
@@ -50,11 +50,11 @@ func TestCreateUIMessageStream_MergeWithToUIMessageStream(t *testing.T) {
 		sw.WriteData("plan", map[string]string{"step": "1"})
 
 		sr := newMockStreamEventer(
-			engine.StepEvent{Type: engine.StepEventStepStart},
-			engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello "},
-			engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "world"},
-			engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-			engine.StepEvent{Type: engine.StepEventDone},
+			aikit.StepEvent{Type: aikit.StepEventStepStart},
+			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
+			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
+			aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+			aikit.StepEvent{Type: aikit.StepEventDone},
 		)
 
 		chunks := ToUIMessageStream(sr, "msg-create-2", ToUIStreamOptions{
@@ -142,10 +142,10 @@ func TestCreateUIMessageStream_OnEndCallback(t *testing.T) {
 		},
 	}, func(sw *UIStreamWriter) error {
 		sr := newMockStreamEventer(
-			engine.StepEvent{Type: engine.StepEventStepStart},
-			engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello world"},
-			engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-			engine.StepEvent{Type: engine.StepEventDone},
+			aikit.StepEvent{Type: aikit.StepEventStepStart},
+			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello world"},
+			aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+			aikit.StepEvent{Type: aikit.StepEventDone},
 		)
 		sw.MergeStreamResult(sr, "msg-create-4", ToUIStreamOptions{
 			SendReasoning: true,
@@ -224,13 +224,13 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 		MessageID: "msg-create-8",
 	}, func(sw *UIStreamWriter) error {
 		sr := newMockStreamEventer(
-			engine.StepEvent{Type: engine.StepEventStepStart},
-			engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "answer"},
-			engine.StepEvent{Type: engine.StepEventUsage, Usage: &engine.Usage{
+			aikit.StepEvent{Type: aikit.StepEventStepStart},
+			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
+			aikit.StepEvent{Type: aikit.StepEventUsage, Usage: &aikit.Usage{
 				InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
 			}},
-			engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-			engine.StepEvent{Type: engine.StepEventDone},
+			aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+			aikit.StepEvent{Type: aikit.StepEventDone},
 		)
 		chunks := ToUIMessageStream(sr, "msg-create-8", ToUIStreamOptions{
 			SendReasoning: true,

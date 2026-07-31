@@ -1,4 +1,4 @@
-package engine
+package agent
 
 import (
 	"github.com/open-ai-sdk/ai-go/aikit"

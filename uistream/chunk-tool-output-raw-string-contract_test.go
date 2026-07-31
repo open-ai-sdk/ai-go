@@ -13,15 +13,15 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 func TestChunksToolResult_OutputIsRawString_JSONShapedTool(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 	envelope := `{"kind":"painter","status":"completed","images":[{"path":"/tmp/x.png"}]}`
-	chunks := cp.chunksToolResult(engine.StepEvent{
-		Type: engine.StepEventToolResult,
-		ToolResult: &engine.ToolResult{
+	chunks := cp.chunksToolResult(aikit.StepEvent{
+		Type: aikit.StepEventToolResult,
+		ToolResult: &aikit.ToolResult{
 			ID:     "call_1",
 			Name:   "painter",
 			Args:   `{"prompt":"a cat"}`,
@@ -42,9 +42,9 @@ func TestChunksToolResult_OutputIsRawString_JSONShapedTool(t *testing.T) {
 func TestChunksToolResult_OutputIsRawString_PlainTextTool(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 	plain := "exit code 0\nhello world"
-	chunks := cp.chunksToolResult(engine.StepEvent{
-		Type: engine.StepEventToolResult,
-		ToolResult: &engine.ToolResult{
+	chunks := cp.chunksToolResult(aikit.StepEvent{
+		Type: aikit.StepEventToolResult,
+		ToolResult: &aikit.ToolResult{
 			ID:     "call_2",
 			Name:   "bash",
 			Args:   `{"cmd":"echo hi"}`,
@@ -64,9 +64,9 @@ func TestChunksToolResult_OutputIsRawString_PlainTextTool(t *testing.T) {
 
 func TestChunksToolResult_OutputIsRawString_EmptyTool(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
-	chunks := cp.chunksToolResult(engine.StepEvent{
-		Type: engine.StepEventToolResult,
-		ToolResult: &engine.ToolResult{
+	chunks := cp.chunksToolResult(aikit.StepEvent{
+		Type: aikit.StepEventToolResult,
+		ToolResult: &aikit.ToolResult{
 			ID:     "call_3",
 			Name:   "noop",
 			Args:   `{}`,
@@ -90,9 +90,9 @@ func TestChunksToolResult_InputStillParsedForUIRendering(t *testing.T) {
 	// This guards against accidentally regressing input parsing alongside
 	// the output passthrough change.
 	cp := NewChunkProducer("msg-1")
-	chunks := cp.chunksToolResult(engine.StepEvent{
-		Type: engine.StepEventToolResult,
-		ToolResult: &engine.ToolResult{
+	chunks := cp.chunksToolResult(aikit.StepEvent{
+		Type: aikit.StepEventToolResult,
+		ToolResult: &aikit.ToolResult{
 			ID:     "call_4",
 			Name:   "calculator",
 			Args:   `{"a":2,"b":3}`,

@@ -5,20 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-func cumulativeUsageEvents() []engine.StepEvent {
-	return []engine.StepEvent{
-		{Type: engine.StepEventStepStart, StepNumber: 0},
-		{Type: engine.StepEventUsage, Usage: &engine.Usage{
+func cumulativeUsageEvents() []aikit.StepEvent {
+	return []aikit.StepEvent{
+		{Type: aikit.StepEventStepStart, StepNumber: 0},
+		{Type: aikit.StepEventUsage, Usage: &aikit.Usage{
 			InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
 		}},
-		{Type: engine.StepEventUsage, Usage: &engine.Usage{
+		{Type: aikit.StepEventUsage, Usage: &aikit.Usage{
 			InputTokens: 10, OutputTokens: 20, TotalTokens: 30,
 		}},
-		{Type: engine.StepEventStepEnd, StepNumber: 0, FinishReason: engine.FinishReasonStop},
-		{Type: engine.StepEventDone},
+		{Type: aikit.StepEventStepEnd, StepNumber: 0, FinishReason: aikit.FinishReasonStop},
+		{Type: aikit.StepEventDone},
 	}
 }
 
@@ -50,7 +50,7 @@ func TestToUIMessageStream_CumulativeUsageUsesLatestStepSnapshot(t *testing.T) {
 }
 
 func TestAdapter_CumulativeUsageUsesLatestStepSnapshot(t *testing.T) {
-	channel := make(chan engine.StepEvent, 8)
+	channel := make(chan aikit.StepEvent, 8)
 	for _, event := range cumulativeUsageEvents() {
 		channel <- event
 	}
@@ -74,42 +74,42 @@ func TestAdapter_CumulativeUsageUsesLatestStepSnapshot(t *testing.T) {
 func TestUsageAccumulator_MultiStepDetails(t *testing.T) {
 	var accumulator usageAccumulator
 	accumulator.startStep()
-	accumulator.apply(&engine.Usage{
+	accumulator.apply(&aikit.Usage{
 		InputTokens: 10,
-		InputTokenDetails: engine.InputTokenDetails{
+		InputTokenDetails: aikit.InputTokenDetails{
 			NoCacheTokens:   8,
 			CacheReadTokens: 2,
 		},
 		OutputTokens: 5,
-		OutputTokenDetails: engine.OutputTokenDetails{
+		OutputTokenDetails: aikit.OutputTokenDetails{
 			TextTokens:      3,
 			ReasoningTokens: 2,
 		},
 		TotalTokens: 15,
 	})
-	accumulator.apply(&engine.Usage{
+	accumulator.apply(&aikit.Usage{
 		InputTokens: 10,
-		InputTokenDetails: engine.InputTokenDetails{
+		InputTokenDetails: aikit.InputTokenDetails{
 			NoCacheTokens:    7,
 			CacheReadTokens:  2,
 			CacheWriteTokens: 1,
 		},
 		OutputTokens: 20,
-		OutputTokenDetails: engine.OutputTokenDetails{
+		OutputTokenDetails: aikit.OutputTokenDetails{
 			TextTokens:      12,
 			ReasoningTokens: 8,
 		},
 		TotalTokens: 30,
 	})
 	accumulator.startStep()
-	accumulator.apply(&engine.Usage{
+	accumulator.apply(&aikit.Usage{
 		InputTokens: 4,
-		InputTokenDetails: engine.InputTokenDetails{
+		InputTokenDetails: aikit.InputTokenDetails{
 			NoCacheTokens:   3,
 			CacheReadTokens: 1,
 		},
 		OutputTokens: 6,
-		OutputTokenDetails: engine.OutputTokenDetails{
+		OutputTokenDetails: aikit.OutputTokenDetails{
 			TextTokens:      4,
 			ReasoningTokens: 2,
 		},

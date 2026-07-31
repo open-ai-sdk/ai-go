@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/agent"
 )
 
 // feedEvents sends events to a channel then closes it.
-func feedEvents(events ...engine.StepEvent) <-chan engine.StepEvent {
-	ch := make(chan engine.StepEvent, len(events))
+func feedEvents(events ...agent.StepEvent) <-chan agent.StepEvent {
+	ch := make(chan agent.StepEvent, len(events))
 	for _, ev := range events {
 		ch <- ev
 	}
@@ -19,12 +19,12 @@ func feedEvents(events ...engine.StepEvent) <-chan engine.StepEvent {
 }
 
 // collectEvents drains a channel into a slice with a timeout.
-func collectEvents(t *testing.T, ch <-chan engine.StepEvent) []engine.StepEvent {
+func collectEvents(t *testing.T, ch <-chan agent.StepEvent) []agent.StepEvent {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var result []engine.StepEvent
+	var result []agent.StepEvent
 	for {
 		select {
 		case ev, ok := <-ch:
@@ -39,24 +39,24 @@ func collectEvents(t *testing.T, ch <-chan engine.StepEvent) []engine.StepEvent 
 	}
 }
 
-func textDelta(s string) engine.StepEvent {
-	return engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: s}
+func textDelta(s string) agent.StepEvent {
+	return agent.StepEvent{Type: agent.StepEventTextDelta, TextDelta: s}
 }
 
-func reasoningDelta(s string) engine.StepEvent {
-	return engine.StepEvent{Type: engine.StepEventReasoningDelta, ReasoningDelta: s}
+func reasoningDelta(s string) agent.StepEvent {
+	return agent.StepEvent{Type: agent.StepEventReasoningDelta, ReasoningDelta: s}
 }
 
-func stepStart() engine.StepEvent {
-	return engine.StepEvent{Type: engine.StepEventStepStart}
+func stepStart() agent.StepEvent {
+	return agent.StepEvent{Type: agent.StepEventStepStart}
 }
 
-func stepEnd() engine.StepEvent {
-	return engine.StepEvent{Type: engine.StepEventStepEnd}
+func stepEnd() agent.StepEvent {
+	return agent.StepEvent{Type: agent.StepEventStepEnd}
 }
 
-func toolCallStart(name string) engine.StepEvent {
-	return engine.StepEvent{Type: engine.StepEventToolCallStart, ToolCallName: name}
+func toolCallStart(name string) agent.StepEvent {
+	return agent.StepEvent{Type: agent.StepEventToolCallStart, ToolCallName: name}
 }
 
 func TestWordChunkingCombinesPartialWords(t *testing.T) {
@@ -66,7 +66,7 @@ func TestWordChunkingCombinesPartialWords(t *testing.T) {
 
 	var text string
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			text += ev.TextDelta
 		}
 	}
@@ -77,7 +77,7 @@ func TestWordChunkingCombinesPartialWords(t *testing.T) {
 	// Should emit "Hello " and "world " as separate chunks
 	var deltas []string
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			deltas = append(deltas, ev.TextDelta)
 		}
 	}
@@ -103,7 +103,7 @@ func TestLineChunkingSplitsOnNewlines(t *testing.T) {
 
 	var deltas []string
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			deltas = append(deltas, ev.TextDelta)
 		}
 	}
@@ -122,7 +122,7 @@ func TestRegexChunkingCustomPattern(t *testing.T) {
 
 	var deltas []string
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			deltas = append(deltas, ev.TextDelta)
 		}
 	}
@@ -152,14 +152,14 @@ func TestNonTextEventsPassThrough(t *testing.T) {
 	out := collectEvents(t, ss.Transform(context.Background(), in))
 
 	// StepStart should pass through first
-	if out[0].Type != engine.StepEventStepStart {
+	if out[0].Type != agent.StepEventStepStart {
 		t.Errorf("expected StepStart first, got %v", out[0].Type)
 	}
 
 	// ToolCallStart should flush "Hello " then pass through
 	var sawToolCall bool
 	for _, ev := range out {
-		if ev.Type == engine.StepEventToolCallStart {
+		if ev.Type == agent.StepEventToolCallStart {
 			sawToolCall = true
 		}
 	}
@@ -170,7 +170,7 @@ func TestNonTextEventsPassThrough(t *testing.T) {
 	// All text should be preserved
 	var text string
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			text += ev.TextDelta
 		}
 	}
@@ -191,9 +191,9 @@ func TestReasoningDeltaBufferedSeparately(t *testing.T) {
 	var order []string
 	for _, ev := range out {
 		switch ev.Type {
-		case engine.StepEventTextDelta:
+		case agent.StepEventTextDelta:
 			order = append(order, "T:"+ev.TextDelta)
-		case engine.StepEventReasoningDelta:
+		case agent.StepEventReasoningDelta:
 			order = append(order, "R:"+ev.ReasoningDelta)
 		}
 	}
@@ -218,7 +218,7 @@ func TestContextCancellationStopsProcessing(t *testing.T) {
 	ss := NewSmoothStream(WithDelayMs(100)) // slow delay to test cancellation
 
 	// Feed many events
-	in := make(chan engine.StepEvent, 100)
+	in := make(chan agent.StepEvent, 100)
 	for i := 0; i < 50; i++ {
 		in <- textDelta("word ")
 	}
@@ -267,7 +267,7 @@ func TestCustomDetectorValidationNonPrefix(t *testing.T) {
 	// Non-prefix error causes flush of entire buffer
 	var text string
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			text += ev.TextDelta
 		}
 	}
@@ -285,7 +285,7 @@ func TestDelayAppliedBetweenChunks(t *testing.T) {
 
 	var count int
 	for _, ev := range out {
-		if ev.Type == engine.StepEventTextDelta {
+		if ev.Type == agent.StepEventTextDelta {
 			count++
 		}
 	}

@@ -14,18 +14,18 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 func TestBlockID_TextReasoningTextHaveDistinctIDs(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 
-	events := []engine.StepEvent{
-		{Type: engine.StepEventStepStart},
-		{Type: engine.StepEventTextDelta, TextDelta: "Hi."},
-		{Type: engine.StepEventReasoningDelta, ReasoningDelta: "Let me think."},
-		{Type: engine.StepEventTextDelta, TextDelta: "Done."},
-		{Type: engine.StepEventStepEnd},
+	events := []aikit.StepEvent{
+		{Type: aikit.StepEventStepStart},
+		{Type: aikit.StepEventTextDelta, TextDelta: "Hi."},
+		{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "Let me think."},
+		{Type: aikit.StepEventTextDelta, TextDelta: "Done."},
+		{Type: aikit.StepEventStepEnd},
 	}
 
 	var allChunks []Chunk
@@ -58,16 +58,16 @@ func TestBlockID_TextReasoningTextHaveDistinctIDs(t *testing.T) {
 func TestBlockID_ReasoningToolReasoningHaveDistinctIDs(t *testing.T) {
 	cp := NewChunkProducer("msg-1")
 
-	events := []engine.StepEvent{
-		{Type: engine.StepEventStepStart},
-		{Type: engine.StepEventReasoningDelta, ReasoningDelta: "Plan A."},
+	events := []aikit.StepEvent{
+		{Type: aikit.StepEventStepStart},
+		{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "Plan A."},
 		{
-			Type:              engine.StepEventToolCallStart,
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "call_1",
 			ToolCallName:      "lookup",
 			ToolCallArgsDelta: `{"q":"x"}`,
 		},
-		{Type: engine.StepEventReasoningDelta, ReasoningDelta: "Refined plan."},
+		{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "Refined plan."},
 	}
 
 	var allChunks []Chunk
@@ -97,12 +97,12 @@ func TestBlockID_TextReasoningBoundaryClosesText(t *testing.T) {
 	// emitted before reasoning-start (symmetric to the existing
 	// reasoning→text behavior).
 	cp := NewChunkProducer("msg-1")
-	cp.translateEvent(engine.StepEvent{Type: engine.StepEventStepStart})
-	cp.translateEvent(engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello."})
+	cp.translateEvent(aikit.StepEvent{Type: aikit.StepEventStepStart})
+	cp.translateEvent(aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello."})
 	textIDBefore := cp.textBlockID
 
-	chunks := cp.chunksReasoningDelta(engine.StepEvent{
-		Type:           engine.StepEventReasoningDelta,
+	chunks := cp.chunksReasoningDelta(aikit.StepEvent{
+		Type:           aikit.StepEventReasoningDelta,
 		ReasoningDelta: "Reflecting...",
 	})
 

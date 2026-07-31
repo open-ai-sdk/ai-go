@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
@@ -25,7 +25,7 @@ func TestSmoothStream_DetectorPanic_SurfacesErrorEvent(t *testing.T) {
 	var lastErr error
 	sawError := false
 	for _, ev := range events {
-		if ev.Type == engine.StepEventError {
+		if ev.Type == agent.StepEventError {
 			sawError = true
 			lastErr = ev.Error
 		}

@@ -1,15 +1,15 @@
 package ai
 
-import "github.com/open-ai-sdk/ai-go/internal/engine"
+import "github.com/open-ai-sdk/ai-go/agent"
 
-func lifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallbacks {
+func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 	if req.OnStepEnd == nil && req.OnEnd == nil && req.OnChunk == nil && req.OnError == nil {
 		return nil
 	}
 
-	callbacks := &engine.LifecycleCallbacks{OnError: req.OnError}
+	callbacks := &agent.LifecycleCallbacks{OnError: req.OnError}
 	if req.OnStepEnd != nil {
-		callbacks.OnStepEnd = func(event engine.StepEndEvent) {
+		callbacks.OnStepEnd = func(event agent.StepEndEvent) {
 			publicEvent := StepEndEvent{
 				StepNumber:       event.StepNumber,
 				Text:             event.Text,
@@ -31,7 +31,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallbacks {
 		}
 	}
 	if req.OnEnd != nil {
-		callbacks.OnEnd = func(event engine.EndEvent) {
+		callbacks.OnEnd = func(event agent.EndEvent) {
 			steps := make([]StepOutput, len(event.Steps))
 			for i, step := range event.Steps {
 				steps[i] = StepOutput{

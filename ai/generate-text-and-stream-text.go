@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	toolpkg "github.com/open-ai-sdk/ai-go/tool"
 )
@@ -56,7 +56,7 @@ func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 		return NewStreamResultWithTools(erroredEventChannel(err), req.Tools)
 	}
 	applyDeferredMiddlewares(&req)
-	ch := engine.Run(ctx, runParams(req))
+	ch := agent.Stream(ctx, runParams(req))
 	if req.SmoothStream != nil {
 		ch = req.SmoothStream.Transform(ctx, ch)
 	}
@@ -70,7 +70,7 @@ func erroredEventChannel(err error) <-chan StepEvent {
 	return ch
 }
 
-func runParams(req GenerateTextRequest) engine.RunParams {
+func runParams(req GenerateTextRequest) agent.RunParams {
 	if req.StopWhen == nil {
 		req.StopWhen = IsStepCount(1)
 	}
@@ -108,12 +108,12 @@ func runParams(req GenerateTextRequest) engine.RunParams {
 			return policy(tool, json.RawMessage(args)) == ApprovalRequired
 		}
 	}
-	var approver engine.ApprovalResponder
+	var approver agent.ApprovalResponder
 	if req.ToolApprovalResponder != nil {
 		approver = approvalResponder{fn: req.ToolApprovalResponder}
 	}
 
-	return engine.RunParams{
+	return agent.RunParams{
 		Model:                 req.Model,
 		Request:               modelRequest,
 		Tools:                 tools,
@@ -162,15 +162,15 @@ type approvalResponder struct{ fn ToolApprovalResponder }
 
 func (r approvalResponder) RequestApproval(
 	ctx context.Context,
-	request engine.ApprovalRequest,
-) (engine.ApprovalResponse, error) {
+	request agent.ApprovalRequest,
+) (agent.ApprovalResponse, error) {
 	response, err := r.fn(ctx, ToolApprovalRequest{
 		ApprovalID: request.ApprovalID,
 		ToolCallID: request.ToolCallID,
 		ToolName:   request.ToolName,
 		Args:       json.RawMessage(request.Args),
 	})
-	return engine.ApprovalResponse{
+	return agent.ApprovalResponse{
 		ApprovalID: response.ApprovalID,
 		Approved:   response.Approved,
 		Reason:     response.Reason,

@@ -5,7 +5,7 @@ import (
 )
 
 // Writer writes AI SDK UI message stream chunks directly to an io.Writer.
-// It is transport-agnostic and does not depend on engine.StepEvent.
+// It is transport-agnostic and does not depend on aikit.StepEvent.
 // Use it alongside Adapter.Stream, or standalone for custom chunk sequences.
 //
 // Every Write* method returns the underlying marshal/write error so a

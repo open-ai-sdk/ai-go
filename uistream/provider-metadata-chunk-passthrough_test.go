@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestWithProviderMetadata_NilReturnsUnchanged verifies nil providerMetadata leaves fields intact.
@@ -32,10 +32,10 @@ func TestWithProviderMetadata_NilFields_AllocatesMap(t *testing.T) {
 func TestChunkProducer_ProviderMetadata_TextDelta(t *testing.T) {
 	pm := map[string]any{"gemini": map[string]any{"safetyRating": "safe"}}
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi", ProviderMetadata: pm},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi", ProviderMetadata: pm},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-pm1", ToUIStreamOptions{SendReasoning: true, SendSources: true})
@@ -53,10 +53,10 @@ func TestChunkProducer_ProviderMetadata_TextDelta(t *testing.T) {
 // TestChunkProducer_ProviderMetadata_AbsentWhenNil verifies providerMetadata is absent when engine does not set it.
 func TestChunkProducer_ProviderMetadata_AbsentWhenNil(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hi"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	ch := ToUIMessageStream(sr, "msg-pm2", ToUIStreamOptions{SendReasoning: true, SendSources: true})

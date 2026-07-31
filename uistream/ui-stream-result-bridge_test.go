@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // makeStreamResult creates an *ai.StreamResult from a list of StepEvents.
-func makeStreamResult(evs ...engine.StepEvent) *ai.StreamResult {
-	ch := make(chan engine.StepEvent, len(evs))
+func makeStreamResult(evs ...aikit.StepEvent) *ai.StreamResult {
+	ch := make(chan aikit.StepEvent, len(evs))
 	for _, e := range evs {
 		ch <- e
 	}
@@ -22,11 +22,11 @@ func makeStreamResult(evs ...engine.StepEvent) *ai.StreamResult {
 // TestStreamToWriter_BasicTextStream verifies SSE output contains expected chunks.
 func TestStreamToWriter_BasicTextStream(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "Hello "},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "world"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var buf bytes.Buffer
@@ -48,27 +48,27 @@ func TestStreamToWriter_BasicTextStream(t *testing.T) {
 // TestStreamToWriter_ToolResultHookFires verifies the tool result hook is invoked.
 func TestStreamToWriter_ToolResultHookFires(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{
-			Type:              engine.StepEventToolCallStart,
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{
+			Type:              aikit.StepEventToolCallStart,
 			ToolCallID:        "tc1",
 			ToolCallName:      "search",
 			ToolCallArgsDelta: `{"q":"go"}`,
 		},
-		engine.StepEvent{
-			Type: engine.StepEventToolResult,
-			ToolResult: &engine.ToolResult{
+		aikit.StepEvent{
+			Type: aikit.StepEventToolResult,
+			ToolResult: &aikit.ToolResult{
 				ID:     "tc1",
 				Name:   "search",
 				Args:   `{"q":"go"}`,
 				Output: `{"results":[]}`,
 			},
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonToolCalls},
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "done"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonToolCalls},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "done"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var hookFired bool
@@ -98,10 +98,10 @@ func TestStreamToWriter_ToolResultHookFires(t *testing.T) {
 // TestStreamToWriter_OnEndCallback verifies the onEnd callback is invoked with full text.
 func TestStreamToWriter_OnEndCallback(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "hello"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var ended string
@@ -118,10 +118,10 @@ func TestStreamToWriter_OnEndCallback(t *testing.T) {
 // TestStreamToWriter_SSELineFormat verifies every line is prefixed with "data: ".
 func TestStreamToWriter_SSELineFormat(t *testing.T) {
 	sr := makeStreamResult(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{Type: engine.StepEventTextDelta, TextDelta: "x"},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "x"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	var buf bytes.Buffer

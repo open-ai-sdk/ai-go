@@ -3,7 +3,7 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/internal/engine"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestChunkProducer_ToolApprovalRequest_OptionalFields verifies that the
@@ -11,17 +11,17 @@ import (
 // engine event sets them, matching the protocol's omit-when-absent shape.
 func TestChunkProducer_ToolApprovalRequest_OptionalFields(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{
-			Type:                engine.StepEventToolApprovalRequest,
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{
+			Type:                aikit.StepEventToolApprovalRequest,
 			ToolCallID:          "call-1",
 			ToolCallName:        "deleteFile",
 			ToolCallArgsDelta:   `{"path":"/tmp/x"}`,
 			ApprovalIsAutomatic: true,
 			ApprovalSignature:   "sig-abc",
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	chunks := drainChunks(ToUIMessageStream(sr, "msg-approval", ToUIStreamOptions{}))
@@ -45,14 +45,14 @@ func TestChunkProducer_ToolApprovalRequest_OptionalFields(t *testing.T) {
 // optional fields are absent when the engine does not set them.
 func TestChunkProducer_ToolApprovalRequest_OmitsUnsetOptionalFields(t *testing.T) {
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{
-			Type:         engine.StepEventToolApprovalRequest,
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{
+			Type:         aikit.StepEventToolApprovalRequest,
 			ToolCallID:   "call-2",
 			ToolCallName: "readFile",
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	chunks := drainChunks(ToUIMessageStream(sr, "msg-approval2", ToUIStreamOptions{}))
@@ -74,10 +74,10 @@ func TestChunkProducer_ToolApprovalRequest_OmitsUnsetOptionalFields(t *testing.T
 func TestChunkProducer_SourceURL_ProviderMetadata(t *testing.T) {
 	pm := map[string]any{"google": map[string]any{"groundingId": "g-1"}}
 	sr := newMockStreamEventer(
-		engine.StepEvent{Type: engine.StepEventStepStart},
-		engine.StepEvent{
-			Type: engine.StepEventSource,
-			Source: &engine.Source{
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{
+			Type: aikit.StepEventSource,
+			Source: &aikit.Source{
 				SourceType:       "url",
 				ID:               "src-1",
 				URL:              "https://example.com",
@@ -85,8 +85,8 @@ func TestChunkProducer_SourceURL_ProviderMetadata(t *testing.T) {
 				ProviderMetadata: pm,
 			},
 		},
-		engine.StepEvent{Type: engine.StepEventStepEnd, FinishReason: engine.FinishReasonStop},
-		engine.StepEvent{Type: engine.StepEventDone},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
 	chunks := drainChunks(ToUIMessageStream(sr, "msg-src", ToUIStreamOptions{SendSources: true}))

@@ -1,4 +1,4 @@
-package engine
+package agent
 
 // streamResult holds accumulated metadata from consuming a model stream.
 type streamResult struct {
@@ -21,12 +21,19 @@ func consumeStream(
 	cb *LifecycleCallbacks,
 ) (streamResult, bool) {
 	var sr streamResult
-	for ev := range eventCh {
-		if fatal := applyStreamEvent(r, ev, &sr, acc, cb); fatal {
+	for {
+		select {
+		case <-r.ctx.Done():
 			return sr, true
+		case ev, ok := <-eventCh:
+			if !ok {
+				return sr, false
+			}
+			if interrupted := applyStreamEvent(r, ev, &sr, acc, cb); interrupted {
+				return sr, true
+			}
 		}
 	}
-	return sr, false
 }
 
 // applyStreamEvent dispatches a single StreamEvent: updates sr in-place,
@@ -39,28 +46,31 @@ func applyStreamEvent(
 	acc *toolCallAccumulator,
 	cb *LifecycleCallbacks,
 ) bool {
-	emitChunk := func(stepEv StepEvent) {
-		r.emit(stepEv)
+	emitChunk := func(stepEv StepEvent) bool {
+		if !r.emit(stepEv) {
+			return false
+		}
 		if cb != nil && cb.OnChunk != nil {
 			callbackEvent := snapshotStepEvent(stepEv)
 			r.safeObserver(func() { cb.OnChunk(callbackEvent) })
 		}
+		return true
 	}
 	switch ev.Type {
 	case StreamEventTextDelta:
 		sr.text += ev.TextDelta
-		emitChunk(StepEvent{Type: StepEventTextDelta, TextDelta: ev.TextDelta})
+		return !emitChunk(StepEvent{Type: StepEventTextDelta, TextDelta: ev.TextDelta})
 
 	case StreamEventReasoningDelta:
 		sr.reasoning += ev.TextDelta
-		emitChunk(StepEvent{
+		return !emitChunk(StepEvent{
 			Type:             StepEventReasoningDelta,
 			ReasoningDelta:   ev.TextDelta,
 			ThoughtSignature: ev.ThoughtSignature,
 		})
 
 	case StreamEventToolCallDelta:
-		handleToolCallDelta(r, ev, acc, cb)
+		return !handleToolCallDelta(r, ev, acc, cb)
 
 	case StreamEventUsage:
 		// Providers may report usage across several events within one step
@@ -68,15 +78,15 @@ func applyStreamEvent(
 		// output count later). Merge non-zero fields so no partial update
 		// clobbers a previously reported count.
 		sr.usage = mergeUsage(sr.usage, ev.Usage)
-		emitChunk(StepEvent{Type: StepEventUsage, Usage: sr.usage})
+		return !emitChunk(StepEvent{Type: StepEventUsage, Usage: sr.usage})
 
 	case StreamEventSource:
 		if ev.Source != nil {
-			emitChunk(StepEvent{Type: StepEventSource, Source: ev.Source})
+			return !emitChunk(StepEvent{Type: StepEventSource, Source: ev.Source})
 		}
 
 	case StreamEventFileDelta:
-		emitChunk(StepEvent{
+		return !emitChunk(StepEvent{
 			Type:          StepEventFileDelta,
 			FileData:      ev.FileData,
 			FileMediaType: ev.FileMediaType,
@@ -91,7 +101,9 @@ func applyStreamEvent(
 		}
 
 	case StreamEventError:
-		r.emit(StepEvent{Type: StepEventError, Error: ev.Error})
+		if !r.emit(StepEvent{Type: StepEventError, Error: ev.Error}) {
+			return true
+		}
 		if cb != nil && cb.OnError != nil {
 			r.safeObserver(func() { cb.OnError(ev.Error) })
 		}
@@ -108,9 +120,9 @@ func handleToolCallDelta(
 	ev StreamEvent,
 	acc *toolCallAccumulator,
 	cb *LifecycleCallbacks,
-) {
+) bool {
 	if acc == nil {
-		return
+		return true
 	}
 	isNew := acc.add(ev)
 	if isNew {
@@ -122,7 +134,9 @@ func handleToolCallDelta(
 			ToolCallArgsDelta: ev.ToolCallArgsDelta,
 			ThoughtSignature:  ev.ThoughtSignature,
 		}
-		r.emit(stepEv)
+		if !r.emit(stepEv) {
+			return false
+		}
 		if cb != nil && cb.OnChunk != nil {
 			r.safeObserver(func() { cb.OnChunk(stepEv) })
 		}
@@ -133,11 +147,14 @@ func handleToolCallDelta(
 			ToolCallID:        ev.ToolCallID,
 			ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		}
-		r.emit(stepEv)
+		if !r.emit(stepEv) {
+			return false
+		}
 		if cb != nil && cb.OnChunk != nil {
 			r.safeObserver(func() { cb.OnChunk(stepEv) })
 		}
 	}
+	return true
 }
 
 // mergeUsage combines partial usage reports from the same step without
