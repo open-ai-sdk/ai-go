@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/ctxlog"
 )
 
@@ -50,7 +50,7 @@ func TestAPIErrorFromResponse_ParsesHeadersAndBody(t *testing.T) {
 	if err.Message != "Rate limit reached" {
 		t.Errorf("Message = %q", err.Message)
 	}
-	if !errors.Is(err, aitypes.ErrRateLimited) {
+	if !errors.Is(err, aikit.ErrRateLimited) {
 		t.Error("expected errors.Is(err, ErrRateLimited) for a 429")
 	}
 }

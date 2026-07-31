@@ -1,15 +1,12 @@
 package ai
 
-// StopCondition determines when the tool loop should stop after each step.
-// step is 1-based (first completed step = 1).
-type StopCondition func(step int, result *StepResult) bool
+import "github.com/open-ai-sdk/ai-go/aikit"
 
-// StepResult holds information about a completed tool-loop step.
-type StepResult struct {
-	HasToolCalls bool
-	ToolNames    []string
-	Text         string
-}
+type (
+	StopCondition = aikit.StopCondition
+	StepResult    = aikit.StepResult
+	OutputSchema  = aikit.OutputSchema
+)
 
 // IsStepCount returns a StopCondition that stops after n completed steps.
 func IsStepCount(n int) StopCondition {
@@ -36,20 +33,6 @@ func HasToolCall(toolName string) StopCondition {
 		}
 		return false
 	}
-}
-
-// OutputSchema describes the desired output mode for a generation call.
-//
-// Supported Type values:
-//   - "text"        — plain text; no JSON constraint (default when Output is nil)
-//   - "json_object" — any valid JSON object; provider uses json_object response_format
-//   - "object"      — JSON object conforming to Schema (uses json_schema response_format)
-//   - "array"       — JSON array conforming to Schema (uses json_schema response_format)
-type OutputSchema struct {
-	// Type is one of "text", "json_object", "object", or "array".
-	Type string
-	// Schema is the JSON Schema definition. Required for "object" and "array"; nil otherwise.
-	Schema map[string]any
 }
 
 // OutputText signals that plain text output is expected (no JSON constraint).

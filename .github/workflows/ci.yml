@@ -93,3 +93,14 @@ jobs:
 
       - name: Verify dependencies
         run: go mod verify
+
+      - name: Enforce aikit leaf boundary
+        run: |
+          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./aikit/... \
+            | grep -v '^$' \
+            | grep -v '^github.com/open-ai-sdk/ai-go/aikit$' || true)"
+          test -z "$deps" || {
+            echo "aikit must depend only on the Go standard library:"
+            echo "$deps"
+            exit 1
+          }

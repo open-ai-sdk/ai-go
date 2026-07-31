@@ -1,7 +1,7 @@
 package uistream
 
 import (
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
@@ -22,10 +22,10 @@ func recoverToChunk(out chan<- Chunk) func(error) {
 // recoverToEvent builds an onPanic that surfaces a recovered panic as a
 // best-effort error event on out, for relay goroutines that carry engine
 // events rather than chunks. Non-blocking for the same reason as recoverToChunk.
-func recoverToEvent(out chan<- aitypes.StepEvent) func(error) {
+func recoverToEvent(out chan<- aikit.StepEvent) func(error) {
 	return func(err error) {
 		select {
-		case out <- aitypes.StepEvent{Type: aitypes.StepEventError, Error: err}:
+		case out <- aikit.StepEvent{Type: aikit.StepEventError, Error: err}:
 		default:
 		}
 	}

@@ -296,7 +296,7 @@ passed to `StreamText`.
 
 ## Error handling
 
-Provider HTTP failures surface as `*ai.APIError` (an alias of the shared `aitypes.APIError`), never as
+Provider HTTP failures surface as `*ai.APIError` (an alias of the shared `aikit.APIError`), never as
 an opaque string. The raw response body is deliberately never embedded — it has, in other SDKs, leaked
 credentials and internal identifiers through error logs — but the fields a caller actually needs
 (status code, provider error code/message, request ID, `Retry-After`) are parsed out and kept:

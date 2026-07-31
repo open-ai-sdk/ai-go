@@ -1,5 +1,7 @@
 package engine
 
+import "encoding/json"
+
 func buildInitialHistory(req Request) []Message {
 	msgs := make([]Message, 0, len(req.Messages)+1)
 	if req.Instructions != "" {
@@ -12,7 +14,7 @@ func buildInitialHistory(req Request) []Message {
 func buildAssistantToolCallMessage(text, reasoning string, calls []toolCallState) Message {
 	parts := make([]ContentPart, 0, 2+len(calls))
 	if reasoning != "" {
-		parts = append(parts, ContentPart{Type: "reasoning", Text: reasoning})
+		parts = append(parts, ContentPart{Type: "reasoning", ReasoningText: reasoning})
 	}
 	if text != "" {
 		parts = append(parts, ContentPart{Type: "text", Text: text})
@@ -22,7 +24,7 @@ func buildAssistantToolCallMessage(text, reasoning string, calls []toolCallState
 			Type:             "tool_call",
 			ToolCallID:       tc.id,
 			ToolCallName:     tc.name,
-			ToolCallArgs:     tc.args,
+			ToolCallArgs:     json.RawMessage(tc.args),
 			ThoughtSignature: tc.thoughtSignature,
 		})
 	}

@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 
@@ -240,7 +241,7 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 			handleToolCallReady(ev, currentStep)
 
 		case StepEventToolResult:
-			currentStep = handleToolResult(ev, result, currentStep)
+			handleToolResult(ev, result, currentStep)
 
 		case StepEventUsage:
 			handleUsage(ev, result, currentStep)
@@ -252,7 +253,8 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 			handleFileDelta(ev, result, currentStep)
 
 		case StepEventStepEnd:
-			currentStep = handleStepEnd(ev, result, currentStep, sr.tools)
+			handleStepEnd(ev, result, currentStep, sr.tools)
+			currentStep = nil
 
 		case StepEventStructuredOutput:
 			result.StructuredOutput = ev.StructuredOutput
@@ -268,4 +270,122 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 
 	result.Response = Response{Messages: ResponseMessagesForSteps(result.Steps, sr.tools)}
 	return result, nil
+}
+
+func handleToolCallStart(event StepEvent, step *StepOutput) {
+	if step == nil {
+		return
+	}
+	step.ToolCalls = append(step.ToolCalls, ToolCallOutput{
+		ID:               event.ToolCallID,
+		Name:             event.ToolCallName,
+		Args:             json.RawMessage(event.ToolCallArgsDelta),
+		ThoughtSignature: event.ThoughtSignature,
+	})
+}
+
+func handleToolCallDelta(event StepEvent, step *StepOutput) {
+	if step == nil || event.ToolCallArgsDelta == "" {
+		return
+	}
+	for i := range step.ToolCalls {
+		if step.ToolCalls[i].ID == event.ToolCallID {
+			step.ToolCalls[i].Args = append(step.ToolCalls[i].Args, event.ToolCallArgsDelta...)
+			return
+		}
+	}
+}
+
+func handleToolCallReady(event StepEvent, step *StepOutput) {
+	if step == nil {
+		return
+	}
+	for i := range step.ToolCalls {
+		if step.ToolCalls[i].ID == event.ToolCallID {
+			step.ToolCalls[i].Name = event.ToolCallName
+			if event.ToolCallArgsDelta != "" {
+				step.ToolCalls[i].Args = json.RawMessage(event.ToolCallArgsDelta)
+			}
+			if event.ThoughtSignature != "" {
+				step.ToolCalls[i].ThoughtSignature = event.ThoughtSignature
+			}
+			return
+		}
+	}
+	handleToolCallStart(event, step)
+}
+
+func handleToolResult(event StepEvent, result *GenerateTextResult, step *StepOutput) {
+	if event.ToolResult == nil {
+		return
+	}
+	result.ToolResults = append(result.ToolResults, *event.ToolResult)
+	if step != nil {
+		step.ToolResults = append(step.ToolResults, *event.ToolResult)
+	}
+}
+
+func handleUsage(event StepEvent, result *GenerateTextResult, step *StepOutput) {
+	if event.Usage == nil {
+		return
+	}
+	result.Usage.InputTokens += event.Usage.InputTokens
+	result.Usage.InputTokenDetails.NoCacheTokens += event.Usage.InputTokenDetails.NoCacheTokens
+	result.Usage.InputTokenDetails.CacheReadTokens += event.Usage.InputTokenDetails.CacheReadTokens
+	result.Usage.InputTokenDetails.CacheWriteTokens += event.Usage.InputTokenDetails.CacheWriteTokens
+	result.Usage.OutputTokens += event.Usage.OutputTokens
+	result.Usage.OutputTokenDetails.TextTokens += event.Usage.OutputTokenDetails.TextTokens
+	result.Usage.OutputTokenDetails.ReasoningTokens += event.Usage.OutputTokenDetails.ReasoningTokens
+	result.Usage.TotalTokens += event.Usage.TotalTokens
+	if event.Usage.Raw != nil {
+		result.Usage.Raw = event.Usage.Raw
+	}
+	if step != nil {
+		step.Usage = *event.Usage
+	}
+}
+
+func handleSource(event StepEvent, result *GenerateTextResult, step *StepOutput) {
+	if event.Source == nil {
+		return
+	}
+	result.Sources = append(result.Sources, *event.Source)
+	if step != nil {
+		step.Sources = append(step.Sources, *event.Source)
+	}
+}
+
+func handleFileDelta(event StepEvent, result *GenerateTextResult, step *StepOutput) {
+	if len(event.FileData) == 0 {
+		return
+	}
+	file := GeneratedFile{Data: event.FileData, MediaType: event.FileMediaType}
+	result.Files = append(result.Files, file)
+	if step != nil {
+		step.Files = append(step.Files, file)
+	}
+}
+
+func handleStepEnd(
+	event StepEvent,
+	result *GenerateTextResult,
+	step *StepOutput,
+	tools *ToolSet,
+) {
+	if step == nil {
+		return
+	}
+	step.FinishReason = event.FinishReason
+	step.RawFinishReason = event.RawFinishReason
+	step.ProviderMetadata = event.ProviderMetadata
+	step.Warnings = event.Warnings
+	step.Response = Response{Messages: ResponseMessagesForStep(*step, tools)}
+	result.Steps = append(result.Steps, *step)
+	result.FinalStep = *step
+	result.Text = step.Text
+	result.Reasoning = step.Reasoning
+	result.FinishReason = event.FinishReason
+	result.RawFinishReason = event.RawFinishReason
+	result.ProviderMetadata = event.ProviderMetadata
+	result.Warnings = append(result.Warnings, step.Warnings...)
 }

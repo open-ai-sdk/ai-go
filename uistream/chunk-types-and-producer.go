@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
@@ -31,7 +31,7 @@ func (cs *ChunkStream) FullText() string {
 	return cs.text
 }
 
-// ChunkProducer translates aitypes.StepEvents into a channel of typed Chunks.
+// ChunkProducer translates aikit.StepEvents into a channel of typed Chunks.
 // It holds the same per-stream state as the former Adapter internals.
 type ChunkProducer struct {
 	msgID string
@@ -66,7 +66,7 @@ func NewChunkProducer(msgID string) *ChunkProducer {
 // exhausted or an error event is received.
 //
 // Produce is designed for single use per ChunkProducer instance.
-func (cp *ChunkProducer) Produce(ch <-chan aitypes.StepEvent) *ChunkStream {
+func (cp *ChunkProducer) Produce(ch <-chan aikit.StepEvent) *ChunkStream {
 	out := make(chan Chunk, 64)
 	cs := &ChunkStream{
 		Chunks: out,
@@ -82,7 +82,7 @@ func (cp *ChunkProducer) Produce(ch <-chan aitypes.StepEvent) *ChunkStream {
 		out <- Chunk{Type: ChunkStart, Fields: map[string]any{"messageId": cp.msgID}}
 
 		for ev := range ch {
-			if ev.Type == aitypes.StepEventError {
+			if ev.Type == aikit.StepEventError {
 				for _, c := range cp.chunksError(ev.Error) {
 					out <- c
 				}
@@ -101,23 +101,23 @@ func (cp *ChunkProducer) Produce(ch <-chan aitypes.StepEvent) *ChunkStream {
 
 // translateEvent converts a single StepEvent into zero or more Chunks plus any
 // text delta accumulated.
-func (cp *ChunkProducer) translateEvent(ev aitypes.StepEvent) ([]Chunk, string) {
+func (cp *ChunkProducer) translateEvent(ev aikit.StepEvent) ([]Chunk, string) {
 	switch ev.Type {
-	case aitypes.StepEventStepStart:
+	case aikit.StepEventStepStart:
 		return cp.chunksStepStart(), ""
-	case aitypes.StepEventTextDelta:
+	case aikit.StepEventTextDelta:
 		return cp.chunksTextDelta(ev)
-	case aitypes.StepEventReasoningDelta:
+	case aikit.StepEventReasoningDelta:
 		return cp.chunksReasoningDelta(ev), ""
-	case aitypes.StepEventToolCallStart:
+	case aikit.StepEventToolCallStart:
 		return cp.chunksToolCallStart(ev), ""
-	case aitypes.StepEventToolCallDelta:
+	case aikit.StepEventToolCallDelta:
 		return cp.chunksToolCallDelta(ev), ""
-	case aitypes.StepEventToolCallReady:
+	case aikit.StepEventToolCallReady:
 		return cp.chunksToolCallReady(ev), ""
-	case aitypes.StepEventToolResult:
+	case aikit.StepEventToolResult:
 		return cp.chunksToolResult(ev), ""
-	case aitypes.StepEventToolApprovalRequest:
+	case aikit.StepEventToolApprovalRequest:
 		fields := map[string]any{
 			"approvalId": ev.ToolCallID,
 			"toolCallId": ev.ToolCallID,
@@ -133,13 +133,13 @@ func (cp *ChunkProducer) translateEvent(ev aitypes.StepEvent) ([]Chunk, string) 
 			fields["signature"] = ev.ApprovalSignature
 		}
 		return []Chunk{{Type: ChunkToolApprovalRequest, Fields: fields}}, ""
-	case aitypes.StepEventToolOutputDenied:
+	case aikit.StepEventToolOutputDenied:
 		return []Chunk{{Type: ChunkToolOutputDenied, Fields: map[string]any{"toolCallId": ev.ToolCallID}}}, ""
-	case aitypes.StepEventToolCallInvalid:
+	case aikit.StepEventToolCallInvalid:
 		return cp.chunksToolCallInvalid(ev), ""
-	case aitypes.StepEventSource:
+	case aikit.StepEventSource:
 		return cp.chunksSource(ev), ""
-	case aitypes.StepEventStepEnd:
+	case aikit.StepEventStepEnd:
 		if ev.FinishReason == "" {
 			cp.lastFinishReason = ""
 			return cp.chunksStepEnd(), ""
@@ -150,7 +150,7 @@ func (cp *ChunkProducer) translateEvent(ev aitypes.StepEvent) ([]Chunk, string) 
 		}
 		cp.lastFinishReason = finishReason
 		return cp.chunksStepEnd(), ""
-	case aitypes.StepEventDone:
+	case aikit.StepEventDone:
 		fields := map[string]any{}
 		if cp.lastFinishReason != "" {
 			fields["finishReason"] = cp.lastFinishReason
@@ -184,7 +184,7 @@ func (cp *ChunkProducer) chunksStepStart() []Chunk {
 	return []Chunk{{Type: ChunkStartStep, Fields: nil}}
 }
 
-func (cp *ChunkProducer) chunksTextDelta(ev aitypes.StepEvent) ([]Chunk, string) {
+func (cp *ChunkProducer) chunksTextDelta(ev aikit.StepEvent) ([]Chunk, string) {
 	var out []Chunk
 	// End active reasoning block before text starts (matches Vercel AI SDK behavior).
 	if cp.reasoningStarted {
@@ -210,7 +210,7 @@ func (cp *ChunkProducer) chunksTextDelta(ev aitypes.StepEvent) ([]Chunk, string)
 	return out, ev.TextDelta
 }
 
-func (cp *ChunkProducer) chunksReasoningDelta(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksReasoningDelta(ev aikit.StepEvent) []Chunk {
 	var out []Chunk
 	// End active text block before reasoning starts. Symmetric to chunksTextDelta's
 	// reasoning-end emission — preserves chronological order when a model
@@ -235,7 +235,7 @@ func (cp *ChunkProducer) chunksReasoningDelta(ev aitypes.StepEvent) []Chunk {
 	return out
 }
 
-func (cp *ChunkProducer) chunksToolCallStart(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallStart(ev aikit.StepEvent) []Chunk {
 	tcID := ev.ToolCallID
 	if tcID == "" {
 		return nil
@@ -286,7 +286,7 @@ func (cp *ChunkProducer) chunksToolCallStart(ev aitypes.StepEvent) []Chunk {
 	return out
 }
 
-func (cp *ChunkProducer) chunksToolCallDelta(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallDelta(ev aikit.StepEvent) []Chunk {
 	tcID := ev.ToolCallID
 	if !cp.toolInputStarted[tcID] || ev.ToolCallArgsDelta == "" {
 		return nil
@@ -302,7 +302,7 @@ func (cp *ChunkProducer) chunksToolCallDelta(ev aitypes.StepEvent) []Chunk {
 	}}}
 }
 
-func (cp *ChunkProducer) chunksToolCallReady(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallReady(ev aikit.StepEvent) []Chunk {
 	tcID := ev.ToolCallID
 	if tcID == "" || cp.toolInputReady[tcID] {
 		return nil
@@ -319,7 +319,7 @@ func (cp *ChunkProducer) chunksToolCallReady(ev aitypes.StepEvent) []Chunk {
 	}, ev.ProviderMetadata)}}
 }
 
-func (cp *ChunkProducer) chunksToolResult(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolResult(ev aikit.StepEvent) []Chunk {
 	if ev.ToolResult == nil {
 		return nil
 	}
@@ -369,7 +369,7 @@ func parseToolArgs(args string) any {
 	return parsed
 }
 
-func (cp *ChunkProducer) chunksToolCallInvalid(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksToolCallInvalid(ev aikit.StepEvent) []Chunk {
 	return []Chunk{{Type: ChunkToolInputError, Fields: map[string]any{
 		"toolCallId": ev.ToolCallID,
 		"toolName":   ev.ToolCallName,
@@ -377,7 +377,7 @@ func (cp *ChunkProducer) chunksToolCallInvalid(ev aitypes.StepEvent) []Chunk {
 	}}}
 }
 
-func (cp *ChunkProducer) chunksSource(ev aitypes.StepEvent) []Chunk {
+func (cp *ChunkProducer) chunksSource(ev aikit.StepEvent) []Chunk {
 	if ev.Source == nil || ev.Source.URL == "" {
 		return nil
 	}

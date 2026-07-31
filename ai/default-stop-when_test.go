@@ -74,7 +74,7 @@ func TestGenerateText_DefaultStopWhen_PerformsExactlyOneStep(t *testing.T) {
 
 // TestStreamText_DefaultStopWhen_PerformsExactlyOneStep is the streaming
 // counterpart: StreamText shares GenerateText's default via the same
-// toEngineParams conversion, so Consume() must observe the same one-step result.
+// runParams wiring, so Consume() must observe the same one-step result.
 func TestStreamText_DefaultStopWhen_PerformsExactlyOneStep(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

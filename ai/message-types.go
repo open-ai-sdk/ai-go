@@ -1,80 +1,33 @@
 // Package ai provides the public API surface for the ai-go SDK.
 package ai
 
-import "encoding/json"
+import (
+	"encoding/json"
 
-// Role identifies the author of a message in a conversation.
-type Role string
-
-const (
-	RoleSystem    Role = "system"
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
-	RoleTool      Role = "tool"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// ContentPartType identifies the kind of content in a message part.
-type ContentPartType string
-
-const (
-	// ContentPartTypeText is a plain-text part.
-	ContentPartTypeText ContentPartType = "text"
-	// ContentPartTypeFile is a file referenced by URL or data URI.
-	ContentPartTypeFile ContentPartType = "file"
-	// ContentPartTypeToolCall is a model-issued tool call (assistant turn only).
-	ContentPartTypeToolCall ContentPartType = "tool_call"
-	// ContentPartTypeToolResult is the result of a tool execution (tool turn only).
-	ContentPartTypeToolResult ContentPartType = "tool_result"
-	// ContentPartTypeReasoning carries prior reasoning text for history replay
-	// (e.g. Claude extended thinking). Used in assistant messages when replaying
-	// multi-step conversations that included a reasoning block.
-	ContentPartTypeReasoning ContentPartType = "reasoning"
+// Message vocabulary is owned by the dependency-free aikit package. These
+// aliases preserve the established ai package surface.
+type (
+	Role            = aikit.Role
+	ContentPartType = aikit.ContentPartType
+	ContentPart     = aikit.ContentPart
+	Message         = aikit.Message
 )
 
-// ContentPart is a single part of a message (text, image, file, tool call/result, or reasoning).
-// Only the fields matching the active Type are populated; all others are zero.
-type ContentPart struct {
-	// Type identifies which fields below are populated.
-	Type ContentPartType
+const (
+	RoleSystem    = aikit.RoleSystem
+	RoleUser      = aikit.RoleUser
+	RoleAssistant = aikit.RoleAssistant
+	RoleTool      = aikit.RoleTool
 
-	// Text is set when Type == ContentPartTypeText.
-	Text string
-
-	// FileURL is the URL or data URI when Type == ContentPartTypeFile.
-	FileURL string
-	// MediaType is either a full IANA media type ("image/png") or just the
-	// top-level segment ("image") when the subtype is unknown. Providers narrow
-	// it as their API requires.
-	MediaType string
-
-	// Data holds inline binary content for file parts.
-	// Exactly one of FileURL, Data, or FileID should be set per part.
-	Data []byte
-	// FileID is a provider-specific file identifier (e.g. OpenAI "file-abc123").
-	// Exactly one of FileURL, Data, or FileID should be set per part.
-	FileID string
-	// Filename is the original filename for file parts (optional, used with Data or FileID).
-	Filename string
-
-	// ToolCallID is the unique ID for the tool call when Type == ContentPartTypeToolCall.
-	ToolCallID string
-	// ToolCallName is the tool function name when Type == ContentPartTypeToolCall.
-	ToolCallName string
-	// ToolCallArgs is the JSON-encoded arguments when Type == ContentPartTypeToolCall.
-	ToolCallArgs json.RawMessage
-	// ThoughtSignature is the Gemini thought signature for multi-turn tool calls.
-	ThoughtSignature string
-
-	// ToolResultID matches the ToolCallID that this result answers (Type == ContentPartTypeToolResult).
-	ToolResultID string
-	// ToolResultName is the name of the tool that produced this result (Type == ContentPartTypeToolResult).
-	ToolResultName string
-	// ToolResultOutput is the string result from the tool execution (Type == ContentPartTypeToolResult).
-	ToolResultOutput string
-
-	// ReasoningText holds the reasoning / thinking text when Type == ContentPartTypeReasoning.
-	ReasoningText string
-}
+	ContentPartTypeText       = aikit.ContentPartTypeText
+	ContentPartTypeFile       = aikit.ContentPartTypeFile
+	ContentPartTypeToolCall   = aikit.ContentPartTypeToolCall
+	ContentPartTypeToolResult = aikit.ContentPartTypeToolResult
+	ContentPartTypeReasoning  = aikit.ContentPartTypeReasoning
+)
 
 // TextPart constructs a text ContentPart.
 func TextPart(text string) ContentPart {
@@ -171,12 +124,6 @@ func ToolResultPart(id, name, output string) ContentPart {
 		ToolResultName:   name,
 		ToolResultOutput: output,
 	}
-}
-
-// Message is a single turn in a conversation.
-type Message struct {
-	Role    Role
-	Content []ContentPart
 }
 
 // UserMessage creates a user message with a single text part.

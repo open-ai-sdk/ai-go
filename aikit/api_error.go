@@ -1,4 +1,4 @@
-package aitypes
+package aikit
 
 import (
 	"fmt"

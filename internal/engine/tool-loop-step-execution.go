@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
@@ -55,7 +56,7 @@ func executeToolCalls(
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
 			ID:               tc.id,
 			Name:             tc.name,
-			Args:             tc.args,
+			Args:             json.RawMessage(tc.args),
 			ArgsSet:          true,
 			ThoughtSignature: tc.thoughtSignature,
 		})
@@ -192,7 +193,7 @@ func executeToolCallsParallel(
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
 			ID:               res.tc.id,
 			Name:             res.tc.name,
-			Args:             res.tc.args,
+			Args:             json.RawMessage(res.tc.args),
 			ArgsSet:          true,
 			ThoughtSignature: res.tc.thoughtSignature,
 		})

@@ -6,20 +6,11 @@ import (
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
-//
-// It delegates to the streaming path so the step-event aggregation switch lives
-// in exactly one place — StreamResult.Consume. Smoothing only shapes live-stream
-// timing, so it is disabled here: a non-streaming call must never pay the
-// per-chunk delays SmoothStream would otherwise impose.
 func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextResult, error) {
-	// Surface a pre-flight validation failure as (nil, err) — the same contract
-	// the direct implementation had — before delegating. Mid-stream errors still
-	// return a partial result alongside the error, matching Consume.
 	if err := validateToolsContext(req); err != nil {
 		return nil, err
 	}
@@ -58,209 +49,66 @@ func validateToolsContext(req GenerateTextRequest) error {
 	return nil
 }
 
-func handleToolCallStart(ev engine.StepEvent, step *StepOutput) {
-	if step == nil {
-		return
-	}
-	step.ToolCalls = append(step.ToolCalls, ToolCallOutput{
-		ID:               ev.ToolCallID,
-		Name:             ev.ToolCallName,
-		Args:             json.RawMessage(ev.ToolCallArgsDelta),
-		ThoughtSignature: ev.ThoughtSignature,
-	})
-}
-
-func handleToolCallDelta(ev engine.StepEvent, step *StepOutput) {
-	if step == nil || ev.ToolCallArgsDelta == "" {
-		return
-	}
-	for i := range step.ToolCalls {
-		if step.ToolCalls[i].ID == ev.ToolCallID {
-			step.ToolCalls[i].Args = append(step.ToolCalls[i].Args, ev.ToolCallArgsDelta...)
-			return
-		}
-	}
-}
-
-func handleToolCallReady(ev engine.StepEvent, step *StepOutput) {
-	if step == nil {
-		return
-	}
-	for i := range step.ToolCalls {
-		if step.ToolCalls[i].ID == ev.ToolCallID {
-			step.ToolCalls[i].Name = ev.ToolCallName
-			if ev.ToolCallArgsDelta != "" {
-				step.ToolCalls[i].Args = json.RawMessage(ev.ToolCallArgsDelta)
-			}
-			if ev.ThoughtSignature != "" {
-				step.ToolCalls[i].ThoughtSignature = ev.ThoughtSignature
-			}
-			return
-		}
-	}
-	step.ToolCalls = append(step.ToolCalls, ToolCallOutput{
-		ID:               ev.ToolCallID,
-		Name:             ev.ToolCallName,
-		Args:             json.RawMessage(ev.ToolCallArgsDelta),
-		ThoughtSignature: ev.ThoughtSignature,
-	})
-}
-
-func handleToolResult(ev engine.StepEvent, result *GenerateTextResult, step *StepOutput) *StepOutput {
-	if ev.ToolResult == nil {
-		return step
-	}
-	tr := ToolResult{
-		ID:      ev.ToolResult.ID,
-		Name:    ev.ToolResult.Name,
-		Args:    ev.ToolResult.Args,
-		Output:  ev.ToolResult.Output,
-		Content: fromEngineToolResultContent(ev.ToolResult.Content),
-	}
-	result.ToolResults = append(result.ToolResults, tr)
-	if step != nil {
-		step.ToolResults = append(step.ToolResults, tr)
-	}
-	return step
-}
-
-func handleUsage(ev engine.StepEvent, result *GenerateTextResult, step *StepOutput) {
-	if ev.Usage == nil {
-		return
-	}
-	result.Usage.InputTokens += ev.Usage.InputTokens
-	result.Usage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
-	result.Usage.OutputTokens += ev.Usage.OutputTokens
-	result.Usage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
-	result.Usage.TotalTokens += ev.Usage.TotalTokens
-	result.Usage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
-	result.Usage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
-	result.Usage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
-	if ev.Usage.Raw != nil {
-		result.Usage.Raw = ev.Usage.Raw
-	}
-	if step != nil {
-		step.Usage = Usage{
-			InputTokens:  ev.Usage.InputTokens,
-			OutputTokens: ev.Usage.OutputTokens,
-			TotalTokens:  ev.Usage.TotalTokens,
-			InputTokenDetails: InputTokenDetails{
-				NoCacheTokens:    ev.Usage.InputTokenDetails.NoCacheTokens,
-				CacheReadTokens:  ev.Usage.InputTokenDetails.CacheReadTokens,
-				CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens,
-			},
-			OutputTokenDetails: OutputTokenDetails{
-				TextTokens:      ev.Usage.OutputTokenDetails.TextTokens,
-				ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens,
-			},
-		}
-	}
-}
-
-func handleSource(ev engine.StepEvent, result *GenerateTextResult, step *StepOutput) {
-	if ev.Source == nil {
-		return
-	}
-	src := Source{
-		SourceType:       ev.Source.SourceType,
-		ID:               ev.Source.ID,
-		URL:              ev.Source.URL,
-		Title:            ev.Source.Title,
-		ProviderMetadata: ev.Source.ProviderMetadata,
-	}
-	result.Sources = append(result.Sources, src)
-	if step != nil {
-		step.Sources = append(step.Sources, src)
-	}
-}
-
-func handleFileDelta(ev engine.StepEvent, result *GenerateTextResult, step *StepOutput) {
-	if len(ev.FileData) == 0 {
-		return
-	}
-	f := GeneratedFile{
-		Data:      ev.FileData,
-		MediaType: ev.FileMediaType,
-	}
-	result.Files = append(result.Files, f)
-	if step != nil {
-		step.Files = append(step.Files, f)
-	}
-}
-
-func handleStepEnd(ev engine.StepEvent, result *GenerateTextResult, step *StepOutput, tools *ToolSet) *StepOutput {
-	if step == nil {
-		return nil
-	}
-	step.FinishReason = ev.FinishReason
-	step.RawFinishReason = ev.RawFinishReason
-	step.ProviderMetadata = ev.ProviderMetadata
-	step.Warnings = fromEngineWarnings(ev.Warnings)
-	step.Response = Response{Messages: ResponseMessagesForStep(*step, tools)}
-	result.Steps = append(result.Steps, *step)
-	result.FinalStep = *step
-	result.Text = step.Text
-	result.Reasoning = step.Reasoning
-	result.FinishReason = ev.FinishReason
-	result.RawFinishReason = ev.RawFinishReason
-	result.ProviderMetadata = ev.ProviderMetadata
-	result.Warnings = append(result.Warnings, step.Warnings...)
-	return nil
-}
-
-// StreamText runs the tool loop and returns a *StreamResult for callers that
-// need live streaming (e.g. SSE adapters). Use StreamResult.TextStream() for
-// text deltas, StreamResult.Stream() for raw engine events, or
-// StreamResult.Consume() to block and get the full aggregated result.
+// StreamText runs the tool loop and returns its live and aggregate views.
 func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 	if err := validateToolsContext(req); err != nil {
 		return NewStreamResultWithTools(erroredEventChannel(err), req.Tools)
 	}
-	// Honour deferred middlewares (WithMiddleware, WithRetry) on the bare path
-	// too, so a directly-built request no longer silently ignores them. The
-	// Runtime facade already applies and clears them, so this only fires when
-	// StreamText/GenerateText are called with a request struct directly.
 	if len(req.Middlewares) > 0 {
 		req.Model = WrapLanguageModel(req.Model, req.Middlewares...)
 		req.Middlewares = nil
 	}
-	ch := engine.Run(ctx, toEngineParams(req))
+	ch := engine.Run(ctx, runParams(req))
 	if req.SmoothStream != nil {
 		ch = req.SmoothStream.Transform(ctx, ch)
 	}
 	return NewStreamResultWithTools(ch, req.Tools)
 }
 
-// erroredEventChannel returns a closed channel yielding a single error event, so
-// a pre-flight validation failure surfaces through the normal stream API
-// (Consume returns the error, Stream emits it) instead of being silently dropped.
-func erroredEventChannel(err error) <-chan engine.StepEvent {
-	ch := make(chan engine.StepEvent, 1)
-	ch <- engine.StepEvent{Type: engine.StepEventError, Error: err}
+func erroredEventChannel(err error) <-chan StepEvent {
+	ch := make(chan StepEvent, 1)
+	ch <- StepEvent{Type: StepEventError, Error: err}
 	close(ch)
 	return ch
 }
 
-// toEngineParams converts a public GenerateTextRequest to engine.RunParams.
-// It also wraps the ai.LanguageModel to satisfy engine.Model.
-func toEngineParams(req GenerateTextRequest) engine.RunParams {
+func runParams(req GenerateTextRequest) engine.RunParams {
 	if req.StopWhen == nil {
-		// Node parity: generateText/streamText default to stopWhen=isStepCount(1)
-		// (ai-sdk-node generate-text.ts) now that the engine no longer has an
-		// implicit step cap of its own. Tool calls in that single step still
-		// execute; only the loop's continuation into a follow-up model call is
-		// gated. Multi-step tool loops require an explicit StopWhen (or
-		// ToolLoopAgent, which defaults to a 20-step budget instead).
 		req.StopWhen = IsStepCount(1)
 	}
-	engReq, engTools := toEngineRequest(req)
-	stopWhen := toEngineStopWhen(req.StopWhen)
-	engPrepareStep := toEnginePrepareStep(req.PrepareStep)
-	repairToolCall := toEngineRepairToolCall(req.RepairToolCall)
-	engCallbacks := toEngineLifecycleCallbacks(req)
+
+	modelRequest := LanguageModelRequest{
+		Instructions:    req.Instructions,
+		Messages:        req.Messages,
+		ToolChoice:      req.ToolChoice,
+		Output:          req.Output,
+		Settings:        req.Settings,
+		ProviderOptions: req.ProviderOptions,
+		ToolsContext:    req.ToolsContext,
+		RuntimeContext:  req.RuntimeContext,
+	}
+
+	var tools *ToolSet
+	if req.Tools != nil {
+		modelRequest.Tools = req.Tools.Definitions
+		if len(req.ActiveTools) > 0 {
+			modelRequest.Tools = filterActiveTools(modelRequest.Tools, req.ActiveTools)
+		}
+		tools = &ToolSet{
+			Definitions: req.Tools.Definitions,
+			Executor: contextualExecutor{
+				executor:       req.Tools.Executor,
+				toolsContext:   req.ToolsContext,
+				runtimeContext: req.RuntimeContext,
+			},
+		}
+	}
+
 	approval := make(map[string]func(string, string) bool, len(req.ToolApproval))
 	for name, policy := range req.ToolApproval {
-		approval[name] = func(tool, args string) bool { return policy(tool, json.RawMessage(args)) == ApprovalRequired }
+		approval[name] = func(tool, args string) bool {
+			return policy(tool, json.RawMessage(args)) == ApprovalRequired
+		}
 	}
 	var approver engine.ApprovalResponder
 	if req.ToolApprovalResponder != nil {
@@ -268,81 +116,36 @@ func toEngineParams(req GenerateTextRequest) engine.RunParams {
 	}
 
 	return engine.RunParams{
-		Model:                 &engineModelAdapter{req.Model},
-		Request:               engReq,
-		Tools:                 engTools,
-		StopWhen:              stopWhen,
+		Model:                 req.Model,
+		Request:               modelRequest,
+		Tools:                 tools,
+		StopWhen:              req.StopWhen,
 		MaxSteps:              req.MaxSteps,
-		PrepareStep:           engPrepareStep,
-		RepairToolCall:        repairToolCall,
+		PrepareStep:           req.PrepareStep,
+		RepairToolCall:        req.RepairToolCall,
 		ToolApproval:          approval,
 		Approver:              approver,
-		Callbacks:             engCallbacks,
+		Callbacks:             lifecycleCallbacks(req),
 		ParallelToolExecution: req.ParallelToolExecution,
 		MaxParallelTools:      req.MaxParallelTools,
 		Logger:                req.Logger,
-		// Always bound to the process-global OTel TracerProvider: until the
-		// consumer's application registers a real one, that global provider is
-		// OTel's own no-op, so this costs nothing extra by default (see
-		// internal/tracing.NewTracer). There is no WithTracer option — tracing
-		// backend selection is the application's concern (otel.SetTracerProvider),
-		// not this SDK's.
-		Tracer:       tracing.NewTracer(),
-		TraceContent: req.TraceContent,
+		Tracer:                tracing.NewTracer(),
+		TraceContent:          req.TraceContent,
 	}
 }
 
-func toEngineRequest(req GenerateTextRequest) (engine.Request, *engine.ToolSet) {
-	engReq := engine.Request{
-		Instructions:    req.Instructions,
-		Messages:        toEngineMessages(req.Messages),
-		ProviderOptions: req.ProviderOptions,
-		ToolsContext:    req.ToolsContext,
-		RuntimeContext:  req.RuntimeContext,
-		Settings: engine.CallSettings{
-			Temperature:   req.Settings.Temperature,
-			MaxTokens:     req.Settings.MaxTokens,
-			TopP:          req.Settings.TopP,
-			TopK:          req.Settings.TopK,
-			Seed:          req.Settings.Seed,
-			StopSequences: req.Settings.StopSequences,
-		},
+func filterActiveTools(tools []ToolDefinition, active []string) []ToolDefinition {
+	set := make(map[string]bool, len(active))
+	for _, name := range active {
+		set[name] = true
 	}
-	if req.Output != nil {
-		engReq.Output = &engine.OutputSchema{Type: req.Output.Type, Schema: req.Output.Schema}
-	}
-	if req.ToolChoice != nil {
-		engReq.ToolChoice = &engine.ToolChoice{Type: req.ToolChoice.Type, ToolName: req.ToolChoice.ToolName}
-	}
-
-	if req.Tools == nil {
-		return engReq, nil
-	}
-
-	defs := make([]engine.ToolDefinition, len(req.Tools.Definitions))
-	for i, d := range req.Tools.Definitions {
-		defs[i] = engine.ToolDefinition{
-			Name:          d.Name,
-			Description:   d.Description,
-			InputSchema:   d.InputSchema,
-			ContextSchema: d.ContextSchema,
-			ToModelOutput: d.ToModelOutput,
-			Timeout:       d.Timeout,
+	filtered := make([]ToolDefinition, 0, len(tools))
+	for _, tool := range tools {
+		if set[tool.Name] {
+			filtered = append(filtered, tool)
 		}
 	}
-	engReq.Tools = defs
-	if len(req.ActiveTools) > 0 {
-		engReq.Tools = engineFilterTools(defs, req.ActiveTools)
-	}
-
-	return engReq, &engine.ToolSet{
-		Definitions: defs,
-		Executor: contextualExecutor{
-			executor:       req.Tools.Executor,
-			toolsContext:   req.ToolsContext,
-			runtimeContext: req.RuntimeContext,
-		},
-	}
+	return filtered
 }
 
 type contextualExecutor struct {
@@ -351,13 +154,9 @@ type contextualExecutor struct {
 	runtimeContext RuntimeContext
 }
 
-// Compile-time assertions that contextualExecutor satisfies both the public
-// ToolExecutor seam and the engine-internal mirror it is registered under
-// (engine.ToolSet.Executor) — the same method set, so one value satisfies both.
-var (
-	_ ToolExecutor        = contextualExecutor{}
-	_ engine.ToolExecutor = contextualExecutor{}
-)
+func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
+	return e.executor.Execute(withToolContexts(ctx, e.toolsContext[name], e.runtimeContext), name, args)
+}
 
 type approvalResponder struct{ fn ToolApprovalResponder }
 
@@ -365,566 +164,15 @@ func (r approvalResponder) RequestApproval(
 	ctx context.Context,
 	request engine.ApprovalRequest,
 ) (engine.ApprovalResponse, error) {
-	response, err := r.fn(
-		ctx,
-		ToolApprovalRequest{
-			ApprovalID: request.ApprovalID,
-			ToolCallID: request.ToolCallID,
-			ToolName:   request.ToolName,
-			Args:       json.RawMessage(request.Args),
-		},
-	)
+	response, err := r.fn(ctx, ToolApprovalRequest{
+		ApprovalID: request.ApprovalID,
+		ToolCallID: request.ToolCallID,
+		ToolName:   request.ToolName,
+		Args:       json.RawMessage(request.Args),
+	})
 	return engine.ApprovalResponse{
 		ApprovalID: response.ApprovalID,
 		Approved:   response.Approved,
 		Reason:     response.Reason,
 	}, err
-}
-
-func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
-	return e.executor.Execute(withToolContexts(ctx, e.toolsContext[name], e.runtimeContext), name, args)
-}
-
-func toEngineStopWhen(stopWhen StopCondition) engine.StopCondition {
-	if stopWhen == nil {
-		return nil
-	}
-	return func(step int, r *engine.StepResult) bool {
-		return stopWhen(step, &StepResult{
-			HasToolCalls: r.HasToolCalls,
-			ToolNames:    r.ToolNames,
-			Text:         r.Text,
-		})
-	}
-}
-
-func toEnginePrepareStep(prepare PrepareStepFunc) engine.PrepareStepFunc {
-	if prepare == nil {
-		return nil
-	}
-	return func(ectx engine.PrepareStepContext) *engine.PrepareStepResult {
-		aiCtx := PrepareStepContext{
-			StepNumber:     ectx.StepNumber,
-			ToolsContext:   ectx.ToolsContext,
-			RuntimeContext: ectx.RuntimeContext,
-		}
-		for _, s := range ectx.Steps {
-			aiCtx.Steps = append(aiCtx.Steps, PrepareStepInfo{
-				StepNumber:   s.StepNumber,
-				HasToolCalls: s.HasToolCalls,
-				ToolNames:    s.ToolNames,
-				Text:         s.Text,
-				FinishReason: s.FinishReason,
-			})
-		}
-		result := prepare(aiCtx)
-		if result == nil {
-			return nil
-		}
-		engResult := &engine.PrepareStepResult{
-			ActiveTools:     result.ActiveTools,
-			Instructions:    result.Instructions,
-			ProviderOptions: result.ProviderOptions,
-		}
-		if result.Model != nil {
-			engResult.Model = &engineModelAdapter{result.Model}
-		}
-		if result.ToolChoice != nil {
-			engResult.ToolChoice = &engine.ToolChoice{
-				Type:     result.ToolChoice.Type,
-				ToolName: result.ToolChoice.ToolName,
-			}
-		}
-		return engResult
-	}
-}
-
-func toEngineRepairToolCall(fn RepairToolCallFunc) engine.ToolCallRepairFunc {
-	if fn == nil {
-		return nil
-	}
-	return func(ctx context.Context, input engine.ToolCallRepairContext) (*engine.ToolCallInfo, error) {
-		publicInput := RepairToolCallInput{
-			Instructions: input.Instructions,
-			Messages:     fromEngineMessages(input.Messages),
-			ToolCall: ToolCallOutput{
-				ID:               input.ToolCall.ID,
-				Name:             input.ToolCall.Name,
-				Args:             json.RawMessage(input.ToolCall.Args),
-				ThoughtSignature: input.ToolCall.ThoughtSignature,
-			},
-			Tools: fromEngineToolSet(input.Tools),
-			// Tool error types are now unified in aitypes, so the engine's typed
-			// error passes straight through — errors.As/Is match end to end.
-			Error: input.Error,
-		}
-		repaired, err := fn(ctx, publicInput)
-		if err != nil {
-			return nil, err
-		}
-		if repaired == nil {
-			return nil, nil
-		}
-
-		result := &engine.ToolCallInfo{
-			ID:               input.ToolCall.ID,
-			Name:             input.ToolCall.Name,
-			Args:             input.ToolCall.Args,
-			ThoughtSignature: input.ToolCall.ThoughtSignature,
-		}
-		if repaired.ID != "" {
-			result.ID = repaired.ID
-		}
-		if repaired.Name != "" {
-			result.Name = repaired.Name
-		}
-		if repaired.Args != nil {
-			result.Args = string(repaired.Args)
-			result.ArgsSet = true
-		}
-		if repaired.ThoughtSignature != "" {
-			result.ThoughtSignature = repaired.ThoughtSignature
-		}
-		return result, nil
-	}
-}
-
-func toEngineLifecycleCallbacks(req GenerateTextRequest) *engine.LifecycleCallbacks {
-	if req.OnStepEnd == nil && req.OnEnd == nil && req.OnChunk == nil && req.OnError == nil {
-		return nil
-	}
-
-	callbacks := &engine.LifecycleCallbacks{}
-	if req.OnStepEnd != nil {
-		callbacks.OnStepEnd = func(ev engine.StepEndEvent) {
-			stepEvent := StepEndEvent{
-				StepNumber:       ev.StepNumber,
-				Text:             ev.Text,
-				Reasoning:        ev.Reasoning,
-				ToolCalls:        fromEngineToolCalls(ev.ToolCalls),
-				ToolResults:      fromEngineToolResults(ev.ToolResults),
-				FinishReason:     ev.FinishReason,
-				Usage:            fromEngineUsagePtr(ev.Usage),
-				ProviderMetadata: ev.ProviderMetadata,
-				Warnings:         fromEngineWarnings(ev.Warnings),
-			}
-			stepEvent.Response = Response{Messages: ResponseMessagesForStep(StepOutput{
-				Text:        stepEvent.Text,
-				Reasoning:   stepEvent.Reasoning,
-				ToolCalls:   stepEvent.ToolCalls,
-				ToolResults: stepEvent.ToolResults,
-			}, req.Tools)}
-			req.OnStepEnd(stepEvent)
-		}
-	}
-	if req.OnEnd != nil {
-		callbacks.OnEnd = func(ev engine.EndEvent) {
-			steps := fromEngineStepInfos(ev.Steps, req.Tools)
-			endEvent := EndEvent{
-				Text:             ev.Text,
-				Reasoning:        ev.Reasoning,
-				Steps:            steps,
-				Usage:            fromEngineUsage(ev.Usage),
-				FinishReason:     ev.FinishReason,
-				ProviderMetadata: ev.ProviderMetadata,
-			}
-			endEvent.Response = Response{Messages: ResponseMessagesForSteps(steps, req.Tools)}
-			req.OnEnd(endEvent)
-		}
-	}
-	if req.OnChunk != nil {
-		callbacks.OnChunk = func(ev engine.StepEvent) {
-			req.OnChunk(toChunkEvent(ev))
-		}
-	}
-	if req.OnError != nil {
-		callbacks.OnError = req.OnError
-	}
-	return callbacks
-}
-
-func engineFilterTools(tools []engine.ToolDefinition, active []string) []engine.ToolDefinition {
-	set := make(map[string]bool, len(active))
-	for _, name := range active {
-		set[name] = true
-	}
-	var filtered []engine.ToolDefinition
-	for _, t := range tools {
-		if set[t.Name] {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
-func fromEngineToolCalls(tcs []engine.ToolCallInfo) []ToolCallOutput {
-	if len(tcs) == 0 {
-		return nil
-	}
-	out := make([]ToolCallOutput, len(tcs))
-	for i, tc := range tcs {
-		out[i] = ToolCallOutput{
-			ID:               tc.ID,
-			Name:             tc.Name,
-			Args:             json.RawMessage(tc.Args),
-			ThoughtSignature: tc.ThoughtSignature,
-		}
-	}
-	return out
-}
-
-func fromEngineToolSet(ts *engine.ToolSet) *ToolSet {
-	if ts == nil {
-		return nil
-	}
-	defs := make([]ToolDefinition, len(ts.Definitions))
-	for i, def := range ts.Definitions {
-		defs[i] = ToolDefinition{
-			Name:          def.Name,
-			Description:   def.Description,
-			InputSchema:   def.InputSchema,
-			ToModelOutput: def.ToModelOutput,
-			Timeout:       def.Timeout,
-		}
-	}
-	return &ToolSet{
-		Definitions: defs,
-		Executor:    ts.Executor,
-	}
-}
-
-func fromEngineToolResults(trs []engine.ToolResult) []ToolResult {
-	if len(trs) == 0 {
-		return nil
-	}
-	out := make([]ToolResult, len(trs))
-	for i, tr := range trs {
-		out[i] = ToolResult{
-			ID: tr.ID, Name: tr.Name, Args: tr.Args,
-			Output:  tr.Output,
-			Content: fromEngineToolResultContent(tr.Content),
-		}
-	}
-	return out
-}
-
-func fromEngineToolResultContent(cs []engine.ToolResultContent) []ToolResultContent {
-	if len(cs) == 0 {
-		return nil
-	}
-	out := make([]ToolResultContent, len(cs))
-	copy(out, cs)
-	return out
-}
-
-func fromEngineUsagePtr(u *engine.Usage) *Usage {
-	if u == nil {
-		return nil
-	}
-	return &Usage{
-		InputTokens:  u.InputTokens,
-		OutputTokens: u.OutputTokens,
-		TotalTokens:  u.TotalTokens,
-		InputTokenDetails: InputTokenDetails{
-			NoCacheTokens:    u.InputTokenDetails.NoCacheTokens,
-			CacheReadTokens:  u.InputTokenDetails.CacheReadTokens,
-			CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens,
-		},
-		OutputTokenDetails: OutputTokenDetails{
-			TextTokens:      u.OutputTokenDetails.TextTokens,
-			ReasoningTokens: u.OutputTokenDetails.ReasoningTokens,
-		},
-	}
-}
-
-func fromEngineUsage(u engine.Usage) Usage {
-	return Usage{
-		InputTokens:  u.InputTokens,
-		OutputTokens: u.OutputTokens,
-		TotalTokens:  u.TotalTokens,
-		InputTokenDetails: InputTokenDetails{
-			NoCacheTokens:    u.InputTokenDetails.NoCacheTokens,
-			CacheReadTokens:  u.InputTokenDetails.CacheReadTokens,
-			CacheWriteTokens: u.InputTokenDetails.CacheWriteTokens,
-		},
-		OutputTokenDetails: OutputTokenDetails{
-			TextTokens:      u.OutputTokenDetails.TextTokens,
-			ReasoningTokens: u.OutputTokenDetails.ReasoningTokens,
-		},
-	}
-}
-
-func fromEngineStepInfos(steps []engine.StepResultInfo, tools *ToolSet) []StepOutput {
-	if len(steps) == 0 {
-		return nil
-	}
-	out := make([]StepOutput, len(steps))
-	for i, s := range steps {
-		out[i] = StepOutput{
-			Text:             s.Text,
-			Reasoning:        s.Reasoning,
-			ToolCalls:        fromEngineToolCalls(s.ToolCalls),
-			ToolResults:      fromEngineToolResults(s.ToolResults),
-			FinishReason:     s.FinishReason,
-			RawFinishReason:  s.RawFinishReason,
-			ProviderMetadata: s.ProviderMetadata,
-			Warnings:         fromEngineWarnings(s.Warnings),
-		}
-		if s.Usage != nil {
-			out[i].Usage = fromEngineUsage(*s.Usage)
-		}
-		out[i].Response = Response{Messages: ResponseMessagesForStep(out[i], tools)}
-	}
-	return out
-}
-
-func toChunkEvent(ev engine.StepEvent) ChunkEvent {
-	var typ string
-	switch ev.Type {
-	case engine.StepEventTextDelta:
-		typ = "text-delta"
-	case engine.StepEventReasoningDelta:
-		typ = "reasoning-delta"
-	case engine.StepEventToolCallStart:
-		typ = "tool-call-start"
-	case engine.StepEventToolCallDelta:
-		typ = "tool-call-delta"
-	case engine.StepEventToolCallReady:
-		typ = "tool-call-ready"
-	case engine.StepEventToolResult:
-		typ = "tool-result"
-	case engine.StepEventUsage:
-		typ = "usage"
-	case engine.StepEventStepStart:
-		typ = "step-start"
-	case engine.StepEventStepEnd:
-		typ = "step-end"
-	case engine.StepEventDone:
-		typ = "done"
-	case engine.StepEventError:
-		typ = "error"
-	case engine.StepEventSource:
-		typ = "source"
-	case engine.StepEventFileDelta:
-		typ = "file-delta"
-	default:
-		typ = "unknown"
-	}
-	return ChunkEvent{
-		Type:              typ,
-		TextDelta:         ev.TextDelta,
-		ReasoningDelta:    ev.ReasoningDelta,
-		ToolCallID:        ev.ToolCallID,
-		ToolCallName:      ev.ToolCallName,
-		ToolCallArgsDelta: ev.ToolCallArgsDelta,
-		StepNumber:        ev.StepNumber,
-		FinishReason:      ev.FinishReason,
-		// Carry the typed payloads instead of dropping them. These are already
-		// the shared aitypes types (Usage/Source/ToolResult), so no conversion.
-		Usage:            ev.Usage,
-		Source:           ev.Source,
-		ToolResult:       ev.ToolResult,
-		FileData:         ev.FileData,
-		FileMediaType:    ev.FileMediaType,
-		ProviderMetadata: ev.ProviderMetadata,
-	}
-}
-
-// engineModelAdapter wraps an ai.LanguageModel to satisfy engine.Model.
-type engineModelAdapter struct {
-	m LanguageModel
-}
-
-func (a *engineModelAdapter) ModelID() string { return a.m.ModelID() }
-
-func (a *engineModelAdapter) Stream(ctx context.Context, req engine.Request) (<-chan engine.StreamEvent, error) {
-	aiReq := LanguageModelRequest{
-		Instructions:    req.Instructions,
-		Messages:        fromEngineMessages(req.Messages),
-		ProviderOptions: req.ProviderOptions,
-		Settings: CallSettings{
-			Temperature:   req.Settings.Temperature,
-			MaxTokens:     req.Settings.MaxTokens,
-			TopP:          req.Settings.TopP,
-			TopK:          req.Settings.TopK,
-			Seed:          req.Settings.Seed,
-			StopSequences: req.Settings.StopSequences,
-		},
-	}
-	if req.Output != nil {
-		aiReq.Output = &OutputSchema{Type: req.Output.Type, Schema: req.Output.Schema}
-	}
-	if req.ToolChoice != nil {
-		aiReq.ToolChoice = &ToolChoice{Type: req.ToolChoice.Type, ToolName: req.ToolChoice.ToolName}
-	}
-	for _, td := range req.Tools {
-		aiReq.Tools = append(aiReq.Tools, ToolDefinition{
-			Name:        td.Name,
-			Description: td.Description,
-			InputSchema: td.InputSchema,
-		})
-	}
-
-	aiCh, err := a.m.Stream(ctx, aiReq)
-	if err != nil {
-		return nil, err
-	}
-
-	engCh := make(chan engine.StreamEvent, 64)
-	go func() {
-		defer close(engCh)
-		// A panic while adapting events surfaces as an error event before
-		// close instead of crashing the process.
-		defer safego.Recover(nil, func(err error) {
-			select {
-			case engCh <- engine.StreamEvent{Type: engine.StreamEventError, Error: err}:
-			default:
-			}
-		})
-		for ev := range aiCh {
-			engCh <- toEngineStreamEvent(ev)
-		}
-	}()
-	return engCh, nil
-}
-
-func toEngineStreamEvent(ev StreamEvent) engine.StreamEvent {
-	e := engine.StreamEvent{
-		Type:              ev.Type,
-		TextDelta:         ev.TextDelta,
-		ToolCallIndex:     ev.ToolCallIndex,
-		ToolCallID:        ev.ToolCallID,
-		ToolCallName:      ev.ToolCallName,
-		ToolCallArgsDelta: ev.ToolCallArgsDelta,
-		ThoughtSignature:  ev.ThoughtSignature,
-		FinishReason:      ev.FinishReason,
-		RawFinishReason:   ev.RawFinishReason,
-		ProviderMetadata:  ev.ProviderMetadata,
-		FileData:          ev.FileData,
-		FileMediaType:     ev.FileMediaType,
-		Error:             ev.Error,
-	}
-	if ev.Usage != nil {
-		e.Usage = &engine.Usage{
-			InputTokens:  ev.Usage.InputTokens,
-			OutputTokens: ev.Usage.OutputTokens,
-			TotalTokens:  ev.Usage.TotalTokens,
-			InputTokenDetails: engine.InputTokenDetails{
-				NoCacheTokens:    ev.Usage.InputTokenDetails.NoCacheTokens,
-				CacheReadTokens:  ev.Usage.InputTokenDetails.CacheReadTokens,
-				CacheWriteTokens: ev.Usage.InputTokenDetails.CacheWriteTokens,
-			},
-			OutputTokenDetails: engine.OutputTokenDetails{
-				TextTokens:      ev.Usage.OutputTokenDetails.TextTokens,
-				ReasoningTokens: ev.Usage.OutputTokenDetails.ReasoningTokens,
-			},
-		}
-	}
-	if len(ev.Warnings) > 0 {
-		e.Warnings = make([]engine.Warning, len(ev.Warnings))
-		copy(e.Warnings, ev.Warnings)
-	}
-	if ev.Source != nil {
-		e.Source = &engine.Source{
-			SourceType:       ev.Source.SourceType,
-			ID:               ev.Source.ID,
-			URL:              ev.Source.URL,
-			Title:            ev.Source.Title,
-			ProviderMetadata: ev.Source.ProviderMetadata,
-		}
-	}
-	return e
-}
-
-func toEngineMessages(msgs []Message) []engine.Message {
-	out := make([]engine.Message, len(msgs))
-	for i, m := range msgs {
-		out[i] = engine.Message{
-			Role:    string(m.Role),
-			Content: toEngineContentParts(m.Content),
-		}
-	}
-	return out
-}
-
-func toEngineContentParts(parts []ContentPart) []engine.ContentPart {
-	out := make([]engine.ContentPart, len(parts))
-	for i, p := range parts {
-		ep := engine.ContentPart{
-			Type:             string(p.Type),
-			FileURL:          p.FileURL,
-			MediaType:        p.MediaType,
-			Data:             p.Data,
-			FileID:           p.FileID,
-			Filename:         p.Filename,
-			ToolCallID:       p.ToolCallID,
-			ToolCallName:     p.ToolCallName,
-			ToolResultID:     p.ToolResultID,
-			ToolResultName:   p.ToolResultName,
-			ToolResultOutput: p.ToolResultOutput,
-		}
-		// "reasoning" parts store their text in ReasoningText; map to the engine's Text field.
-		if p.Type == ContentPartTypeReasoning {
-			ep.Text = p.ReasoningText
-		} else {
-			ep.Text = p.Text
-		}
-		if p.ToolCallArgs != nil {
-			ep.ToolCallArgs = string(p.ToolCallArgs)
-		}
-		ep.ThoughtSignature = p.ThoughtSignature
-		out[i] = ep
-	}
-	return out
-}
-
-func fromEngineMessages(msgs []engine.Message) []Message {
-	out := make([]Message, len(msgs))
-	for i, m := range msgs {
-		out[i] = Message{
-			Role:    Role(m.Role),
-			Content: fromEngineContentParts(m.Content),
-		}
-	}
-	return out
-}
-
-func fromEngineWarnings(ws []engine.Warning) []Warning {
-	if len(ws) == 0 {
-		return nil
-	}
-	out := make([]Warning, len(ws))
-	copy(out, ws)
-	return out
-}
-
-func fromEngineContentParts(parts []engine.ContentPart) []ContentPart {
-	out := make([]ContentPart, len(parts))
-	for i, p := range parts {
-		cp := ContentPart{
-			Type:             ContentPartType(p.Type),
-			FileURL:          p.FileURL,
-			MediaType:        p.MediaType,
-			Data:             p.Data,
-			FileID:           p.FileID,
-			Filename:         p.Filename,
-			ToolCallID:       p.ToolCallID,
-			ToolCallName:     p.ToolCallName,
-			ToolResultID:     p.ToolResultID,
-			ToolResultName:   p.ToolResultName,
-			ToolResultOutput: p.ToolResultOutput,
-		}
-		// "reasoning" parts map the engine's Text field back to ReasoningText.
-		if p.Type == "reasoning" {
-			cp.ReasoningText = p.Text
-		} else {
-			cp.Text = p.Text
-		}
-		if p.ToolCallArgs != "" {
-			cp.ToolCallArgs = json.RawMessage(p.ToolCallArgs)
-		}
-		cp.ThoughtSignature = p.ThoughtSignature
-		out[i] = cp
-	}
-	return out
 }

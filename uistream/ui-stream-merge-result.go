@@ -3,14 +3,14 @@ package uistream
 import (
 	"sync"
 
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamEventer is satisfied by *ai.StreamResult; using an interface avoids
 // an import cycle between the uistream and ai packages.
 type StreamEventer interface {
-	Stream() <-chan aitypes.StepEvent
+	Stream() <-chan aikit.StepEvent
 	// DrainUnused prevents fan-out deadlocks when only Stream() is consumed.
 	DrainUnused()
 }
@@ -93,12 +93,12 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 	)
 	if cfg.toolResultHook != nil {
 		toolCache = make(map[string]toolData)
-		intercepted := make(chan aitypes.StepEvent, 64)
+		intercepted := make(chan aikit.StepEvent, 64)
 		go func() {
 			defer close(intercepted)
 			defer safego.Recover(nil, recoverToEvent(intercepted))
 			for ev := range ch {
-				if ev.Type == aitypes.StepEventToolResult && ev.ToolResult != nil {
+				if ev.Type == aikit.StepEventToolResult && ev.ToolResult != nil {
 					tr := ev.ToolResult
 					toolCacheMu.Lock()
 					toolCache[tr.ID] = toolData{

@@ -1,27 +1,14 @@
 package ai
 
 import (
-	"context"
-
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// RepairToolCallInput is passed to RepairToolCallFunc.
-type RepairToolCallInput struct {
-	Instructions string
-	Messages     []Message
-	ToolCall     ToolCallOutput
-	Tools        *ToolSet
-	Error        error
-}
-
-// RepairToolCallFunc attempts to repair an invalid tool call.
-// Returning nil leaves the original invalid tool call behavior unchanged.
-type RepairToolCallFunc func(context.Context, RepairToolCallInput) (*ToolCallOutput, error)
-
-// Tool error types are aliases of the shared aitypes definitions (see
-// aitypes/tool-errors.go and ai/errors.go).
+// Tool error types are aliases of the shared aikit definitions (see
+// aikit/tool-errors.go and ai/errors.go).
 type (
-	NoSuchToolError           = aitypes.NoSuchToolError
-	InvalidToolArgumentsError = aitypes.InvalidToolArgumentsError
+	RepairToolCallInput       = aikit.RepairToolCallInput
+	RepairToolCallFunc        = aikit.RepairToolCallFunc
+	NoSuchToolError           = aikit.NoSuchToolError
+	InvalidToolArgumentsError = aikit.InvalidToolArgumentsError
 )

@@ -3,21 +3,21 @@ package uistream
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 func TestWireFinishReason(t *testing.T) {
 	tests := []struct {
 		name   string
-		reason aitypes.FinishReason
+		reason aikit.FinishReason
 		want   string
 	}{
-		{name: "stop", reason: aitypes.FinishReasonStop, want: "stop"},
-		{name: "tool calls", reason: aitypes.FinishReasonToolCalls, want: "tool-calls"},
-		{name: "length", reason: aitypes.FinishReasonLength, want: "length"},
-		{name: "content filter", reason: aitypes.FinishReasonContentFilter, want: "content-filter"},
-		{name: "error", reason: aitypes.FinishReasonError, want: "error"},
-		{name: "unknown", reason: aitypes.FinishReasonUnknown, want: "other"},
+		{name: "stop", reason: aikit.FinishReasonStop, want: "stop"},
+		{name: "tool calls", reason: aikit.FinishReasonToolCalls, want: "tool-calls"},
+		{name: "length", reason: aikit.FinishReasonLength, want: "length"},
+		{name: "content filter", reason: aikit.FinishReasonContentFilter, want: "content-filter"},
+		{name: "error", reason: aikit.FinishReasonError, want: "error"},
+		{name: "unknown", reason: aikit.FinishReasonUnknown, want: "other"},
 	}
 
 	for _, tt := range tests {
@@ -34,7 +34,7 @@ func TestWireFinishReason(t *testing.T) {
 }
 
 func TestWireFinishReasonRejectsUnmappedValue(t *testing.T) {
-	if got, ok := wireFinishReason(aitypes.FinishReason("new-provider-reason")); ok {
+	if got, ok := wireFinishReason(aikit.FinishReason("new-provider-reason")); ok {
 		t.Fatalf("wireFinishReason accepted an unmapped value as %q", got)
 	}
 }

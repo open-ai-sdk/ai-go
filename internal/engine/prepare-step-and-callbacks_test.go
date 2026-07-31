@@ -341,7 +341,7 @@ func TestLifecycleCallbacks_OnStepEnd(t *testing.T) {
 	if len(stepEvents[0].ToolCalls) != 1 || stepEvents[0].ToolCalls[0].Name != "search" {
 		t.Fatalf("first step should have search tool call, got %v", stepEvents[0].ToolCalls)
 	}
-	if stepEvents[0].ToolCalls[0].Args != `{"q":"test"}` {
+	if string(stepEvents[0].ToolCalls[0].Args) != `{"q":"test"}` {
 		t.Errorf("first step should preserve tool args, got %q", stepEvents[0].ToolCalls[0].Args)
 	}
 	if stepEvents[1].StepNumber != 1 {

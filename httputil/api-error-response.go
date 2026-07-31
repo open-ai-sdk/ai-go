@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/ctxlog"
 )
 
@@ -18,7 +18,7 @@ import (
 // extracted code/message survive into the typed error.
 const defaultErrorBodyLimit = 64 * 1024
 
-// APIErrorFromResponse converts a non-2xx response into a typed *aitypes.APIError.
+// APIErrorFromResponse converts a non-2xx response into a typed *aikit.APIError.
 // It parses the provider error code/message from the (bounded) JSON body, the
 // request-ID and Retry-After response headers, then discards the raw body — it is
 // never embedded in the error value. resp.Body is read and closed.
@@ -28,9 +28,9 @@ const defaultErrorBodyLimit = 64 * 1024
 // which is a no-op unless the caller configured a logger (ai.WithLogger).
 // This is the same "off by default, explicit opt-in" policy applied to span
 // content — a security-relevant default, not an incidental one.
-func APIErrorFromResponse(ctx context.Context, provider string, resp *http.Response) *aitypes.APIError {
+func APIErrorFromResponse(ctx context.Context, provider string, resp *http.Response) *aikit.APIError {
 	defer resp.Body.Close()
-	e := aitypes.NewAPIError(provider, resp.StatusCode, nil)
+	e := aikit.NewAPIError(provider, resp.StatusCode, nil)
 	e.RequestID = firstHeader(resp.Header,
 		"X-Request-Id", "Request-Id", "X-Amzn-Requestid", "Cf-Ray", "Anthropic-Request-Id")
 	if ra := parseRetryAfterHeader(resp.Header.Get("Retry-After")); ra > 0 {

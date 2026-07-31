@@ -3,7 +3,7 @@ package uistream
 import (
 	"sync"
 
-	"github.com/open-ai-sdk/ai-go/aitypes"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
@@ -97,19 +97,19 @@ func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <
 // interceptEvents filters and tracks usage from the raw engine event stream.
 // It writes accumulated usage into totalUsage (updated concurrently by the goroutine).
 func interceptEvents(
-	eventCh <-chan aitypes.StepEvent,
+	eventCh <-chan aikit.StepEvent,
 	opts ToUIStreamOptions,
 	totalUsage *UsageInfo,
 	usageMu *sync.Mutex,
-) <-chan aitypes.StepEvent {
-	intercepted := make(chan aitypes.StepEvent, 64)
+) <-chan aikit.StepEvent {
+	intercepted := make(chan aikit.StepEvent, 64)
 
 	go func() {
 		defer close(intercepted)
 		defer safego.Recover(nil, recoverToEvent(intercepted))
 		for ev := range eventCh {
 			// Track usage for metadata.
-			if ev.Type == aitypes.StepEventUsage && ev.Usage != nil {
+			if ev.Type == aikit.StepEventUsage && ev.Usage != nil {
 				usageMu.Lock()
 				totalUsage.InputTokens += ev.Usage.InputTokens
 				totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
@@ -122,11 +122,11 @@ func interceptEvents(
 				usageMu.Unlock()
 			}
 			// Filter reasoning events.
-			if !opts.SendReasoning && ev.Type == aitypes.StepEventReasoningDelta {
+			if !opts.SendReasoning && ev.Type == aikit.StepEventReasoningDelta {
 				continue
 			}
 			// Filter source events.
-			if !opts.SendSources && ev.Type == aitypes.StepEventSource {
+			if !opts.SendSources && ev.Type == aikit.StepEventSource {
 				continue
 			}
 			intercepted <- ev

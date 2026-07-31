@@ -62,7 +62,7 @@ func validateAndRepairToolCall(
 		ToolCall: ToolCallInfo{
 			ID:               tc.id,
 			Name:             tc.name,
-			Args:             tc.args,
+			Args:             json.RawMessage(tc.args),
 			ArgsSet:          true,
 			ThoughtSignature: tc.thoughtSignature,
 		},
@@ -82,8 +82,10 @@ func validateAndRepairToolCall(
 	if repaired.Name != "" {
 		tc.name = repaired.Name
 	}
-	if repaired.ArgsSet {
-		tc.args = repaired.Args
+	// Args was historically enough for the public repair callback to signal an
+	// override. ArgsSet additionally permits an explicit nil/empty override.
+	if repaired.ArgsSet || repaired.Args != nil {
+		tc.args = string(repaired.Args)
 	}
 	if repaired.ThoughtSignature != "" {
 		tc.thoughtSignature = repaired.ThoughtSignature

@@ -3,7 +3,15 @@ package ai
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/open-ai-sdk/ai-go/internal/engine"
 )
+
+func sharedContentPartRoundTrip(parts []ContentPart) []ContentPart {
+	var engineParts []engine.ContentPart = parts
+	var publicParts []ContentPart = engineParts
+	return publicParts
+}
 
 // --- ContentPart constructors ---
 
@@ -146,7 +154,7 @@ func TestFileIDPart(t *testing.T) {
 func TestContentPartRoundTrip_ImageData(t *testing.T) {
 	data := []byte{0x89, 0x50, 0x4e, 0x47}
 	parts := []ContentPart{ImageDataPart(data, "image/png")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected file type, got %s", rt[0].Type)
 	}
@@ -160,7 +168,7 @@ func TestContentPartRoundTrip_ImageData(t *testing.T) {
 
 func TestContentPartRoundTrip_ImageFileID(t *testing.T) {
 	parts := []ContentPart{ImageFileIDPart("file-abc123")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected file type, got %s", rt[0].Type)
 	}
@@ -172,7 +180,7 @@ func TestContentPartRoundTrip_ImageFileID(t *testing.T) {
 func TestContentPartRoundTrip_FileData(t *testing.T) {
 	data := []byte("%PDF-1.4")
 	parts := []ContentPart{FileDataPart(data, "application/pdf", "report.pdf")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected file type, got %s", rt[0].Type)
 	}
@@ -189,7 +197,7 @@ func TestContentPartRoundTrip_FileData(t *testing.T) {
 
 func TestContentPartRoundTrip_FileID(t *testing.T) {
 	parts := []ContentPart{FileIDPart("file-xyz", "application/pdf")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected file type, got %s", rt[0].Type)
 	}
@@ -227,13 +235,11 @@ func TestSystemMessage(t *testing.T) {
 	}
 }
 
-// --- ContentPart round-trip through engine adapter (via internal helpers) ---
-// These tests verify that all part types survive the ai→engine→ai translation
-// without data loss.
+// --- ContentPart identity across the public and engine surfaces ---
 
 func TestContentPartRoundTrip_Text(t *testing.T) {
 	parts := []ContentPart{TextPart("hello world")}
-	roundTripped := fromEngineContentParts(toEngineContentParts(parts))
+	roundTripped := sharedContentPartRoundTrip(parts)
 	if roundTripped[0].Type != ContentPartTypeText || roundTripped[0].Text != "hello world" {
 		t.Errorf("text part round-trip failed: %+v", roundTripped[0])
 	}
@@ -241,7 +247,7 @@ func TestContentPartRoundTrip_Text(t *testing.T) {
 
 func TestContentPartRoundTrip_ImageURL(t *testing.T) {
 	parts := []ContentPart{ImageURLPart("data:image/png;base64,abc")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeFile || rt[0].FileURL != "data:image/png;base64,abc" {
 		t.Errorf("imageURL part round-trip failed: %+v", rt[0])
 	}
@@ -249,7 +255,7 @@ func TestContentPartRoundTrip_ImageURL(t *testing.T) {
 
 func TestContentPartRoundTrip_File(t *testing.T) {
 	parts := []ContentPart{FilePart("https://cdn.example.com/doc.pdf", "application/pdf")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeFile {
 		t.Errorf("expected file type, got %s", rt[0].Type)
 	}
@@ -263,7 +269,7 @@ func TestContentPartRoundTrip_File(t *testing.T) {
 
 func TestContentPartRoundTrip_Reasoning(t *testing.T) {
 	parts := []ContentPart{ReasoningPart("I should search the web first.")}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeReasoning {
 		t.Errorf("expected reasoning type, got %s", rt[0].Type)
 	}
@@ -278,7 +284,7 @@ func TestContentPartRoundTrip_Reasoning(t *testing.T) {
 func TestContentPartRoundTrip_ToolCall(t *testing.T) {
 	args := json.RawMessage(`{"query":"go lang"}`)
 	parts := []ContentPart{ToolCallPart("call-abc", "web_search", args)}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeToolCall {
 		t.Errorf("expected tool_call type, got %s", rt[0].Type)
 	}
@@ -295,7 +301,7 @@ func TestContentPartRoundTrip_ToolCall(t *testing.T) {
 
 func TestContentPartRoundTrip_ToolResult(t *testing.T) {
 	parts := []ContentPart{ToolResultPart("call-abc", "web_search", `{"results":["r1"]}`)}
-	rt := fromEngineContentParts(toEngineContentParts(parts))
+	rt := sharedContentPartRoundTrip(parts)
 	if rt[0].Type != ContentPartTypeToolResult {
 		t.Errorf("expected tool_result type, got %s", rt[0].Type)
 	}

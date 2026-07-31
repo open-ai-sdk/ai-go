@@ -1,22 +1,22 @@
 package uistream
 
-import "github.com/open-ai-sdk/ai-go/aitypes"
+import "github.com/open-ai-sdk/ai-go/aikit"
 
 // wireFinishReason maps the SDK's internal finish-reason vocabulary to the
 // values accepted by the AI SDK UI message stream protocol.
-func wireFinishReason(reason aitypes.FinishReason) (string, bool) {
+func wireFinishReason(reason aikit.FinishReason) (string, bool) {
 	switch reason {
-	case aitypes.FinishReasonStop:
+	case aikit.FinishReasonStop:
 		return "stop", true
-	case aitypes.FinishReasonToolCalls:
+	case aikit.FinishReasonToolCalls:
 		return "tool-calls", true
-	case aitypes.FinishReasonLength:
+	case aikit.FinishReasonLength:
 		return "length", true
-	case aitypes.FinishReasonContentFilter:
+	case aikit.FinishReasonContentFilter:
 		return "content-filter", true
-	case aitypes.FinishReasonError:
+	case aikit.FinishReasonError:
 		return "error", true
-	case aitypes.FinishReasonUnknown:
+	case aikit.FinishReasonUnknown:
 		return "other", true
 	default:
 		return "", false

@@ -1,12 +1,15 @@
 package ai
 
-import "context"
+import (
+	"context"
 
-// RuntimeContext is shared data supplied to every tool invocation and prepare-step callback.
-type RuntimeContext map[string]any
+	"github.com/open-ai-sdk/ai-go/aikit"
+)
 
-// ToolsContext supplies per-tool context values keyed by tool name.
-type ToolsContext map[string]any
+type (
+	RuntimeContext = aikit.RuntimeContext
+	ToolsContext   = aikit.ToolsContext
+)
 
 type (
 	toolContextKey    struct{}

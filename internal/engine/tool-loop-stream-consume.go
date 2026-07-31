@@ -139,6 +139,51 @@ func handleToolCallDelta(
 	}
 }
 
+// mergeUsage combines partial usage reports from the same step without
+// discarding fields populated by an earlier provider event.
+func mergeUsage(prior, incoming *Usage) *Usage {
+	if incoming == nil {
+		return prior
+	}
+	if prior == nil {
+		return incoming
+	}
+	takeInt := func(current, next int) int {
+		if next != 0 {
+			return next
+		}
+		return current
+	}
+	merged := *prior
+	merged.InputTokens = takeInt(prior.InputTokens, incoming.InputTokens)
+	merged.OutputTokens = takeInt(prior.OutputTokens, incoming.OutputTokens)
+	merged.TotalTokens = takeInt(prior.TotalTokens, incoming.TotalTokens)
+	merged.InputTokenDetails.NoCacheTokens = takeInt(
+		prior.InputTokenDetails.NoCacheTokens,
+		incoming.InputTokenDetails.NoCacheTokens,
+	)
+	merged.InputTokenDetails.CacheReadTokens = takeInt(
+		prior.InputTokenDetails.CacheReadTokens,
+		incoming.InputTokenDetails.CacheReadTokens,
+	)
+	merged.InputTokenDetails.CacheWriteTokens = takeInt(
+		prior.InputTokenDetails.CacheWriteTokens,
+		incoming.InputTokenDetails.CacheWriteTokens,
+	)
+	merged.OutputTokenDetails.TextTokens = takeInt(
+		prior.OutputTokenDetails.TextTokens,
+		incoming.OutputTokenDetails.TextTokens,
+	)
+	merged.OutputTokenDetails.ReasoningTokens = takeInt(
+		prior.OutputTokenDetails.ReasoningTokens,
+		incoming.OutputTokenDetails.ReasoningTokens,
+	)
+	if incoming.Raw != nil {
+		merged.Raw = incoming.Raw
+	}
+	return &merged
+}
+
 // executeToolCalls processes a batch of completed tool calls: validates JSON args,
 // emits StepEventToolCallInvalid for invalid args (with error result for model retry),
 // then fires events and runs executors for valid calls.

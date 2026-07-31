@@ -3,6 +3,8 @@ package ai
 import (
 	"encoding/json"
 	"log/slog"
+
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // GenerateTextRequest is the input to GenerateText and StreamText.
@@ -97,12 +99,7 @@ type StepOutput struct {
 }
 
 // ToolCallOutput holds the details of a single tool call made by the model.
-type ToolCallOutput struct {
-	ID               string
-	Name             string
-	Args             json.RawMessage
-	ThoughtSignature string
-}
+type ToolCallOutput = aikit.ToolCallInfo
 
 // GenerateTextResult holds the full output of a GenerateText call.
 type GenerateTextResult struct {
@@ -125,34 +122,12 @@ type GenerateTextResult struct {
 	Response Response
 }
 
-// PrepareStepContext provides information about the current step for the PrepareStep callback.
-type PrepareStepContext struct {
-	StepNumber     int
-	Steps          []PrepareStepInfo
-	ToolsContext   ToolsContext
-	RuntimeContext RuntimeContext
-}
-
-// PrepareStepInfo holds information about a completed step for PrepareStep evaluation.
-type PrepareStepInfo struct {
-	StepNumber   int
-	HasToolCalls bool
-	ToolNames    []string
-	Text         string
-	FinishReason FinishReason
-}
-
-// PrepareStepResult holds per-step overrides returned by PrepareStep.
-type PrepareStepResult struct {
-	Model           LanguageModel
-	ToolChoice      *ToolChoice
-	ActiveTools     []string
-	Instructions    string
-	ProviderOptions map[string]any
-}
-
-// PrepareStepFunc is called before each step to allow per-step configuration overrides.
-type PrepareStepFunc func(ctx PrepareStepContext) *PrepareStepResult
+type (
+	PrepareStepContext = aikit.PrepareStepContext
+	PrepareStepInfo    = aikit.PrepareStepInfo
+	PrepareStepResult  = aikit.PrepareStepResult
+	PrepareStepFunc    = aikit.PrepareStepFunc
+)
 
 // StepEndEvent is passed to the OnStepEnd callback after each step.
 type StepEndEvent struct {

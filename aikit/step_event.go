@@ -1,12 +1,4 @@
-// Package aitypes holds the shared, public data types that flow between the ai
-// package, the internal tool-loop engine, and the uistream package. It is a leaf
-// package: it imports only the standard library and is imported by ai, engine,
-// and uistream so those packages name one identical set of types rather than
-// maintaining duplicate universes bridged by converters.
-//
-// Everything here is public API — keep it minimal and stable. Types only, no
-// behavior: adding a field is additive, removing or reshaping one is breaking.
-package aitypes
+package aikit
 
 import "encoding/json"
 

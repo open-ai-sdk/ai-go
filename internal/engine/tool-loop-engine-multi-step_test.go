@@ -240,7 +240,7 @@ func TestRunLoop_RepairToolCall_HistoryUsesRepairedToolCall(t *testing.T) {
 	if assistant.Content[0].ToolCallName != "search" {
 		t.Fatalf("expected repaired tool-call name in history, got %q", assistant.Content[0].ToolCallName)
 	}
-	if assistant.Content[0].ToolCallArgs != `{"q":"golang"}` {
+	if string(assistant.Content[0].ToolCallArgs) != `{"q":"golang"}` {
 		t.Fatalf("expected original args preserved in repaired history, got %q", assistant.Content[0].ToolCallArgs)
 	}
 
