@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // ImageModel implements ai.ImageModel using the native Gemini API's
@@ -73,20 +74,10 @@ func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) 
 	if err != nil {
 		return nil, fmt.Errorf("gemini-image: http request: %w", err)
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		// Bound the error body: attacker-influenced and only used for a message.
-		errBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"gemini-image: unexpected status %d (failed to read body: %w)",
-				resp.StatusCode,
-				readErr,
-			)
-		}
-		return nil, fmt.Errorf("gemini-image: unexpected status %d: %s", resp.StatusCode, string(errBody))
+		return nil, transport.APIErrorFromResponse(ctx, "gemini-image", resp)
 	}
+	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -1,10 +1,10 @@
 package mcp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // RedirectPolicy controls whether the transport follows HTTP redirects.
@@ -271,58 +273,36 @@ func (t *HTTPTransport) handleJSONResponse(body io.Reader) error {
 func (t *HTTPTransport) readSSEStream(body io.ReadCloser) {
 	defer body.Close()
 
-	scanner := bufio.NewScanner(body)
-	var eventType string
-	var dataLines []string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if line == "" {
-			// Empty line = end of event.
-			if len(dataLines) > 0 {
-				data := strings.Join(dataLines, "\n")
-				if eventType == "" || eventType == "message" {
-					var msg JSONRPCMessage
-					if err := json.Unmarshal([]byte(data), &msg); err != nil {
-						if t.onError != nil {
-							t.onError(fmt.Errorf("mcp: parse sse message: %w", err))
-						}
-					} else if t.onMessage != nil {
-						t.onMessage(msg)
-					}
-				}
+	reader := transport.NewSSEReader(body)
+	for {
+		frame, err := reader.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) && t.onError != nil {
+				t.onError(fmt.Errorf("mcp: read sse stream: %w", err))
 			}
-			eventType = ""
-			dataLines = nil
-			continue
+			return
 		}
 
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		} else if strings.HasPrefix(line, "data:") {
-			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		} else if strings.HasPrefix(line, "id:") {
-			id := strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+		if id := strings.TrimSpace(frame.ID); id != "" {
 			t.mu.Lock()
 			t.lastEventID = id
 			t.mu.Unlock()
 		}
-		// Ignore "retry:" and comment lines.
-	}
 
-	// Process any trailing event without a final blank line.
-	if len(dataLines) > 0 {
-		data := strings.Join(dataLines, "\n")
-		if eventType == "" || eventType == "message" {
-			var msg JSONRPCMessage
-			if err := json.Unmarshal([]byte(data), &msg); err != nil {
-				if t.onError != nil {
-					t.onError(fmt.Errorf("mcp: parse sse message: %w", err))
-				}
-			} else if t.onMessage != nil {
-				t.onMessage(msg)
+		eventType := strings.TrimSpace(frame.Event)
+		data := strings.TrimSpace(frame.Data)
+		if data == "" || (eventType != "" && eventType != "message") {
+			continue
+		}
+		var msg JSONRPCMessage
+		if err := json.Unmarshal([]byte(data), &msg); err != nil {
+			if t.onError != nil {
+				t.onError(fmt.Errorf("mcp: parse sse message: %w", err))
 			}
+			continue
+		}
+		if t.onMessage != nil {
+			t.onMessage(msg)
 		}
 	}
 }

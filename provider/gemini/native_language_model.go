@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -24,9 +24,10 @@ const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 //
 // Use NewNativeLanguageModel to construct an instance.
 type NativeLanguageModel struct {
-	modelID string
-	cfg     Config
-	client  *http.Client
+	modelID   string
+	cfg       Config
+	client    *transport.Client
+	clientErr error
 }
 
 var _ llm.Model = (*NativeLanguageModel)(nil)
@@ -42,12 +43,25 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = nativeBaseURL
+	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: baseURL,
+		Headers: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Auth: func(req *http.Request) {
+			req.Header.Set("x-goog-api-key", cfg.APIKey)
+		},
+		HTTPClient: transport.NewStreamingClient(timeout),
+	})
 	return &NativeLanguageModel{
-		modelID: modelID,
-		cfg:     cfg,
-		// Streaming path: no client-wide timeout (it would cap the whole SSE
-		// exchange); cfg.Timeout becomes a response-header deadline instead.
-		client: httputil.NewStreamingClient(timeout),
+		modelID:   modelID,
+		cfg:       cfg,
+		client:    client,
+		clientErr: clientErr,
 	}
 }
 
@@ -77,19 +91,25 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-ch
 		return nil, fmt.Errorf("gemini-native: marshal request: %w", err)
 	}
 
-	baseURL := m.cfg.BaseURL
-	if baseURL == "" {
-		baseURL = nativeBaseURL
+	if m.clientErr != nil {
+		return nil, fmt.Errorf(
+			"gemini-native: configure transport: %w",
+			m.clientErr,
+		)
 	}
-	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse", baseURL, m.modelID)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	target := fmt.Sprintf(
+		"models/%s:streamGenerateContent?alt=sse",
+		m.modelID,
+	)
+	httpReq, err := m.client.NewRequest(
+		ctx,
+		http.MethodPost,
+		target,
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: build http request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", m.cfg.APIKey)
-
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: http request: %w", err)
@@ -97,17 +117,13 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-ch
 	if resp.StatusCode != http.StatusOK {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse(ctx, "gemini-native", resp)
+		return nil, transport.APIErrorFromResponse(ctx, "gemini-native", resp)
 	}
 
-	raw := make(chan ai.StreamEvent, 64)
-	go func() {
-		defer resp.Body.Close()
-		decodeNativeSSEStream(ctx, resp.Body, raw)
-	}()
+	raw := transport.Stream(ctx, resp, decodeNativeSSEStream)
 
 	if len(warnings) == 0 {
-		return httputil.GuardStream(ctx, raw), nil
+		return raw, nil
 	}
 
 	// Wrap the channel to inject warnings into the first finish event. Sends are

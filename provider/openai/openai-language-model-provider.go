@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
@@ -23,7 +23,8 @@ type LanguageModel struct {
 	apiKey       string
 	baseURL      string
 	chunkTimeout time.Duration
-	client       *http.Client
+	client       *transport.Client
+	clientErr    error
 }
 
 var _ llm.Model = (*LanguageModel)(nil)
@@ -46,14 +47,23 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: base,
+		Headers: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Auth: func(req *http.Request) {
+			req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		},
+		HTTPClient: transport.NewStreamingClient(timeout),
+	})
 	return &LanguageModel{
 		modelID:      modelID,
 		apiKey:       cfg.APIKey,
 		baseURL:      base,
 		chunkTimeout: cfg.ChunkTimeout,
-		// Streaming path: no client-wide timeout (it would cap the whole SSE
-		// exchange); cfg.Timeout becomes a response-header deadline instead.
-		client: httputil.NewStreamingClient(timeout),
+		client:       client,
+		clientErr:    clientErr,
 	}
 }
 
@@ -79,15 +89,23 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 		body = openaichat.NewTimeoutReader(resp.Body, m.chunkTimeout)
 	}
 
-	raw := make(chan ai.StreamEvent, 64)
-	go func() {
-		// Encoding warnings are merged onto the response.completed finish event
-		// inside the decoder so callers see them in GenerateTextResult.Warnings.
-		decodeResponsesSSEStream(ctx, body, raw, warnings...)
-	}()
-	// GuardStream honours the Stream context contract: sends are ctx-guarded and
-	// the decoder is drained on cancel so its body is released.
-	return httputil.GuardStream(ctx, raw), nil
+	resp.Body = body
+	return transport.Stream(
+		ctx,
+		resp,
+		func(
+			ctx context.Context,
+			reader *transport.SSEReader,
+			events chan<- ai.StreamEvent,
+		) error {
+			return decodeResponsesSSEStream(
+				ctx,
+				reader,
+				events,
+				warnings...,
+			)
+		},
+	), nil
 }
 
 // GenerateText sends a non-streaming Responses API request and returns the
@@ -121,14 +139,18 @@ func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) 
 		return nil, fmt.Errorf("openai: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		m.baseURL+"/responses", bytes.NewReader(body))
+	if m.clientErr != nil {
+		return nil, fmt.Errorf("openai: configure transport: %w", m.clientErr)
+	}
+	httpReq, err := m.client.NewRequest(
+		ctx,
+		http.MethodPost,
+		"responses",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("openai: build http request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.apiKey)
-
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("openai: http request: %w", err)
@@ -136,7 +158,7 @@ func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse(ctx, "openai", resp)
+		return nil, transport.APIErrorFromResponse(ctx, "openai", resp)
 	}
 	return resp, nil
 }

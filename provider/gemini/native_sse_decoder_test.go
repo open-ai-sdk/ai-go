@@ -3,10 +3,12 @@ package gemini
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 func nativeStreamFromString(s string) io.ReadCloser {
@@ -14,13 +16,22 @@ func nativeStreamFromString(s string) io.ReadCloser {
 }
 
 func collectNativeEvents(body io.ReadCloser) []ai.StreamEvent {
-	ch := make(chan ai.StreamEvent, 128)
-	decodeNativeSSEStream(context.Background(), body, ch)
 	var events []ai.StreamEvent
-	for e := range ch {
+	for e := range nativeTestStream(context.Background(), body) {
 		events = append(events, e)
 	}
 	return events
+}
+
+func nativeTestStream(
+	ctx context.Context,
+	body io.ReadCloser,
+) <-chan ai.StreamEvent {
+	return transport.Stream(
+		ctx,
+		&http.Response{Body: body},
+		decodeNativeSSEStream,
+	)
 }
 
 func TestDecodeNativeSSE_SimpleTextStream(t *testing.T) {
@@ -313,17 +324,37 @@ func TestDecodeNativeSSE_ContextCancelled(t *testing.T) {
 
 	sse := `data: {"candidates":[{"content":{"parts":[{"text":"text"}],"role":"model"},"index":0}]}
 `
-	ch := make(chan ai.StreamEvent, 128)
-	decodeNativeSSEStream(ctx, nativeStreamFromString(sse), ch)
-
 	hasError := false
-	for e := range ch {
+	for e := range nativeTestStream(ctx, nativeStreamFromString(sse)) {
 		if e.Type == ai.StreamEventError {
 			hasError = true
 		}
 	}
 	if !hasError {
 		t.Error("expected error event on context cancellation")
+	}
+}
+
+func TestDecodeNativeSSE_MalformedChunkDoesNotHideLaterEvents(t *testing.T) {
+	sse := "data: {not-json}\n" +
+		`data: {"candidates":[{"content":{"parts":[{"text":"recovered"}]}}]}` +
+		"\n"
+
+	events := collectNativeEvents(nativeStreamFromString(sse))
+	var sawError bool
+	var sawText bool
+	for _, event := range events {
+		sawError = sawError ||
+			event.Type == ai.StreamEventError
+		sawText = sawText ||
+			(event.Type == ai.StreamEventTextDelta &&
+				event.TextDelta == "recovered")
+	}
+	if !sawError || !sawText {
+		t.Fatalf(
+			"events = %#v, want malformed-chunk error followed by text",
+			events,
+		)
 	}
 }
 

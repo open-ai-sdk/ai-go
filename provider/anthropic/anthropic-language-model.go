@@ -6,21 +6,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // LanguageModel implements ai.LanguageModel using the Anthropic Messages API.
 type LanguageModel struct {
-	modelID string
-	config  Config
-	client  *http.Client
+	modelID   string
+	config    Config
+	client    *transport.Client
+	clientErr error
 }
 
 var _ llm.Model = (*LanguageModel)(nil)
@@ -28,19 +27,22 @@ var _ llm.Model = (*LanguageModel)(nil)
 // NewLanguageModel creates a native Anthropic language model.
 func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 	cfg = cfg.withDefaults()
-	// Use Transport.ResponseHeaderTimeout for initial handshake protection
-	// instead of Client.Timeout, which would kill long-running SSE streams.
-	transport := &http.Transport{
-		ResponseHeaderTimeout: cfg.Timeout,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: cfg.BaseURL,
+		Headers: http.Header{
+			"Content-Type":      []string{"application/json"},
+			"Anthropic-Version": []string{cfg.APIVersion},
+		},
+		Auth: func(req *http.Request) {
+			req.Header.Set("X-API-Key", cfg.APIKey)
+		},
+		HTTPClient: transport.NewStreamingClient(cfg.Timeout),
+	})
 	return &LanguageModel{
-		modelID: modelID,
-		config:  cfg,
-		client:  &http.Client{Transport: transport},
+		modelID:   modelID,
+		config:    cfg,
+		client:    client,
+		clientErr: clientErr,
 	}
 }
 
@@ -54,18 +56,17 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 		return nil, fmt.Errorf("anthropic: encode request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(
+	if m.clientErr != nil {
+		return nil, fmt.Errorf("anthropic: configure transport: %w", m.clientErr)
+	}
+	httpReq, err := m.client.NewRequest(
 		ctx, http.MethodPost,
-		m.config.BaseURL+"/v1/messages",
+		"v1/messages",
 		bytes.NewReader(body),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: build http request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", m.config.APIKey)
-	httpReq.Header.Set("Anthropic-Version", m.config.APIVersion)
-
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: http request: %w", err)
@@ -73,18 +74,25 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 	if resp.StatusCode != http.StatusOK {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse(ctx, "anthropic", resp)
+		return nil, transport.APIErrorFromResponse(ctx, "anthropic", resp)
 	}
 
-	ch := make(chan ai.StreamEvent, 64)
-	// Encoding warnings are merged onto the finish event so callers see them in
-	// GenerateTextResult.Warnings. The deferred close mirrors the decoder's own
-	// (a second Close is a safe no-op) and keeps body ownership visible.
-	go func() {
-		defer resp.Body.Close()
-		decodeSSEStream(ctx, resp.Body, ch, encodeWarnings...)
-	}()
-	return ch, nil
+	return transport.Stream(
+		ctx,
+		resp,
+		func(
+			ctx context.Context,
+			reader *transport.SSEReader,
+			events chan<- ai.StreamEvent,
+		) error {
+			return decodeSSEStream(
+				ctx,
+				reader,
+				events,
+				encodeWarnings...,
+			)
+		},
+	), nil
 }
 
 // anthropicRequest is the Messages API request body.

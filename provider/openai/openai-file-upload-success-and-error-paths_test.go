@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -77,9 +78,13 @@ func TestUploadFile_Success(t *testing.T) {
 }
 
 func TestUploadFile_HTTPError(t *testing.T) {
+	const secret = "raw-response-secret"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":{"message":"invalid api key","type":"authentication_error"}}`))
+		w.Write([]byte(
+			`{"error":{"message":"invalid api key","type":"authentication_error"},"debug":"` +
+				secret + `"}`,
+		))
 	}))
 	defer srv.Close()
 
@@ -91,6 +96,9 @@ func TestUploadFile_HTTPError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for HTTP 401, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("raw response body leaked into error: %q", err)
 	}
 }
 

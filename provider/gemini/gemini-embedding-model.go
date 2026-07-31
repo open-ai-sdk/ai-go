@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 const embedBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -76,20 +78,10 @@ func (m *EmbeddingModel) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	if err != nil {
 		return nil, fmt.Errorf("gemini embed: http request: %w", err)
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		// Bound the error body: it is attacker-influenced and only used for a message.
-		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		if readErr != nil {
-			return nil, fmt.Errorf(
-				"gemini embed: unexpected status %d (failed to read body: %w)",
-				resp.StatusCode,
-				readErr,
-			)
-		}
-		return nil, fmt.Errorf("gemini embed: unexpected status %d: %s", resp.StatusCode, string(respBody))
+		return nil, transport.APIErrorFromResponse(ctx, "gemini-embed", resp)
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

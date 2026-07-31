@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/textproto"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // UploadedFile holds the metadata returned by the OpenAI /v1/files endpoint
@@ -118,15 +120,14 @@ func (fc *fileClient) upload(ctx context.Context, req UploadFileRequest) (*Uploa
 	if err != nil {
 		return nil, fmt.Errorf("openai: upload file: http: %w", err)
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, transport.APIErrorFromResponse(ctx, "openai-file-upload", resp)
+	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("openai: upload file: read response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("openai: upload file: unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return parseFileResponse(respBody)

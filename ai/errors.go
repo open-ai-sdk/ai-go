@@ -16,7 +16,7 @@ var (
 )
 
 // NewAPIError builds a typed provider error. Providers usually call
-// httputil.APIErrorFromResponse instead, which also parses headers and body.
+// transport.APIErrorFromResponse instead, which also parses headers and body.
 func NewAPIError(provider string, statusCode int, wrapped error) *APIError {
 	return aikit.NewAPIError(provider, statusCode, wrapped)
 }

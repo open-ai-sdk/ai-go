@@ -2,10 +2,10 @@ package gemini
 
 import (
 	"context"
-	"io"
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // decodeSSEStream reads SSE lines from body and emits normalized ai.StreamEvents onto ch.
@@ -13,7 +13,11 @@ import (
 // Metadata (groundingMetadata, safetyRatings, urlContextMetadata) is accumulated across
 // all chunks so that the finish event carries the last-seen values even if they arrived
 // in a non-final chunk.
-func decodeSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- ai.StreamEvent) {
+func decodeSSEStream(
+	ctx context.Context,
+	reader *transport.SSEReader,
+	ch chan<- ai.StreamEvent,
+) error {
 	seen := make(map[string]bool)
 
 	// lastMeta holds the most-recently-seen google metadata map across all chunks.
@@ -40,7 +44,7 @@ func decodeSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- ai.Strea
 		return map[string]any{"google": lastMeta}
 	}
 
-	openaichat.DecodeSSEStream(ctx, body, ch, openaichat.SSEDecodeParams{
+	return openaichat.DecodeSSEStream(ctx, reader, ch, openaichat.SSEDecodeParams{
 		ProviderName:      "gemini",
 		MetadataExtractor: metaExtractor,
 		SourceExtractor:   sourceExtractor,

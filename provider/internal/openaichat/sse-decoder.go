@@ -1,17 +1,14 @@
 package openaichat
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // StreamChunk mirrors the OpenAI chat completions SSE chunk structure.
@@ -75,64 +72,32 @@ type SSEDecodeParams struct {
 // It closes ch when done or on error.
 func DecodeSSEStream(
 	ctx context.Context,
-	body io.ReadCloser,
+	reader *transport.SSEReader,
 	ch chan<- ai.StreamEvent,
 	params SSEDecodeParams,
-) {
-	defer close(ch)
-	defer body.Close()
-	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
-	// watcher on normal completion.
-	defer httputil.CloseOnCancel(ctx, body)()
-	// Recover is deferred last so it runs first: a panic surfaces as an error
-	// event before the channel closes, instead of crashing the process.
-	defer safego.Recover(nil, func(err error) {
-		select {
-		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
-		case <-ctx.Done():
-		}
-	})
-
+) error {
 	providerName := params.ProviderName
 	if providerName == "" {
 		providerName = "openaichat"
 	}
 
-	reader := bufio.NewReader(body)
 	lineCount := 0
 	var finishEmitted bool
 	for {
 		select {
 		case <-ctx.Done():
-			ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()}
-			return
+			return ctx.Err()
 		default:
 		}
 
-		line, err := reader.ReadString('\n')
+		data, err := reader.NextData()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if line == "" {
-					break
-				}
-			} else {
-				ch <- ai.StreamEvent{
-					Type:  ai.StreamEventError,
-					Error: fmt.Errorf("%s: read stream: %w", providerName, err),
-				}
-				return
-			}
+			return fmt.Errorf("%s: read stream: %w", providerName, err)
 		}
-
-		line = strings.TrimRight(line, "\r\n")
 		lineCount++
-		if !strings.HasPrefix(line, "data: ") {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			if !finishEmitted {
 				ch <- ai.StreamEvent{
@@ -142,30 +107,21 @@ func DecodeSSEStream(
 					Warnings:        params.EncodeWarnings,
 				}
 			}
-			return
+			return nil
 		}
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			ch <- ai.StreamEvent{
-				Type:  ai.StreamEventError,
-				Error: fmt.Errorf("%s: unmarshal chunk: %w", providerName, err),
-			}
-			return
+			return fmt.Errorf("%s: unmarshal chunk: %w", providerName, err)
 		}
 
 		emitChunkEvents(chunk, ch, params, &finishEmitted)
-		if errors.Is(err, io.EOF) {
-			break
-		}
 	}
 
 	if lineCount == 0 {
-		ch <- ai.StreamEvent{
-			Type:  ai.StreamEventError,
-			Error: fmt.Errorf("%s: stream ended with zero lines", providerName),
-		}
+		return fmt.Errorf("%s: stream ended with zero lines", providerName)
 	}
+	return nil
 }
 
 // emitUsageEvent emits a StreamEventUsage for a chunk that carries token counts.

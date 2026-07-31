@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-ai-sdk/ai-go/internal/ctxlog"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // Run executes the tool loop and streams StepEvents onto the returned channel.
@@ -28,11 +28,11 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		tracer = tracing.NoopTracer{}
 	}
 	if params.Logger != nil {
-		// Skipped entirely when nil: ctxlog.FromContext already returns the
+		// Skipped entirely when nil: transport.LoggerFromContext returns the
 		// discard logger for a context carrying no value at all, the same as
 		// for one explicitly carrying a nil logger, so wrapping ctx here would
 		// only cost an allocation without changing what any reader observes.
-		ctx = ctxlog.WithLogger(ctx, params.Logger)
+		ctx = transport.WithLogger(ctx, params.Logger)
 	}
 	ctx, runSpan := tracer.Start(ctx, "ai.run")
 

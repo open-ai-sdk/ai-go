@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // ModelConfig holds all configuration for the shared chat completions LanguageModel.
@@ -57,27 +57,42 @@ type ModelConfig struct {
 
 // LanguageModel implements ai.LanguageModel using OpenAI-style chat completions.
 type LanguageModel struct {
-	cfg    ModelConfig
-	client *http.Client
+	cfg       ModelConfig
+	client    *transport.Client
+	clientErr error
 }
 
 var _ llm.Model = (*LanguageModel)(nil)
 
 // NewLanguageModel creates a LanguageModel with the given configuration.
 func NewLanguageModel(cfg ModelConfig) *LanguageModel {
-	client := cfg.HTTPClient
-	if client == nil {
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
 		timeout := cfg.Timeout
 		if timeout == 0 {
 			timeout = 120 * time.Second
 		}
 		// Streaming path: no client-wide timeout (it would cap the whole SSE
 		// exchange); cfg.Timeout becomes a response-header deadline instead.
-		client = httputil.NewStreamingClient(timeout)
+		httpClient = transport.NewStreamingClient(timeout)
 	}
+	headers := make(http.Header, len(cfg.Headers)+1)
+	headers.Set("Content-Type", "application/json")
+	for key, value := range cfg.Headers {
+		headers.Set(key, value)
+	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: cfg.BaseURL,
+		Headers: headers,
+		Auth: func(req *http.Request) {
+			req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		},
+		HTTPClient: httpClient,
+	})
 	return &LanguageModel{
-		cfg:    cfg,
-		client: client,
+		cfg:       cfg,
+		client:    client,
+		clientErr: clientErr,
 	}
 }
 
@@ -127,20 +142,21 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.ProviderName, err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(
+	if m.clientErr != nil {
+		return nil, fmt.Errorf(
+			"%s: configure transport: %w",
+			m.cfg.ProviderName,
+			m.clientErr,
+		)
+	}
+	httpReq, err := m.client.NewRequest(
 		ctx, http.MethodPost,
-		m.cfg.BaseURL+"/chat/completions",
+		"chat/completions",
 		bytes.NewReader(body),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%s: build http request: %w", m.cfg.ProviderName, err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
-	for k, v := range m.cfg.Headers {
-		httpReq.Header.Set(k, v)
-	}
-
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%s: http request: %w", m.cfg.ProviderName, err)
@@ -148,7 +164,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 	if resp.StatusCode != http.StatusOK {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse(ctx, m.cfg.ProviderName, resp)
+		return nil, transport.APIErrorFromResponse(ctx, m.cfg.ProviderName, resp)
 	}
 
 	respBody := resp.Body
@@ -156,21 +172,27 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 		respBody = NewTimeoutReader(resp.Body, m.cfg.ChunkTimeout)
 	}
 
-	raw := make(chan ai.StreamEvent, 64)
-	// The deferred close guarantees resp.Body is released regardless of whether
-	// the (possibly TimeoutReader-wrapped) respBody close propagates, and keeps
-	// body ownership visible; a second Close is a safe no-op.
-	go func() {
-		defer resp.Body.Close()
-		DecodeSSEStream(ctx, respBody, raw, SSEDecodeParams{
-			ProviderName:      m.cfg.ProviderName,
-			MetadataExtractor: m.cfg.MetadataExtractor,
-			EncodeWarnings:    encodeWarnings,
-		})
-	}()
-	// GuardStream honours the Stream context contract: sends are ctx-guarded and
-	// the decoder is drained on cancel so its body is released.
-	return httputil.GuardStream(ctx, raw), nil
+	resp.Body = respBody
+	return transport.Stream(
+		ctx,
+		resp,
+		func(
+			ctx context.Context,
+			reader *transport.SSEReader,
+			events chan<- ai.StreamEvent,
+		) error {
+			return DecodeSSEStream(
+				ctx,
+				reader,
+				events,
+				SSEDecodeParams{
+					ProviderName:      m.cfg.ProviderName,
+					MetadataExtractor: m.cfg.MetadataExtractor,
+					EncodeWarnings:    encodeWarnings,
+				},
+			)
+		},
+	), nil
 }
 
 // structToMap marshals v to JSON and unmarshals into a map[string]any.

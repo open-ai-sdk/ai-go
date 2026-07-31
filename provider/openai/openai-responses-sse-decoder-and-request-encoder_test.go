@@ -3,10 +3,12 @@ package openai
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // helpers
@@ -16,13 +18,28 @@ func streamFromString(s string) io.ReadCloser {
 }
 
 func collectEvents(body io.ReadCloser) []ai.StreamEvent {
-	ch := make(chan ai.StreamEvent, 128)
-	decodeResponsesSSEStream(context.Background(), body, ch)
 	var out []ai.StreamEvent
-	for e := range ch {
+	for e := range responsesTestStream(context.Background(), body) {
 		out = append(out, e)
 	}
 	return out
+}
+
+func responsesTestStream(
+	ctx context.Context,
+	body io.ReadCloser,
+) <-chan ai.StreamEvent {
+	return transport.Stream(
+		ctx,
+		&http.Response{Body: body},
+		func(
+			ctx context.Context,
+			reader *transport.SSEReader,
+			events chan<- ai.StreamEvent,
+		) error {
+			return decodeResponsesSSEStream(ctx, reader, events)
+		},
+	)
 }
 
 // SSE decoder tests
@@ -182,11 +199,8 @@ func TestOpenAISSE_ContextCancelled(t *testing.T) {
 
 	sse := `data: {"type":"response.output_text.delta","delta":"text"}
 `
-	ch := make(chan ai.StreamEvent, 128)
-	decodeResponsesSSEStream(ctx, streamFromString(sse), ch)
-
 	var events []ai.StreamEvent
-	for e := range ch {
+	for e := range responsesTestStream(ctx, streamFromString(sse)) {
 		events = append(events, e)
 	}
 

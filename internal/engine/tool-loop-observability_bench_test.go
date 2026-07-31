@@ -32,7 +32,7 @@ func runBenchOnce(params RunParams) {
 
 // BenchmarkToolLoop_InstrumentationDisabled is the default a caller gets with
 // neither ai.WithLogger nor any OTel provider configured: Logger and Tracer
-// are both nil, so runLoop substitutes tracing.NoopTracer{} and ctxlog's
+// are both nil, so runLoop substitutes tracing.NoopTracer{} and transport's
 // discard logger without ever touching OTel.
 func BenchmarkToolLoop_InstrumentationDisabled(b *testing.B) {
 	b.ReportAllocs()

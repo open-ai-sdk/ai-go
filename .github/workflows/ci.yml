@@ -104,3 +104,15 @@ jobs:
             echo "$deps"
             exit 1
           }
+
+      - name: Enforce transport leaf boundary
+        run: |
+          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./transport/... \
+            | grep -v '^$' \
+            | grep -v '^github.com/open-ai-sdk/ai-go/aikit$' \
+            | grep -v '^github.com/open-ai-sdk/ai-go/transport$' || true)"
+          test -z "$deps" || {
+            echo "transport must depend only on aikit and the Go standard library:"
+            echo "$deps"
+            exit 1
+          }

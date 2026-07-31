@@ -1,18 +1,15 @@
 package gemini
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // --------------------------------------------------------------------
@@ -128,25 +125,11 @@ type nativeMapsChunk struct {
 // decodeNativeSSEStream reads Gemini native SSE from body and emits ai.StreamEvents onto ch.
 // It closes ch when the stream ends (EOF or context cancellation).
 // body is closed when decoding finishes.
-func decodeNativeSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- ai.StreamEvent) {
-	defer close(ch)
-	defer body.Close()
-	// Close the body if ctx is cancelled so a blocked read unblocks; stop the
-	// watcher on normal completion.
-	defer httputil.CloseOnCancel(ctx, body)()
-	// Recover is deferred last so it runs first: a panic surfaces as an error
-	// event before the channel closes, instead of crashing the process.
-	defer safego.Recover(nil, func(err error) {
-		select {
-		case ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
-		case <-ctx.Done():
-		}
-	})
-
-	// bufio.Reader has no per-line size cap, so a single data: line larger than
-	// a Scanner's token limit (e.g. a base64 image) no longer kills the stream.
-	reader := bufio.NewReader(body)
-
+func decodeNativeSSEStream(
+	ctx context.Context,
+	reader *transport.SSEReader,
+	ch chan<- ai.StreamEvent,
+) error {
 	seen := make(map[string]bool)
 	var lastGoogleMeta map[string]any
 	toolCallIndex := 0
@@ -154,37 +137,36 @@ func decodeNativeSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- ai
 	for {
 		select {
 		case <-ctx.Done():
-			ch <- ai.StreamEvent{Type: ai.StreamEventError, Error: ctx.Err()}
-			return
+			return ctx.Err()
 		default:
 		}
 
-		line, err := reader.ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			ch <- ai.StreamEvent{
-				Type:  ai.StreamEventError,
-				Error: fmt.Errorf("gemini-native: read stream: %w", err),
-			}
-			return
-		}
-
-		line = strings.TrimRight(line, "\r\n")
-		if strings.HasPrefix(line, "data: ") {
-			if data := strings.TrimPrefix(line, "data: "); data != "" {
-				var chunk nativeSSEChunk
-				if jsonErr := json.Unmarshal([]byte(data), &chunk); jsonErr != nil {
-					ch <- ai.StreamEvent{
-						Type:  ai.StreamEventError,
-						Error: fmt.Errorf("gemini-native: unmarshal chunk: %w", jsonErr),
-					}
-				} else {
-					emitNativeChunkEvents(chunk, ch, seen, &lastGoogleMeta, &toolCallIndex)
-				}
-			}
-		}
-
+		data, err := reader.NextData()
 		if errors.Is(err, io.EOF) {
-			return
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("gemini-native: read stream: %w", err)
+		}
+		if data != "" {
+			var chunk nativeSSEChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				ch <- ai.StreamEvent{
+					Type: ai.StreamEventError,
+					Error: fmt.Errorf(
+						"gemini-native: unmarshal chunk: %w",
+						err,
+					),
+				}
+			} else {
+				emitNativeChunkEvents(
+					chunk,
+					ch,
+					seen,
+					&lastGoogleMeta,
+					&toolCallIndex,
+				)
+			}
 		}
 	}
 }

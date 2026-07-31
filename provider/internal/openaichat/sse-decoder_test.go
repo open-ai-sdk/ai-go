@@ -3,10 +3,12 @@ package openaichat
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // sseBody returns a ReadCloser from raw SSE lines.
@@ -23,6 +25,24 @@ func collectEvents(ch <-chan ai.StreamEvent) []ai.StreamEvent {
 	return events
 }
 
+func decodeTestStream(
+	ctx context.Context,
+	body io.ReadCloser,
+	params SSEDecodeParams,
+) <-chan ai.StreamEvent {
+	return transport.Stream(
+		ctx,
+		&http.Response{Body: body},
+		func(
+			ctx context.Context,
+			reader *transport.SSEReader,
+			events chan<- ai.StreamEvent,
+		) error {
+			return DecodeSSEStream(ctx, reader, events, params)
+		},
+	)
+}
+
 func TestSSE_ToolCallsFinishReason_NotOverwrittenByDone(t *testing.T) {
 	// Simulate: chunk with finish_reason "tool_calls", then [DONE].
 	body := sseBody(
@@ -30,10 +50,11 @@ func TestSSE_ToolCallsFinishReason_NotOverwrittenByDone(t *testing.T) {
 		`data: [DONE]`,
 	)
 
-	ch := make(chan ai.StreamEvent, 32)
-	go DecodeSSEStream(context.Background(), body, ch, SSEDecodeParams{ProviderName: "test"})
-
-	events := collectEvents(ch)
+	events := collectEvents(decodeTestStream(
+		context.Background(),
+		body,
+		SSEDecodeParams{ProviderName: "test"},
+	))
 
 	var finishEvents []ai.StreamEvent
 	for _, ev := range events {
@@ -60,10 +81,11 @@ func TestSSE_NoFinishReason_FallbackOnDone(t *testing.T) {
 		`data: [DONE]`,
 	)
 
-	ch := make(chan ai.StreamEvent, 32)
-	go DecodeSSEStream(context.Background(), body, ch, SSEDecodeParams{ProviderName: "test"})
-
-	events := collectEvents(ch)
+	events := collectEvents(decodeTestStream(
+		context.Background(),
+		body,
+		SSEDecodeParams{ProviderName: "test"},
+	))
 
 	var finishEvents []ai.StreamEvent
 	for _, ev := range events {
@@ -87,10 +109,11 @@ func TestSSE_StopFinishReason_NoDuplicate(t *testing.T) {
 		`data: [DONE]`,
 	)
 
-	ch := make(chan ai.StreamEvent, 32)
-	go DecodeSSEStream(context.Background(), body, ch, SSEDecodeParams{ProviderName: "test"})
-
-	events := collectEvents(ch)
+	events := collectEvents(decodeTestStream(
+		context.Background(),
+		body,
+		SSEDecodeParams{ProviderName: "test"},
+	))
 
 	var finishEvents []ai.StreamEvent
 	for _, ev := range events {
@@ -114,10 +137,11 @@ func TestSSE_LargeDataLineDoesNotHitScannerLimit(t *testing.T) {
 		`data: [DONE]`,
 	)
 
-	ch := make(chan ai.StreamEvent, 8)
-	go DecodeSSEStream(context.Background(), body, ch, SSEDecodeParams{ProviderName: "test"})
-
-	events := collectEvents(ch)
+	events := collectEvents(decodeTestStream(
+		context.Background(),
+		body,
+		SSEDecodeParams{ProviderName: "test"},
+	))
 	var sawText bool
 	for _, ev := range events {
 		if ev.Type == ai.StreamEventError {

@@ -3,10 +3,12 @@ package gemini
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 func streamFromString(s string) io.ReadCloser {
@@ -14,13 +16,22 @@ func streamFromString(s string) io.ReadCloser {
 }
 
 func collectEvents(body io.ReadCloser) []ai.StreamEvent {
-	ch := make(chan ai.StreamEvent, 128)
-	decodeSSEStream(context.Background(), body, ch)
 	var events []ai.StreamEvent
-	for e := range ch {
+	for e := range compatibleTestStream(context.Background(), body) {
 		events = append(events, e)
 	}
 	return events
+}
+
+func compatibleTestStream(
+	ctx context.Context,
+	body io.ReadCloser,
+) <-chan ai.StreamEvent {
+	return transport.Stream(
+		ctx,
+		&http.Response{Body: body},
+		decodeSSEStream,
+	)
 }
 
 func TestDecodeSSE_TextOnly(t *testing.T) {
@@ -105,11 +116,8 @@ func TestDecodeSSE_ContextCancelled(t *testing.T) {
 	sse := `data: {"choices":[{"delta":{"content":"text"}}]}
 data: [DONE]
 `
-	ch := make(chan ai.StreamEvent, 128)
-	decodeSSEStream(ctx, streamFromString(sse), ch)
-
 	var events []ai.StreamEvent
-	for e := range ch {
+	for e := range compatibleTestStream(ctx, streamFromString(sse)) {
 		events = append(events, e)
 	}
 

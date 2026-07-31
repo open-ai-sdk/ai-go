@@ -6,8 +6,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/open-ai-sdk/ai-go/ai"
 )
 
 // silentBody blocks Read until Close is called, modelling a Responses stream
@@ -47,16 +45,12 @@ func (b *silentBody) wasClosed() bool {
 // return promptly and close the response body.
 func TestResponsesDecoder_CancelReturnsAndClosesBody(t *testing.T) {
 	body := newSilentBody()
-	ch := make(chan ai.StreamEvent, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		decodeResponsesSSEStream(ctx, body, ch)
-	}()
-	go func() {
-		for range ch {
+		for range responsesTestStream(ctx, body) {
 		}
 	}()
 
