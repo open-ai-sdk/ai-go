@@ -68,6 +68,11 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		r.emit(StepEvent{Type: StepEventError, Error: err})
 	}, "phase", "tool-loop")
 
+	if err := params.Tools.Validate(); err != nil {
+		r.emit(StepEvent{Type: StepEventError, Error: err})
+		return
+	}
+
 	history := buildInitialHistory(params.Request)
 
 	// MaxSteps <= 0 means unbounded: node has no maxSteps concept at all, so

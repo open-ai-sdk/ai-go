@@ -2,8 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 // fixedApprover returns the same decision for every request.
@@ -122,6 +125,9 @@ func TestApproval_Denied_SkipsToolAndEmitsDenial(t *testing.T) {
 	}
 	if denied.Output != `{"error":"tool approval denied"}` {
 		t.Errorf("denied output = %q, want denied JSON", denied.Output)
+	}
+	if !errors.Is(denied.Error, tool.ErrDenied) {
+		t.Errorf("denied error = %v, want tool.ErrDenied", denied.Error)
 	}
 }
 

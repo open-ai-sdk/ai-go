@@ -1,9 +1,11 @@
 package engine
 
-import "github.com/open-ai-sdk/ai-go/aikit"
+import (
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
+)
 
 type (
-	ToolExecutor   = aikit.ToolExecutor
 	ToolDefinition = aikit.ToolDefinition
-	ToolSet        = aikit.ToolSet
+	ToolSet        = tool.Set
 )

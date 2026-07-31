@@ -2,13 +2,12 @@ package ai
 
 import (
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
-// Tool error types are aliases of the shared aikit definitions (see
-// aikit/tool-errors.go and ai/errors.go).
 type (
-	RepairToolCallInput       = aikit.RepairToolCallInput
-	RepairToolCallFunc        = aikit.RepairToolCallFunc
-	NoSuchToolError           = aikit.NoSuchToolError
-	InvalidToolArgumentsError = aikit.InvalidToolArgumentsError
+	RepairToolCallInput = aikit.RepairToolCallInput
+	RepairToolCallFunc  = aikit.RepairToolCallFunc
+	NoSuchToolError     = tool.NoSuchToolError
+	ToolInputError      = tool.InputError
 )

@@ -24,8 +24,7 @@ import "context"
 // from the tool set at the type level). Go has no equivalent for that kind of
 // inference, so this interface fixes the shape to *ToolSet and the existing
 // GenerateTextResult/StreamResult types instead of inventing a parametrized
-// type Go cannot express safely — tool typing stays at DefineTool[T], same as
-// everywhere else in ai-go.
+// type Go cannot express safely — tool typing stays at tool.New[In, Out].
 type Agent interface {
 	// ID identifies the agent. Empty when unset.
 	ID() string

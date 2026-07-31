@@ -90,7 +90,7 @@ func snapshotMessages(messages []Message) []Message {
 	return snapshot
 }
 
-func snapshotToolSetForCallback(tools *ToolSet) *ToolSet {
+func snapshotToolDefinitionsForCallback(tools *ToolSet) []ToolDefinition {
 	if tools == nil {
 		return nil
 	}
@@ -100,10 +100,7 @@ func snapshotToolSetForCallback(tools *ToolSet) *ToolSet {
 		definitions[i].InputSchema = snapshotJSONMap(definition.InputSchema)
 		definitions[i].ContextSchema = snapshotJSONMap(definition.ContextSchema)
 	}
-	return &ToolSet{
-		Definitions: definitions,
-		Executor:    tools.Executor,
-	}
+	return definitions
 }
 
 func snapshotStepEvent(event StepEvent) StepEvent {

@@ -101,9 +101,9 @@ func TestRepairToolCall_ReceivesIsolatedToolDefinitions(t *testing.T) {
 			_ context.Context,
 			input ToolCallRepairContext,
 		) (*ToolCallInfo, error) {
-			input.Tools.Definitions[0].Name = "admin"
-			input.Tools.Definitions[0].InputSchema["nested"].(map[string]any)["value"] = "corrupt"
-			input.Tools.Definitions[0].ContextSchema["nested"].(map[string]any)["value"] = "corrupt"
+			input.Tools[0].Name = "admin"
+			input.Tools[0].InputSchema["nested"].(map[string]any)["value"] = "corrupt"
+			input.Tools[0].ContextSchema["nested"].(map[string]any)["value"] = "corrupt"
 			return &ToolCallInfo{Name: "search"}, nil
 		},
 		MaxSteps: 1,

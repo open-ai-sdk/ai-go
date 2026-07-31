@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 // twoToolModel calls two distinct tools in the first step, then stops.
@@ -40,7 +41,7 @@ type ctxCaptureExecutor struct {
 }
 
 func (e *ctxCaptureExecutor) Execute(ctx context.Context, name, _ string) (string, error) {
-	v, _ := ai.ToolContextFrom(ctx)
+	v, _ := tool.ToolContextFrom(ctx)
 	e.mu.Lock()
 	e.seen[name] = v
 	e.mu.Unlock()

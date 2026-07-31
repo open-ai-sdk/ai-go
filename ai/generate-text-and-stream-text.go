@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/internal/engine"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
+	toolpkg "github.com/open-ai-sdk/ai-go/tool"
 )
 
 // GenerateText runs a full tool loop and returns the aggregated result.
@@ -94,7 +95,7 @@ func runParams(req GenerateTextRequest) engine.RunParams {
 		tools = &ToolSet{
 			Definitions: req.Tools.Definitions,
 			Executor: contextualExecutor{
-				executor:       req.Tools.Executor,
+				executor:       req.Tools,
 				toolsContext:   req.ToolsContext,
 				runtimeContext: req.RuntimeContext,
 			},
@@ -152,7 +153,9 @@ type contextualExecutor struct {
 }
 
 func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
-	return e.executor.Execute(withToolContexts(ctx, e.toolsContext[name], e.runtimeContext), name, args)
+	ctx = toolpkg.WithToolContext(ctx, e.toolsContext[name])
+	ctx = toolpkg.WithRuntimeContext(ctx, e.runtimeContext)
+	return e.executor.Execute(ctx, name, args)
 }
 
 type approvalResponder struct{ fn ToolApprovalResponder }

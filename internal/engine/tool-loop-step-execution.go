@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
+	"github.com/open-ai-sdk/ai-go/tool"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -132,9 +133,11 @@ func executeToolCallsParallel(
 			// while queued caps how many tool bodies run, not just how many
 			// goroutines are spawned.
 			if gctx.Err() != nil {
+				err := gctx.Err()
 				results[idx].result = &ToolResult{
 					ID: tc.id, Name: tc.name, Args: tc.args,
-					Output: invalidToolCallOutput(tc, gctx.Err()),
+					Output: invalidToolCallOutput(tc, err),
+					Error:  classifyToolError(tc.name, err),
 				}
 				results[idx].modelOutput = results[idx].result.Output
 				return nil
@@ -149,6 +152,7 @@ func executeToolCallsParallel(
 					Name:   tc.name,
 					Args:   tc.args,
 					Output: invalidToolCallOutput(tc, err),
+					Error:  classifyToolError(tc.name, err),
 				}
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
@@ -223,12 +227,12 @@ func approvedToolCall(
 		)
 		if approver == nil {
 			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
-			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
+			return deniedToolResult(tc, "approval responder unavailable", nil)
 		}
 		response, err := approver.RequestApproval(ctx, request)
 		if err != nil || !response.Approved {
 			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
-			return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: `{"error":"tool approval denied"}`}
+			return deniedToolResult(tc, response.Reason, err)
 		}
 	}
 
@@ -248,4 +252,22 @@ func approvedToolCall(
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.output", Value: result.Output})
 	}
 	return result
+}
+
+func deniedToolResult(
+	tc toolCallState,
+	reason string,
+	cause error,
+) *ToolResult {
+	return &ToolResult{
+		ID:     tc.id,
+		Name:   tc.name,
+		Args:   tc.args,
+		Output: `{"error":"tool approval denied"}`,
+		Error: &tool.DeniedError{
+			ToolName: tc.name,
+			Reason:   reason,
+			Cause:    cause,
+		},
+	}
 }

@@ -14,6 +14,4 @@ var (
 	ErrContextLength = errors.New("ai: context length exceeded")
 	// ErrUnauthorized is matched by a provider 401 or 403.
 	ErrUnauthorized = errors.New("ai: unauthorized")
-	// ErrNoSuchTool is matched by *NoSuchToolError.
-	ErrNoSuchTool = errors.New("ai: no such tool")
 )

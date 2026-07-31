@@ -3,7 +3,8 @@ package mcp
 import (
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 // Routing specifies MCP tool routing preferences.
@@ -65,11 +66,11 @@ func FilterToolDefs(tools []MCPToolDef, routing *Routing) []MCPToolDef {
 	return result
 }
 
-// FilterToolSet filters an ai.ToolSet based on routing preferences.
+// FilterToolSet filters a tool.Set based on routing preferences.
 // Uses ServerFromQualifiedName to extract the server name from each tool's
-// qualified name. Returns a new ToolSet with filtered definitions and the
-// same Executor. If routing is nil, returns the original ToolSet unchanged.
-func FilterToolSet(ts *ai.ToolSet, routing *Routing) *ai.ToolSet {
+// qualified name. Returns a new Set retaining the matching invokers. If
+// routing is nil, returns the original Set unchanged.
+func FilterToolSet(ts *tool.Set, routing *Routing) *tool.Set {
 	if routing == nil || ts == nil {
 		return ts
 	}
@@ -78,38 +79,31 @@ func FilterToolSet(ts *ai.ToolSet, routing *Routing) *ai.ToolSet {
 	preferred := makeSet(routing.PreferredServers)
 
 	// Remove blocked servers first.
-	var unblocked []ai.ToolDefinition
-	for _, def := range ts.Definitions {
+	unblocked := ts.Filter(func(def aikit.ToolDefinition) bool {
 		server := strings.ToLower(ServerFromQualifiedName(def.Name))
-		if blocked[server] {
-			continue
-		}
-		unblocked = append(unblocked, def)
-	}
+		return !blocked[server]
+	})
 
 	// If no preferred servers, return unblocked set.
 	if len(preferred) == 0 {
-		return &ai.ToolSet{Definitions: unblocked, Executor: ts.Executor}
+		return unblocked
 	}
 
 	// Filter to preferred servers only.
-	var result []ai.ToolDefinition
-	for _, def := range unblocked {
+	result := unblocked.Filter(func(def aikit.ToolDefinition) bool {
 		server := strings.ToLower(ServerFromQualifiedName(def.Name))
-		if preferred[server] {
-			result = append(result, def)
-		}
-	}
+		return preferred[server]
+	})
 
 	// Fallback: if no preferred tools found and fallback is allowed, keep all unblocked.
-	if len(result) == 0 {
+	if len(result.Definitions) == 0 {
 		if routing.FallbackAllowed == nil || *routing.FallbackAllowed {
-			return &ai.ToolSet{Definitions: unblocked, Executor: ts.Executor}
+			return unblocked
 		}
-		return &ai.ToolSet{Definitions: nil, Executor: ts.Executor}
+		return unblocked.Restrict(nil)
 	}
 
-	return &ai.ToolSet{Definitions: result, Executor: ts.Executor}
+	return result
 }
 
 // makeSet builds a case-insensitive lookup set from a slice of strings.

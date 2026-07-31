@@ -1,16 +1,15 @@
 package ai
 
 import (
-	"context"
-
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 type (
 	ToolDefinition = aikit.ToolDefinition
 	ToolChoice     = aikit.ToolChoice
-	ToolExecutor   = aikit.ToolExecutor
-	ToolSet        = aikit.ToolSet
+	ToolExecutor   = tool.Executor
+	ToolSet        = tool.Set
 )
 
 var (
@@ -39,17 +38,7 @@ type (
 	ToolResult        = aikit.ToolResult
 )
 
-// ToolResultStream allows tools to stream partial output to the UI in real-time.
-type ToolResultStream interface {
-	// Write sends a partial result to the UI (e.g., stdout from a bash command).
-	Write(partial string)
-}
-
-// StreamingToolExecutor extends ToolExecutor with streaming support.
-// Tools that implement this interface receive a stream for real-time output.
-type StreamingToolExecutor interface {
-	ToolExecutor
-	// ExecuteStreaming executes a tool with a stream for partial results.
-	// Falls back to Execute if not implemented.
-	ExecuteStreaming(ctx context.Context, name, argsJSON string, stream ToolResultStream) (string, error)
-}
+type (
+	ToolResultStream      = tool.ResultStream
+	StreamingToolExecutor = tool.StreamingExecutor
+)

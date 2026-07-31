@@ -29,8 +29,9 @@ type RepairToolCallInput struct {
 	Instructions string
 	Messages     []Message
 	ToolCall     ToolCallInfo
-	Tools        *ToolSet
-	Error        error
+	// Tools is an isolated snapshot of the active tool descriptions.
+	Tools []ToolDefinition
+	Error error
 }
 
 // RepairToolCallFunc attempts to repair an invalid tool call.

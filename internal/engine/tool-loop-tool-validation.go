@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 type preparedToolCall struct {
@@ -66,7 +68,7 @@ func validateAndRepairToolCall(
 			ArgsSet:          true,
 			ThoughtSignature: tc.thoughtSignature,
 		},
-		Tools: snapshotToolSetForCallback(tools),
+		Tools: snapshotToolDefinitionsForCallback(tools),
 		Error: err,
 	})
 	if repairErr != nil {
@@ -127,15 +129,15 @@ func validateToolCall(tools *ToolSet, tc toolCallState) (ToolDefinition, error) 
 	return def, nil
 }
 
-func invalidToolArgumentsError(toolName, args string) *InvalidToolArgumentsError {
+func invalidToolArgumentsError(toolName, args string) *ToolInputError {
 	if args == "" {
 		return nil
 	}
 	var decoded any
 	if err := json.Unmarshal([]byte(args), &decoded); err != nil {
-		return &InvalidToolArgumentsError{
+		return &ToolInputError{
 			ToolName: toolName,
-			Args:     args,
+			Input:    json.RawMessage(args),
 			Cause:    err,
 		}
 	}
@@ -148,7 +150,7 @@ func invalidToolCallOutput(tc toolCallState, err error) string {
 		return fmt.Sprintf(`{"error":%q}`, fmt.Sprintf("unknown tool %q", noSuchToolErr.ToolName))
 	}
 
-	var invalidArgsErr *InvalidToolArgumentsError
+	var invalidArgsErr *ToolInputError
 	if errors.As(err, &invalidArgsErr) {
 		return fmt.Sprintf(`{"error":%q}`, fmt.Sprintf("invalid JSON arguments for tool %q", invalidArgsErr.ToolName))
 	}
@@ -172,15 +174,12 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 		return nil
 	}
 	if len(tools.Definitions) == 0 {
-		return &ToolSet{Executor: tools.Executor}
+		return tools.Restrict(nil)
 	}
 	if len(activeDefs) == 0 {
 		return nil
 	}
-	return &ToolSet{
-		Definitions: activeDefs,
-		Executor:    tools.Executor,
-	}
+	return tools.Restrict(activeDefs)
 }
 
 // executeToolCall invokes tools.Executor for a single validated call. def is
@@ -190,22 +189,37 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 // a silent behavior change.
 func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState, def ToolDefinition) *ToolResult {
 	result := &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args}
-	if tools == nil || tools.Executor == nil {
+	if tools == nil {
+		result.Error = &tool.ExecutionError{
+			ToolName: tc.name,
+			Cause:    errors.New("no executor"),
+		}
 		result.Output = fmt.Sprintf(`{"error":"no executor for tool %q"}`, tc.name)
 		return result
 	}
 	// Inject tool call ID into context so downstream code (e.g. approval managers) can correlate.
-	execCtx := context.WithValue(ctx, toolCallIDCtxKey, tc.id)
+	execCtx := tool.WithToolCallID(ctx, tc.id)
 	if def.Timeout > 0 {
 		var cancel context.CancelFunc
 		execCtx, cancel = context.WithTimeout(execCtx, def.Timeout)
 		defer cancel()
 	}
-	output, err := tools.Executor.Execute(execCtx, tc.name, tc.args)
+	output, err := tools.Invoke(execCtx, tc.name, json.RawMessage(tc.args))
 	if err != nil {
+		result.Error = classifyToolError(tc.name, err)
 		result.Output = fmt.Sprintf(`{"error":%q}`, err.Error())
 	} else {
-		result.Output = output
+		result.Output = string(output)
 	}
 	return result
+}
+
+func classifyToolError(toolName string, err error) error {
+	if errors.Is(err, tool.ErrInput) ||
+		errors.Is(err, tool.ErrExecution) ||
+		errors.Is(err, tool.ErrDenied) ||
+		errors.Is(err, tool.ErrNoSuchTool) {
+		return err
+	}
+	return &tool.ExecutionError{ToolName: toolName, Cause: err}
 }

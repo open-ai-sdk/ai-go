@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 // fixedToolCallsModel emits a fixed batch of tool-call deltas (one per event,
@@ -78,6 +80,35 @@ func TestExecuteToolCallsParallel_SiblingFailure_OthersComplete(t *testing.T) {
 	}
 	if results["fail"].Output != `{"error":"boom"}` {
 		t.Errorf(`fail output = %q, want {"error":"boom"}`, results["fail"].Output)
+	}
+	if !errors.Is(results["fail"].Error, tool.ErrExecution) {
+		t.Errorf("fail error = %v, want tool.ErrExecution", results["fail"].Error)
+	}
+}
+
+func TestExecuteToolCallsParallel_PanicRetainsTypedExecutionError(t *testing.T) {
+	ch := Run(context.Background(), RunParams{
+		Model: fixedToolCallsModel{toolNames: []string{"panic"}},
+		Tools: &ToolSet{
+			Definitions: []ToolDefinition{{Name: "panic"}},
+			Executor:    panicExecutor{},
+		},
+		ParallelToolExecution: true,
+		MaxParallelTools:      1,
+		MaxSteps:              1,
+	})
+
+	var result *ToolResult
+	for event := range ch {
+		if event.Type == StepEventToolResult {
+			result = event.ToolResult
+		}
+	}
+	if result == nil {
+		t.Fatal("expected panic tool result")
+	}
+	if !errors.Is(result.Error, tool.ErrExecution) {
+		t.Fatalf("panic error = %v, want tool.ErrExecution", result.Error)
 	}
 }
 

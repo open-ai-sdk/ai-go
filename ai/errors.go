@@ -1,6 +1,9 @@
 package ai
 
-import "github.com/open-ai-sdk/ai-go/aikit"
+import (
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
+)
 
 // APIError is a provider HTTP failure surfaced as a typed value; the raw
 // response body is never embedded. See aikit.APIError.
@@ -12,7 +15,7 @@ var (
 	ErrRateLimited   = aikit.ErrRateLimited
 	ErrContextLength = aikit.ErrContextLength
 	ErrUnauthorized  = aikit.ErrUnauthorized
-	ErrNoSuchTool    = aikit.ErrNoSuchTool
+	ErrNoSuchTool    = tool.ErrNoSuchTool
 )
 
 // NewAPIError builds a typed provider error. Providers usually call

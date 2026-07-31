@@ -149,6 +149,45 @@ text := adapter.Stream(stream.Stream(), &buf)
 // buf contains SSE-encoded AI SDK UI message stream chunks
 ```
 
+### Typed tools
+
+Create native tools with `tool.New[In, Out]`. The input JSON Schema is derived
+from `In` when the tool is constructed, and `Out` is JSON-marshaled after the
+handler returns. Unsupported input fields fail during construction rather than
+during the first call.
+
+```go
+import "github.com/open-ai-sdk/ai-go/tool"
+
+type weatherInput struct {
+    Location string `json:"location" description:"City and state"`
+    Unit     string `json:"unit" enum:"celsius,fahrenheit"`
+}
+
+type weatherOutput struct {
+    Summary string `json:"summary"`
+}
+
+weather, err := tool.New(
+    "getWeather",
+    "Get the current weather",
+    func(ctx context.Context, input weatherInput) (weatherOutput, error) {
+        return weatherOutput{Summary: lookupWeather(input.Location, input.Unit)}, nil
+    },
+)
+if err != nil {
+    return err
+}
+
+tools, err := tool.NewSet(weather)
+if err != nil { // duplicate tool names are rejected
+    return err
+}
+```
+
+Runtime-described tools use `tool.NewDynamic`; MCP clients expose those through
+the same `tool.Set` and agent-loop invocation path.
+
 ### Tool approval
 
 Gate individual tool calls behind a human decision. `ToolApproval` maps a tool
@@ -177,7 +216,8 @@ result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
 
 Supply per-tool data with `ToolsContext` (keyed by tool name) and run-wide data
 with `RuntimeContext`. Both reach the executor through the call `context.Context`;
-read them with `ai.ToolContextFrom` / `ai.TypedToolContext[T]` and `ai.RuntimeContextFrom`.
+read them with `tool.ToolContextFrom` / `tool.TypedContext[T]` and
+`tool.RuntimeContextFrom`.
 When a tool defines a `ContextSchema`, its `ToolsContext` entry is required and the
 call fails fast if it is missing (in both `GenerateText` and `StreamText`).
 
@@ -191,8 +231,8 @@ ai.GenerateTextRequest{
 
 // Inside the tool executor:
 func (e myExec) Execute(ctx context.Context, name, args string) (string, error) {
-    toolCtx, _ := ai.ToolContextFrom(ctx)      // per-tool value for `name`
-    runtime := ai.RuntimeContextFrom(ctx)      // shared across all tools
+    toolCtx, _ := tool.ToolContextFrom(ctx) // per-tool value for `name`
+    runtime := tool.RuntimeContextFrom(ctx) // shared across all tools
     _ = toolCtx
     _ = runtime
     // ...
@@ -317,8 +357,12 @@ if err != nil {
 }
 ```
 
-`ai.ErrNoSuchTool` classifies a tool call for a name the request's `ToolSet` does not define, the same
-way — `errors.Is(err, ai.ErrNoSuchTool)` rather than matching an error string.
+`tool.ErrNoSuchTool` classifies a tool call for a name the request's `tool.Set`
+does not define, the same way — use `errors.Is(err, tool.ErrNoSuchTool)` rather
+than matching an error string. Input, execution, and policy-denial failures are
+similarly classified by `tool.ErrInput`, `tool.ErrExecution`, and
+`tool.ErrDenied`. Executed calls retain that typed value in
+`ToolResult.Error`; `ToolResult.Output` remains the raw model/wire string.
 
 ## Observability
 

@@ -479,12 +479,12 @@ func TestValidateToolCall_InvalidArgsIncludesCause(t *testing.T) {
 		t.Fatal("expected invalid args error")
 	}
 
-	var invalidArgsErr *InvalidToolArgumentsError
+	var invalidArgsErr *ToolInputError
 	if !errors.As(err, &invalidArgsErr) {
-		t.Fatalf("expected InvalidToolArgumentsError, got %T", err)
+		t.Fatalf("expected ToolInputError, got %T", err)
 	}
 	if invalidArgsErr.Cause == nil {
-		t.Fatal("expected InvalidToolArgumentsError.Cause to be populated")
+		t.Fatal("expected ToolInputError.Cause to be populated")
 	}
 }
 
@@ -501,9 +501,9 @@ func TestInvalidToolCallOutput_IsValidJSON(t *testing.T) {
 		},
 		{
 			name: "invalid args",
-			err: &InvalidToolArgumentsError{
+			err: &ToolInputError{
 				ToolName: "search",
-				Args:     `{"q":}`,
+				Input:    json.RawMessage(`{"q":}`),
 				Cause:    errors.New("bad json"),
 			},
 		},

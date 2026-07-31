@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 func boolPtr(v bool) *bool { return &v }
@@ -14,6 +17,33 @@ func mcpTool(server, name string) MCPToolDef {
 		Name:        name,
 		Description: name + " from " + server,
 	}
+}
+
+func routingToolSet(t *testing.T, definitions ...aikit.ToolDefinition) *tool.Set {
+	t.Helper()
+
+	tools := make([]tool.Invokable, 0, len(definitions))
+	for _, definition := range definitions {
+		definition := definition
+		dynamic, err := tool.NewDynamic(
+			definition.Name,
+			definition.Description,
+			definition.InputSchema,
+			func(context.Context, json.RawMessage) (json.RawMessage, error) {
+				return json.RawMessage(definition.Name), nil
+			},
+		)
+		if err != nil {
+			t.Fatalf("new dynamic tool %q: %v", definition.Name, err)
+		}
+		tools = append(tools, dynamic)
+	}
+
+	set, err := tool.NewSet(tools...)
+	if err != nil {
+		t.Fatalf("new tool set: %v", err)
+	}
+	return set
 }
 
 // ── FilterToolDefs tests ─────────────────────────────────────────────
@@ -183,14 +213,12 @@ func TestFilterToolDefs_EmptyToolList(t *testing.T) {
 // ── FilterToolSet tests ──────────────────────────────────────────────
 
 func TestFilterToolSet_BasicPreferredFiltering(t *testing.T) {
-	ts := &ai.ToolSet{
-		Definitions: []ai.ToolDefinition{
-			{Name: QualifiedName("browsermcp", "click"), Description: "click"},
-			{Name: QualifiedName("browsermcp", "type"), Description: "type"},
-			{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
-			{Name: QualifiedName("deepwiki", "ask"), Description: "ask"},
-		},
-	}
+	ts := routingToolSet(t,
+		aikit.ToolDefinition{Name: QualifiedName("browsermcp", "click"), Description: "click"},
+		aikit.ToolDefinition{Name: QualifiedName("browsermcp", "type"), Description: "type"},
+		aikit.ToolDefinition{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
+		aikit.ToolDefinition{Name: QualifiedName("deepwiki", "ask"), Description: "ask"},
+	)
 	got := FilterToolSet(ts, &Routing{
 		PreferredServers: []string{"browsermcp"},
 	})
@@ -206,12 +234,10 @@ func TestFilterToolSet_BasicPreferredFiltering(t *testing.T) {
 }
 
 func TestFilterToolSet_NilRouting_Passthrough(t *testing.T) {
-	ts := &ai.ToolSet{
-		Definitions: []ai.ToolDefinition{
-			{Name: QualifiedName("browsermcp", "click"), Description: "click"},
-			{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
-		},
-	}
+	ts := routingToolSet(t,
+		aikit.ToolDefinition{Name: QualifiedName("browsermcp", "click"), Description: "click"},
+		aikit.ToolDefinition{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
+	)
 	got := FilterToolSet(ts, nil)
 	if got != ts {
 		t.Fatal("nil routing should return the same ToolSet pointer")
@@ -226,13 +252,11 @@ func TestFilterToolSet_NilToolSet(t *testing.T) {
 }
 
 func TestFilterToolSet_BlockedServer(t *testing.T) {
-	ts := &ai.ToolSet{
-		Definitions: []ai.ToolDefinition{
-			{Name: QualifiedName("browsermcp", "click"), Description: "click"},
-			{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
-			{Name: QualifiedName("deepwiki", "ask"), Description: "ask"},
-		},
-	}
+	ts := routingToolSet(t,
+		aikit.ToolDefinition{Name: QualifiedName("browsermcp", "click"), Description: "click"},
+		aikit.ToolDefinition{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
+		aikit.ToolDefinition{Name: QualifiedName("deepwiki", "ask"), Description: "ask"},
+	)
 	got := FilterToolSet(ts, &Routing{
 		BlockedServers: []string{"serena"},
 	})
@@ -248,12 +272,10 @@ func TestFilterToolSet_BlockedServer(t *testing.T) {
 }
 
 func TestFilterToolSet_FallbackAllowed(t *testing.T) {
-	ts := &ai.ToolSet{
-		Definitions: []ai.ToolDefinition{
-			{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
-			{Name: QualifiedName("deepwiki", "ask"), Description: "ask"},
-		},
-	}
+	ts := routingToolSet(t,
+		aikit.ToolDefinition{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
+		aikit.ToolDefinition{Name: QualifiedName("deepwiki", "ask"), Description: "ask"},
+	)
 	got := FilterToolSet(ts, &Routing{
 		PreferredServers: []string{"nonexistent"},
 		FallbackAllowed:  boolPtr(true),
@@ -264,16 +286,31 @@ func TestFilterToolSet_FallbackAllowed(t *testing.T) {
 }
 
 func TestFilterToolSet_NoFallback(t *testing.T) {
-	ts := &ai.ToolSet{
-		Definitions: []ai.ToolDefinition{
-			{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
-		},
-	}
+	ts := routingToolSet(t,
+		aikit.ToolDefinition{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
+	)
 	got := FilterToolSet(ts, &Routing{
 		PreferredServers: []string{"nonexistent"},
 		FallbackAllowed:  boolPtr(false),
 	})
 	if len(got.Definitions) != 0 {
 		t.Fatalf("no fallback: expected 0 tools, got %d", len(got.Definitions))
+	}
+}
+
+func TestFilterToolSet_RetainsMatchingInvokers(t *testing.T) {
+	click := QualifiedName("browsermcp", "click")
+	ts := routingToolSet(t,
+		aikit.ToolDefinition{Name: click, Description: "click"},
+		aikit.ToolDefinition{Name: QualifiedName("serena", "find_symbol"), Description: "find_symbol"},
+	)
+
+	got := FilterToolSet(ts, &Routing{PreferredServers: []string{"browsermcp"}})
+	output, err := got.Invoke(context.Background(), click, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("invoke retained tool: %v", err)
+	}
+	if string(output) != click {
+		t.Fatalf("output = %q, want %q", output, click)
 	}
 }

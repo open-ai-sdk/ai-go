@@ -1,26 +1,13 @@
 package engine
 
 import (
-	"context"
 	"log/slog"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
-
-type ctxKey int
-
-const toolCallIDCtxKey ctxKey = iota
-
-// ToolCallIDFromContext returns the tool call ID injected by the engine.
-func ToolCallIDFromContext(ctx context.Context) string {
-	value, ok := ctx.Value(toolCallIDCtxKey).(string)
-	if !ok {
-		return ""
-	}
-	return value
-}
 
 // Shared model, message, request, loop, and tool-call contracts are aliases of
 // aikit. The engine therefore consumes the same values providers and callers
@@ -55,8 +42,8 @@ type (
 	Warning               = aikit.Warning
 	StreamEvent           = aikit.StreamEvent
 
-	NoSuchToolError           = aikit.NoSuchToolError
-	InvalidToolArgumentsError = aikit.InvalidToolArgumentsError
+	NoSuchToolError = tool.NoSuchToolError
+	ToolInputError  = tool.InputError
 )
 
 const (

@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
+
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
 // GenerateObjectRequest configures a single structured-output call whose
@@ -44,29 +45,20 @@ type ObjectResult[T any] struct {
 // result into T.
 //
 // The JSON Schema sent to the model is derived from T's exported struct
-// fields via reflection — the same derivation DefineTool uses for tool input
+// fields via reflection — the same derivation tool.New uses for tool input
 // schemas, so a caller never hand-builds a schema.OutputObject map. T must be
-// a struct (the same constraint DefineTool has); nested structs and slices in
-// T are supported, mirroring DefineTool's field-schema derivation.
+// a struct (the same constraint tool.New has); nested structs and slices in T
+// are supported, mirroring tool.New's field-schema derivation.
 //
 // GenerateObject is a typed convenience over GenerateText with req.Output set:
 // callers who need the raw JSON (e.g. to defer unmarshalling, or because the
 // shape is only known at runtime) still use GenerateText directly — this
 // entry point does not replace it.
 func GenerateObject[T any](ctx context.Context, req GenerateObjectRequest) (ObjectResult[T], error) {
-	var zero T
-	// Reject a non-struct type argument (slice, map, primitive, or interface T)
-	// with an error instead of letting the reflection helper panic — a caller
-	// reaching for GenerateObject[[]Item] or GenerateObject[any] is plausible.
-	rt := reflect.TypeOf(zero)
-	elem := rt
-	for elem != nil && elem.Kind() == reflect.Pointer {
-		elem = elem.Elem()
+	schema, err := tool.Schema[T]()
+	if err != nil {
+		return ObjectResult[T]{}, fmt.Errorf("ai: GenerateObject: %w", err)
 	}
-	if elem == nil || elem.Kind() != reflect.Struct {
-		return ObjectResult[T]{}, fmt.Errorf("ai: GenerateObject: T must be a struct type, got %v", rt)
-	}
-	schema := schemaFromStruct(rt)
 
 	result, err := GenerateText(ctx, GenerateTextRequest{
 		Model:           req.Model,
