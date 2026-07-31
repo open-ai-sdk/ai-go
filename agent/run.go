@@ -116,6 +116,15 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	}
 
 	history := buildInitialHistory(params.Request)
+	var err error
+	history, err = resumeToolApprovals(r, params, history)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		r.emitError(err)
+		return nil
+	}
 
 	// MaxSteps <= 0 means unbounded: node has no maxSteps concept at all, so
 	// StopWhen (or the model naturally stopping — no tool calls) is the only

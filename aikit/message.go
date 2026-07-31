@@ -23,7 +23,7 @@ const (
 	// ContentPartTypeToolApprovalResponse carries a human approval decision
 	// back to the stateless agent runtime in conversation history.
 	ContentPartTypeToolApprovalResponse ContentPartType = "tool_approval_response"
-	ContentPartTypeReasoning  ContentPartType = "reasoning"
+	ContentPartTypeReasoning            ContentPartType = "reasoning"
 )
 
 // ContentPart is a single part of a message.

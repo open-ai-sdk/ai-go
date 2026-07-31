@@ -22,12 +22,12 @@ const (
 	RoleAssistant = aikit.RoleAssistant
 	RoleTool      = aikit.RoleTool
 
-	ContentPartTypeText       = aikit.ContentPartTypeText
-	ContentPartTypeFile       = aikit.ContentPartTypeFile
-	ContentPartTypeToolCall   = aikit.ContentPartTypeToolCall
-	ContentPartTypeToolResult = aikit.ContentPartTypeToolResult
+	ContentPartTypeText                 = aikit.ContentPartTypeText
+	ContentPartTypeFile                 = aikit.ContentPartTypeFile
+	ContentPartTypeToolCall             = aikit.ContentPartTypeToolCall
+	ContentPartTypeToolResult           = aikit.ContentPartTypeToolResult
 	ContentPartTypeToolApprovalResponse = aikit.ContentPartTypeToolApprovalResponse
-	ContentPartTypeReasoning  = aikit.ContentPartTypeReasoning
+	ContentPartTypeReasoning            = aikit.ContentPartTypeReasoning
 )
 
 // TextPart constructs a text ContentPart.

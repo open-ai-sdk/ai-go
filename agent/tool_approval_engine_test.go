@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -131,9 +132,10 @@ func TestApproval_Denied_SkipsToolAndEmitsDenial(t *testing.T) {
 	}
 }
 
-// TestApproval_NoResponder_DeniesByDefault verifies that without an approver a
-// tool requiring approval is denied rather than executed.
-func TestApproval_NoResponder_DeniesByDefault(t *testing.T) {
+// TestApproval_NoResponder_Suspends verifies that without an in-process
+// responder the run returns its pending approval instead of converting the
+// absence of a response into a denial.
+func TestApproval_NoResponder_Suspends(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
 		{toolCallEvt(0, "tc-1", "deleteFile", `{}`), finishEvt(FinishReasonToolCalls)},
 		{textEvt("ok"), finishEvt(FinishReasonStop)},
@@ -148,11 +150,85 @@ func TestApproval_NoResponder_DeniesByDefault(t *testing.T) {
 		MaxSteps:     5,
 	}))
 
-	if !hasEvent(events, StepEventToolOutputDenied) {
-		t.Error("expected denial when no approver is configured")
+	if !hasEvent(events, StepEventToolApprovalRequest) {
+		t.Error("expected approval request when no approver is configured")
+	}
+	if hasEvent(events, StepEventToolOutputDenied) || hasEvent(events, StepEventToolResult) {
+		t.Error("a suspended call must not be denied or executed")
+	}
+	if !hasEvent(events, StepEventStepEnd) || !hasEvent(events, StepEventDone) {
+		t.Error("suspension must close the invocation cleanly with its partial step")
 	}
 	if len(exec.called) != 0 {
 		t.Errorf("expected no execution without an approver, got %v", exec.called)
+	}
+}
+
+func TestApproval_ResumesApprovedCallFromHistory(t *testing.T) {
+	model := &recordingModel{mockModel: mockModel{calls: [][]StreamEvent{
+		{textEvt("continued"), finishEvt(FinishReasonStop)},
+	}}}
+	exec := &mockExecutor{results: map[string]string{"deleteFile": `{"ok":true}`}}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model: model,
+		Tools: &ToolSet{Executor: exec},
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile",
+				ToolCallArgs: json.RawMessage(`{"path":"/tmp/x"}`),
+			}}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalApproved: true,
+			}}},
+		}},
+		MaxSteps: 1,
+	}))
+
+	if len(exec.called) != 1 || exec.called[0] != "deleteFile" {
+		t.Fatalf("resumed execution calls = %v", exec.called)
+	}
+	if !hasEvent(events, StepEventToolResult) {
+		t.Fatal("expected resumed tool result event")
+	}
+	if len(model.requests) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(model.requests))
+	}
+	var sawResult, sawApprovalPart bool
+	for _, message := range model.requests[0].Messages {
+		for _, part := range message.Content {
+			sawResult = sawResult || part.Type == "tool_result" && part.ToolResultID == "tc-1"
+			sawApprovalPart = sawApprovalPart || part.Type == "tool_approval_response"
+		}
+	}
+	if !sawResult || sawApprovalPart {
+		t.Fatalf("provider history result=%v approvalPart=%v, want result only", sawResult, sawApprovalPart)
+	}
+}
+
+func TestApproval_ResumesDeniedCallFromHistoryWithoutExecution(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{textEvt("continued"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model: model,
+		Tools: &ToolSet{Executor: exec},
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
+			}}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalReason: "operator denied",
+			}}},
+		}},
+		MaxSteps: 1,
+	}))
+
+	if len(exec.called) != 0 {
+		t.Fatalf("denied resumed call executed: %v", exec.called)
+	}
+	if !hasEvent(events, StepEventToolOutputDenied) || !hasEvent(events, StepEventToolResult) {
+		t.Fatal("expected denial and denied tool-result events")
 	}
 }
 

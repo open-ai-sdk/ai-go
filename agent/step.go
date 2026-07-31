@@ -41,6 +41,14 @@ func executeToolCalls(
 			ToolCallArgsDelta: tc.args,
 			ThoughtSignature:  tc.thoughtSignature,
 		})
+		toolNames = append(toolNames, tc.name)
+		stepToolCalls = append(stepToolCalls, ToolCallInfo{
+			ID:               tc.id,
+			Name:             tc.name,
+			Args:             json.RawMessage(tc.args),
+			ArgsSet:          true,
+			ThoughtSignature: tc.thoughtSignature,
+		})
 
 		result, approvalErr := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
 		if approvalErr != nil {
@@ -60,14 +68,6 @@ func executeToolCalls(
 		}
 
 		*history = append(*history, buildToolResultMessage(tc.id, tc.name, modelOutput))
-		toolNames = append(toolNames, tc.name)
-		stepToolCalls = append(stepToolCalls, ToolCallInfo{
-			ID:               tc.id,
-			Name:             tc.name,
-			Args:             json.RawMessage(tc.args),
-			ArgsSet:          true,
-			ThoughtSignature: tc.thoughtSignature,
-		})
 		stepToolResults = append(stepToolResults, *result)
 	}
 	return toolNames, stepToolCalls, stepToolResults, nil
