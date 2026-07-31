@@ -308,7 +308,9 @@ func (r *run) executeToolStep(
 	}
 
 	if controlErr != nil {
-		stepSpan.RecordError(controlErr)
+		if !errors.Is(controlErr, errApprovalPending) {
+			stepSpan.RecordError(controlErr)
+		}
 		stepSpan.End()
 		if errors.Is(controlErr, errApprovalPending) {
 			r.emit(StepEvent{

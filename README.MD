@@ -195,9 +195,12 @@ the same `tool.Set` and agent-loop invocation path.
 ### Tool approval
 
 Gate individual tool calls behind a human decision. `ToolApproval` maps a tool
-name to a policy that decides whether the call needs approval; `ToolApprovalResponder`
-resolves each request (blocking until a decision or context cancellation). A call
-proceeds only when the responder approves it — the default is deny.
+name to a policy that decides whether the call needs approval. An optional
+`ToolApprovalResponder` resolves the request inside the current invocation. If
+it is omitted, the invocation suspends after returning the pending tool call;
+resume it by sending the returned response messages plus a
+`ToolApprovalResponsePart` in the next request. The runtime reconstructs the
+pending call from history and retains no cross-request state.
 
 ```go
 result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
@@ -213,6 +216,23 @@ result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
         approved := promptOperator(req.ToolName, req.Args) // your UI/CLI decision
         return ai.ToolApprovalResponse{ApprovalID: req.ApprovalID, Approved: approved}, nil
     },
+})
+```
+
+For a UI or other asynchronous approval flow, omit the responder and resume
+after the operator decides:
+
+```go
+history := append(append([]ai.Message{}, request.Messages...), result.Response.Messages...)
+history = append(history, ai.Message{
+    Role: ai.RoleUser,
+    Content: []ai.ContentPart{
+        ai.ToolApprovalResponsePart(pendingToolCallID, true, "approved"),
+    },
+})
+
+result, err = ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model: model, Messages: history, Tools: tools,
 })
 ```
 

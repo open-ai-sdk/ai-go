@@ -30,6 +30,7 @@ type ToolApprovalResponse struct {
 	Reason     string
 }
 
-// ToolApprovalResponder resolves an approval request, blocking until a decision
-// is available or the context is cancelled.
+// ToolApprovalResponder optionally resolves an approval request within the
+// current invocation. When omitted, the run suspends and can be resumed by
+// adding [ToolApprovalResponsePart] to the next request's message history.
 type ToolApprovalResponder func(context.Context, ToolApprovalRequest) (ToolApprovalResponse, error)

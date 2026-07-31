@@ -52,7 +52,10 @@ func executeToolCalls(
 
 		result, approvalErr := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
 		if approvalErr != nil {
-			return toolNames, stepToolCalls, stepToolResults, approvalErr
+			if controlErr == nil {
+				controlErr = approvalErr
+			}
+			continue
 		}
 		// The invocation result is caller-visible even if the history-only
 		// transform below fails. Emit it before crossing that user callback
@@ -70,7 +73,7 @@ func executeToolCalls(
 		*history = append(*history, buildToolResultMessage(tc.id, tc.name, modelOutput))
 		stepToolResults = append(stepToolResults, *result)
 	}
-	return toolNames, stepToolCalls, stepToolResults, nil
+	return toolNames, stepToolCalls, stepToolResults, controlErr
 }
 
 // executeToolCallsParallel processes tool calls concurrently, bounded by
@@ -227,7 +230,8 @@ func executeToolCallsParallel(
 		if res.result != nil {
 			stepToolResults = append(stepToolResults, *res.result)
 		}
-		if controlErr == nil && res.controlErr != nil {
+		if res.controlErr != nil && (controlErr == nil ||
+			(errors.Is(controlErr, errApprovalPending) && !errors.Is(res.controlErr, errApprovalPending))) {
 			controlErr = res.controlErr
 		}
 	}

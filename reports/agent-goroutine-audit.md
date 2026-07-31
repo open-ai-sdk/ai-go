@@ -11,7 +11,7 @@ rg -n '(<-|close\(|make\(chan)' agent -g '*.go' -g '!*_test.go'
 
 | Site | Ownership and shutdown | Panic boundary | Channel ownership |
 |---|---|---|---|
-| `agent/run.go: Stream` | Starts one run goroutine. It returns on normal completion, provider/control failure, or `ctx.Done()`; model consumption selects on cancellation. | The outermost defer uses `safego.Recover`, covering initialization, the loop, and deferred span cleanup. | Creates and exclusively closes the returned event channel. Its panic-error send selects on `ctx.Done()`. |
+| `agent/run.go: Stream` | Starts one run goroutine. It returns on normal completion, provider/control failure, or `ctx.Done()`; model consumption selects on cancellation. | The outermost defer uses `safego.Recover`, covering initialization, the loop, and deferred span cleanup. | Creates and exclusively closes the returned event channel. The terminal-error helper is bounded and non-blocking even after `ctx` is cancelled. |
 | `agent/step.go: executeToolCallsParallel` (`errgroup.Go`) | One bounded worker per valid parallel tool call. `errgroup.Wait` joins every started worker before the step returns. Queued workers check the group context before invoking user code. | Every worker has `safego.Recover`. A recovered control panic becomes a terminal run error after already-completed tool results are emitted. | Workers do not send to or close channels; each writes to one exclusive result slot. |
 
 The former fatal-event `go drainStreamEvents(...)` site was removed. It could
@@ -23,13 +23,19 @@ without creating an unjoinable drain goroutine.
 
 | Site | Audit result |
 |---|---|
-| `agent/run.go: Stream` panic handler | Sends the recovered error with `select { case ch <- event; case <-ctx.Done(): }`. |
+| `agent/run.go: emitTerminalError` | Cancellation itself must remain observable after `ctx.Done()`, so this terminal path cannot use the normal context-rejecting send. It attempts a non-blocking send; if the bounded buffer is full, it discards one already-truncated buffered event to reserve the terminal error slot. It never blocks an abandoned consumer. |
 | `agent/runtime.go: run.emit` | Rejects an already-cancelled context, then selects between the output send and `ctx.Done()`. Every normal runtime event is routed through this method. |
 | `agent/run.go: Stream` close | A single outer defer closes the event channel for normal return, cancellation, or panic. No other code closes it. |
 
 Provider channels are received in `agent/stream.go` and
 `agent/structured_output.go` with a `ctx.Done()` select. The agent never closes
 a provider-owned channel.
+
+Approval suspension starts no goroutine. A missing in-process responder closes
+the current invocation after emitting the approval request and partial step.
+`agent/approval_resume.go` reconstructs the pending call solely from the next
+request's message history, replaces the client-only approval response with a
+provider-facing tool result, and retains no cross-request state.
 
 ## User callback boundaries
 
@@ -53,4 +59,4 @@ channels. A barrier regression test proves the callbacks start concurrently.
 - `TestControlCallbackPanicsFailRun`
 - `TestToModelOutputPanicPreservesToolResultBeforeFailingRun`
 - `TestMergeCallback_RunsBothCallbacksConcurrently`
-
+- `TestToolApprovalSuspendsAndResumesFromMessageHistory`

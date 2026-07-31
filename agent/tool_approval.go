@@ -19,8 +19,10 @@ type ApprovalResponse struct {
 	Reason     string
 }
 
-// ApprovalResponder resolves an approval request, blocking until a decision is
-// available or the context is cancelled.
+// ApprovalResponder optionally resolves an approval request within the current
+// invocation. When it is nil, the run suspends after emitting the request; the
+// caller resumes statelessly by adding a tool_approval_response content part to
+// the next request's message history.
 type ApprovalResponder interface {
 	RequestApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
 }
