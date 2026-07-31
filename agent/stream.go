@@ -101,12 +101,7 @@ func applyStreamEvent(
 		}
 
 	case StreamEventError:
-		if !r.emit(StepEvent{Type: StepEventError, Error: ev.Error}) {
-			return true
-		}
-		if cb != nil && cb.OnError != nil {
-			r.safeObserver(func() { cb.OnError(ev.Error) })
-		}
+		r.emitError(ev.Error)
 		return true
 	}
 	return false

@@ -6,7 +6,7 @@ Go SDK for building AI-powered applications with a unified provider interface.
 
 - **Multi-provider support** — Gemini, OpenAI (Responses + Chat Completions), and any OpenAI-compatible endpoint
 - **Streaming and non-streaming** — `GenerateText` and `StreamText` with automatic tool-loop orchestration
-- **Tool use** — Define tools, execute them, and let the engine handle multi-step reasoning
+- **Tool use** — Define tools, execute them, and let the agent runtime handle multi-step reasoning
 - **Structured output** — JSON schema-constrained generation with automatic validation
 - **Provider extensions** — Generic `ProviderOptions` / `ProviderMetadata` / `Warnings` without polluting core types
 - **UI streaming** — SSE adapter emitting AI SDK UI message stream protocol chunks
@@ -37,11 +37,15 @@ SSE framing, fixture bytes, or browser-facing tool/approval behavior.
 | Package | Description |
 |---------|-------------|
 | `ai` | Public API: `GenerateText`, `StreamText`, request/result types, model interfaces |
+| `agent` | Public multi-step tool-loop runtime, stop conditions, approval gate, and lifecycle callbacks |
+| `aikit` | Dependency-free shared messages, events, usage, and error vocabulary |
+| `llm` | Language-model contracts and request builder |
+| `tool` | Typed tools and duplicate-safe runtime registry |
+| `transport` | Shared HTTP, SSE, retry, and provider-error transport |
 | `provider/gemini` | Google Gemini provider |
 | `provider/openai` | OpenAI Responses API + Chat Completions provider |
 | `provider/openai_compatible` | Generic provider for any OpenAI-compatible endpoint |
 | `uistream` | SSE adapter and Writer for AI SDK UI message stream protocol |
-| `schema` | JSON Schema builder for structured output |
 
 ## Quick Start
 

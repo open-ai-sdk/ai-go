@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
@@ -20,14 +21,38 @@ func Stream(ctx context.Context, params RunParams) <-chan StepEvent {
 		// panic anywhere in the goroutine still reports an error and closes ch.
 		defer close(ch)
 		defer safego.Recover(params.Logger, func(err error) {
-			select {
-			case ch <- StepEvent{Type: StepEventError, Error: err}:
-			case <-ctx.Done():
-			}
+			emitTerminalError(ch, err, params.Logger, params.Callbacks)
 		}, "phase", "tool-loop")
-		runLoop(ctx, ch, params)
+		if err := runLoop(ctx, ch, params); err != nil {
+			emitTerminalError(ch, err, params.Logger, params.Callbacks)
+		}
 	}()
 	return ch
+}
+
+// emitTerminalError guarantees an active consumer can observe why a run
+// stopped while still guaranteeing prompt close for an abandoned consumer.
+// If cancellation found the bounded buffer full, one already-truncated event
+// is discarded to reserve the terminal error slot.
+func emitTerminalError(
+	ch chan StepEvent,
+	err error,
+	logger *slog.Logger,
+	callbacks *LifecycleCallbacks,
+) {
+	event := StepEvent{Type: StepEventError, Error: err}
+	for {
+		select {
+		case ch <- event:
+			notifyError(logger, callbacks, err)
+			return
+		default:
+		}
+		select {
+		case <-ch:
+		default:
+		}
+	}
 }
 
 // Run executes the tool loop and returns its event stream. It is equivalent
@@ -37,14 +62,17 @@ func Run(ctx context.Context, params RunParams) <-chan StepEvent {
 	return Stream(ctx, params)
 }
 
-func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
-	tracer := params.Tracer
+func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error {
+	tracer := params.tracer
+	if tracer == nil && !params.disableTracing {
+		tracer = tracing.NewTracer()
+	}
 	tracingEnabled := tracer != nil
 	if !tracingEnabled {
-		// Defensive fallback for a nil Tracer (engine driven directly without
-		// wiring one). The public ai API always supplies tracing.NewTracer(),
-		// so real callers take the tracingEnabled path; that tracer is OTel's
-		// global no-op until the application registers a provider.
+		// The package-private disabled-instrumentation seam is used only by
+		// tests and benchmarks. Public runs take the tracingEnabled path; that
+		// tracer is OTel's global no-op until the application registers a
+		// provider.
 		tracer = tracing.NoopTracer{}
 	}
 	if params.Logger != nil {
@@ -63,6 +91,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// so the run span reports the run's terminal state (see the deferred
 	// closure below).
 	var lastSR streamResult
+	lastModel := params.Model
+	lastRequest := params.Request
 	// Reports the run's terminal finish reason/usage on the span regardless of
 	// which of the loop's several exit points was taken. This mirrors the
 	// last completed step's outcome rather than a lifetime sum across steps —
@@ -76,12 +106,12 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	}()
 
 	r := &run{
-		ctx: ctx, out: out, logger: params.Logger,
+		ctx: ctx, out: out, logger: params.Logger, callbacks: params.Callbacks,
 		tracer: tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
 	}
 	if err := params.Tools.Validate(); err != nil {
-		r.emit(StepEvent{Type: StepEventError, Error: err})
-		return
+		r.emitError(err)
+		return nil
 	}
 
 	history := buildInitialHistory(params.Request)
@@ -94,7 +124,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
 		// cancelled context makes the StepStart send return false and unwinds.
 		if !r.emit(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
-			return
+			return ctx.Err()
 		}
 
 		model := params.Model
@@ -106,6 +136,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		}
 
 		applyPrepareStep(params, step, completedSteps, &model, &req)
+		lastModel = model
+		lastRequest = req
 
 		// Each step gets a child context so its provider stream can be released
 		// deterministically once the step's events are consumed, without waiting
@@ -149,8 +181,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 			modelSpan.End()
 			stepSpan.RecordError(err)
 			stepSpan.End()
-			r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("step %d: start stream: %w", step, err)})
-			return
+			r.emitError(fmt.Errorf("step %d: start stream: %w", step, err))
+			return ctx.Err()
 		}
 
 		acc := newToolCallAccumulator()
@@ -168,7 +200,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		modelSpan.End()
 		if interrupted {
 			stepSpan.End()
-			return
+			return ctx.Err()
 		}
 		lastSR = sr
 		fullText := sr.text
@@ -186,7 +218,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				ProviderMetadata: sr.providerMeta,
 				Warnings:         sr.warnings,
 			}) {
-				return
+				return ctx.Err()
 			}
 			r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
 			completedSteps = append(completedSteps, StepResultInfo{
@@ -199,16 +231,16 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 				ProviderMetadata: sr.providerMeta,
 				Warnings:         sr.warnings,
 			})
-			if !emitStructuredOutput(r, params, history) {
-				return
+			if !emitStructuredOutput(r, model, req, history) {
+				return ctx.Err()
 			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
 			r.emit(StepEvent{Type: StepEventDone})
-			return
+			return nil
 		}
 
-		if r.executeToolStep(params, step, sr, fullText, acc, req, &history, &completedSteps, stepSpan) {
-			return
+		if r.executeToolStep(params, step, sr, fullText, acc, model, req, &history, &completedSteps, stepSpan) {
+			return ctx.Err()
 		}
 	}
 
@@ -219,11 +251,12 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
 	// Matches ai-sdk-node semantics (see packages/ai generate-text.ts:1008).
-	if !emitStructuredOutput(r, params, history) {
-		return
+	if !emitStructuredOutput(r, lastModel, lastRequest, history) {
+		return ctx.Err()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
 	r.emit(StepEvent{Type: StepEventDone})
+	return nil
 }
 
 // executeToolStep runs a step's tool calls, ends the step span, emits the
@@ -236,6 +269,7 @@ func (r *run) executeToolStep(
 	sr streamResult,
 	fullText string,
 	acc *toolCallAccumulator,
+	model Model,
 	req Request,
 	history *[]Message,
 	completedSteps *[]StepResultInfo,
@@ -251,8 +285,9 @@ func (r *run) executeToolStep(
 	var toolNames []string
 	var stepToolCalls []ToolCallInfo
 	var stepToolResults []ToolResult
+	var controlErr error
 	if params.ParallelToolExecution {
-		toolNames, stepToolCalls, stepToolResults = executeToolCallsParallel(
+		toolNames, stepToolCalls, stepToolResults, controlErr = executeToolCallsParallel(
 			r, params.Tools, preparedToolCalls, history,
 			params.MaxParallelTools, params.ToolApproval, params.Approver,
 		)
@@ -260,6 +295,12 @@ func (r *run) executeToolStep(
 		toolNames, stepToolCalls, stepToolResults = executeToolCalls(
 			r, params.Tools, preparedToolCalls, history, params.ToolApproval, params.Approver,
 		)
+	}
+
+	if controlErr != nil {
+		stepSpan.RecordError(controlErr)
+		stepSpan.End()
+		return true
 	}
 
 	if r.tracingEnabled {
@@ -297,7 +338,7 @@ func (r *run) executeToolStep(
 	if params.StopWhen != nil {
 		stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
 		if params.StopWhen(step+1, stopResult) {
-			if !emitStructuredOutput(r, params, *history) {
+			if !emitStructuredOutput(r, model, req, *history) {
 				return true
 			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })

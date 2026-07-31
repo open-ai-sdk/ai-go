@@ -83,7 +83,12 @@ func executeToolCallsParallel(
 	history *[]Message,
 	maxParallel int,
 	approval map[string]func(string, string) bool, approver ApprovalResponder,
-) (toolNames []string, stepToolCalls []ToolCallInfo, stepToolResults []ToolResult) {
+) (
+	toolNames []string,
+	stepToolCalls []ToolCallInfo,
+	stepToolResults []ToolResult,
+	controlErr error,
+) {
 	if maxParallel <= 0 {
 		maxParallel = 5
 	}
@@ -180,13 +185,12 @@ func executeToolCallsParallel(
 	// forward-defensive: if a future body ever returns an error, it surfaces
 	// instead of being silently dropped.
 	if err := g.Wait(); err != nil {
-		r.emit(StepEvent{Type: StepEventError, Error: err})
+		r.emitError(err)
 	}
 
 	// Emit events and build history in original order. A recovered control
 	// panic is reported only after the original tool result is visible.
 	toolNames = make([]string, 0, len(prepared))
-	var controlErr error
 	for _, res := range results {
 		if !res.valid {
 			r.emit(StepEvent{
@@ -216,9 +220,9 @@ func executeToolCallsParallel(
 		}
 	}
 	if controlErr != nil {
-		r.emit(StepEvent{Type: StepEventError, Error: controlErr})
+		r.emitError(controlErr)
 	}
-	return toolNames, stepToolCalls, stepToolResults
+	return toolNames, stepToolCalls, stepToolResults, controlErr
 }
 
 func approvedToolCall(

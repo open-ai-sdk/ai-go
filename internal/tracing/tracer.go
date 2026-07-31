@@ -1,7 +1,7 @@
 // Package tracing gives the tool loop one small interface for span
 // instrumentation so the OpenTelemetry dependency stays confined to this
 // file. Swapping OTel for another backend, or dropping it entirely, is a
-// single-file change — internal/engine only ever sees Tracer/Span/Attr.
+// single-file change — the agent runtime only sees Tracer/Span/Attr.
 package tracing
 
 import (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -332,6 +333,40 @@ func TestRunLoop_MaxStepsExhausted(t *testing.T) {
 	}
 	if lastFinish != FinishReasonToolCalls {
 		t.Errorf("expected last step finish=ToolCalls (honest exit), got %v", lastFinish)
+	}
+}
+
+func TestRunLoop_NonPositiveMaxStepsIsUnbounded(t *testing.T) {
+	for _, maxSteps := range []int{0, -1} {
+		t.Run(fmt.Sprintf("max_steps_%d", maxSteps), func(t *testing.T) {
+			model := &mockModel{calls: [][]StreamEvent{
+				{toolCallEvt(0, "tc1", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+				{toolCallEvt(0, "tc2", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+				{toolCallEvt(0, "tc3", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+			}}
+			ch := Run(context.Background(), RunParams{
+				Model:    model,
+				Tools:    &ToolSet{Executor: &mockExecutor{}},
+				StopWhen: IsStepCount(3),
+				MaxSteps: maxSteps,
+			})
+
+			var stepEnds int
+			for event := range ch {
+				if event.Type == StepEventStepEnd {
+					stepEnds++
+				}
+				if event.Type == StepEventError {
+					t.Fatalf("unexpected error: %v", event.Error)
+				}
+			}
+			if stepEnds != 3 {
+				t.Fatalf("completed steps = %d, want 3", stepEnds)
+			}
+			if model.idx != 3 {
+				t.Fatalf("model calls = %d, want 3", model.idx)
+			}
+		})
 	}
 }
 

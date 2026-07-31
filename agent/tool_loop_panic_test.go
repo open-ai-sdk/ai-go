@@ -6,7 +6,18 @@ import (
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
+
+type panicStartTracer struct{}
+
+func (panicStartTracer) Start(
+	context.Context,
+	string,
+	...tracing.Attr,
+) (context.Context, tracing.Span) {
+	panic("tracer start boom")
+}
 
 type panicExecutor struct{}
 
@@ -76,5 +87,24 @@ func TestRun_OnChunkPanic_RunCompletes(t *testing.T) {
 	}
 	if !sawDone {
 		t.Error("run should complete normally despite an observer panic")
+	}
+}
+
+func TestRun_PanicDuringInitialization_EmitsErrorAndClosesChannel(t *testing.T) {
+	ch := Run(context.Background(), RunParams{
+		Model:  &mockModel{},
+		tracer: panicStartTracer{},
+	})
+
+	var events []StepEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].Type != StepEventError {
+		t.Fatalf("events = %#v, want one error", events)
+	}
+	var panicErr *safego.PanicError
+	if !errors.As(events[0].Error, &panicErr) {
+		t.Fatalf("error = %T %v, want *safego.PanicError", events[0].Error, events[0].Error)
 	}
 }

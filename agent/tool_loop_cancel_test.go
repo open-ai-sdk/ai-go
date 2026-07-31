@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,6 +52,42 @@ func (delayedStreamModel) Stream(ctx context.Context, _ Request) (<-chan StreamE
 				return
 			}
 		}
+	}()
+	return ch, nil
+}
+
+// hungProviderModel represents a provider that releases its transport when
+// its context is cancelled but, due to a decoder bug, never closes the event
+// channel. The agent must not range that channel forever.
+type hungProviderModel struct {
+	providerDone chan struct{}
+}
+
+func (m *hungProviderModel) ModelID() string { return "hung-provider" }
+
+func (m *hungProviderModel) Stream(ctx context.Context, _ Request) (<-chan StreamEvent, error) {
+	ch := make(chan StreamEvent)
+	go func() {
+		<-ctx.Done()
+		close(m.providerDone)
+		// Intentionally leave ch open: the agent owns cancellation of its own
+		// output, not correctness of a third-party provider channel.
+	}()
+	return ch, nil
+}
+
+type errorThenOpenModel struct {
+	providerDone chan struct{}
+}
+
+func (m *errorThenOpenModel) ModelID() string { return "error-then-open" }
+
+func (m *errorThenOpenModel) Stream(ctx context.Context, _ Request) (<-chan StreamEvent, error) {
+	ch := make(chan StreamEvent, 1)
+	ch <- StreamEvent{Type: StreamEventError, Error: errors.New("provider failed")}
+	go func() {
+		<-ctx.Done()
+		close(m.providerDone)
 	}()
 	return ch, nil
 }
@@ -111,24 +148,78 @@ func TestRun_CancelMidStream_ClosesChannelAndReleasesProvider(t *testing.T) {
 	}
 }
 
-// TestRun_CancelBeforeStart_EmitsNoEvents verifies that a context cancelled
-// before Run starts terminates the loop at the first step boundary.
-func TestRun_CancelBeforeStart_EmitsNoEvents(t *testing.T) {
+// TestRun_CancelBeforeStart_ReportsCancellation verifies that a context
+// cancelled before Run starts terminates at the first step boundary and still
+// reports why it stopped.
+func TestRun_CancelBeforeStart_ReportsCancellation(t *testing.T) {
 	model := &ctxAwareModel{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled
 
 	ch := Run(ctx, RunParams{Model: model, MaxSteps: 3})
 
+	var gotErr error
+	for event := range ch {
+		if event.Type == StepEventError {
+			gotErr = event.Error
+		}
+	}
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", gotErr)
+	}
+}
+
+func TestRun_CancelHungProvider_ClosesOutputAndReleasesProvider(t *testing.T) {
+	model := &hungProviderModel{providerDone: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := Run(ctx, RunParams{Model: model})
+
+	if event := <-ch; event.Type != StepEventStepStart {
+		t.Fatalf("first event = %v, want StepEventStepStart", event.Type)
+	}
+	cancel()
+
+	select {
+	case <-model.providerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("hung provider did not observe cancellation")
+	}
+	var gotErr error
 	closed := make(chan struct{})
 	go func() {
-		for range ch {
+		defer close(closed)
+		for event := range ch {
+			if event.Type == StepEventError {
+				gotErr = event.Error
+			}
 		}
-		close(closed)
 	}()
 	select {
 	case <-closed:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not terminate for an already-cancelled context")
+		t.Fatal("agent output did not close after cancelling a hung provider")
+	}
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", gotErr)
+	}
+}
+
+func TestRun_ProviderErrorThenOpenChannel_DoesNotLeakDrain(t *testing.T) {
+	model := &errorThenOpenModel{providerDone: make(chan struct{})}
+	ch := Run(context.Background(), RunParams{Model: model})
+
+	var sawError bool
+	for event := range ch {
+		if event.Type == StepEventError {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Fatal("provider error was not emitted")
+	}
+	select {
+	case <-model.providerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("step cancellation did not release provider after fatal event")
 	}
 }

@@ -12,8 +12,8 @@ import (
 // emitStructuredOutput makes a final constrained LLM call when an OutputSchema
 // is configured. It returns false when the run was cancelled or the provider
 // failed, in which case the caller must not emit OnEnd or Done.
-func emitStructuredOutput(r *run, params RunParams, history []Message) bool {
-	if params.Request.Output == nil || params.Request.Output.Type == "text" {
+func emitStructuredOutput(r *run, model Model, request Request, history []Message) bool {
+	if request.Output == nil || request.Output.Type == "text" {
 		return true
 	}
 
@@ -25,9 +25,12 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) bool {
 	}
 
 	req := Request{
-		Messages: msgs,
-		Output:   params.Request.Output,
-		Settings: params.Request.Settings,
+		Messages:        msgs,
+		Output:          request.Output,
+		Settings:        request.Settings,
+		ProviderOptions: request.ProviderOptions,
+		ToolsContext:    request.ToolsContext,
+		RuntimeContext:  request.RuntimeContext,
 	}
 
 	// Bind the structured-output call to a child context so it is released when
@@ -40,7 +43,7 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) bool {
 	var startAttrs []tracing.Attr
 	if r.tracingEnabled {
 		startAttrs = []tracing.Attr{
-			{Key: "ai.model_id", Value: params.Model.ModelID()},
+			{Key: "ai.model_id", Value: model.ModelID()},
 			{Key: "ai.structured_output", Value: true},
 		}
 	}
@@ -50,10 +53,10 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) bool {
 		span.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(msgs)})
 	}
 
-	eventCh, err := params.Model.Stream(modelCtx, req)
+	eventCh, err := model.Stream(modelCtx, req)
 	if err != nil {
 		span.RecordError(err)
-		r.emit(StepEvent{Type: StepEventError, Error: fmt.Errorf("structured output call: %w", err)})
+		r.emitError(fmt.Errorf("structured output call: %w", err))
 		return false
 	}
 
@@ -71,7 +74,7 @@ func emitStructuredOutput(r *run, params RunParams, history []Message) bool {
 			}
 			if ev.Type == StreamEventError {
 				span.RecordError(ev.Error)
-				r.emit(StepEvent{Type: StepEventError, Error: ev.Error})
+				r.emitError(ev.Error)
 				return false
 			}
 		}

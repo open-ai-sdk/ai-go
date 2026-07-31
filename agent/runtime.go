@@ -13,9 +13,10 @@ import (
 // cancellation latency to one in-flight event: a cancelled context unblocks any
 // pending send instead of leaving a goroutine parked on a full channel.
 type run struct {
-	ctx    context.Context
-	out    chan<- StepEvent
-	logger *slog.Logger
+	ctx       context.Context
+	out       chan<- StepEvent
+	logger    *slog.Logger
+	callbacks *LifecycleCallbacks
 	// tracer is never nil: runLoop substitutes tracing.NoopTracer{} when the
 	// caller configured none, so every call site can use it unconditionally.
 	tracer tracing.Tracer
@@ -38,11 +39,30 @@ type run struct {
 // node's mergeCallbacks, which runs callbacks under Promise.allSettled and
 // swallows their errors — an observer panic must not fail the run.
 func (r *run) safeObserver(fn func()) {
+	safeObserver(r.logger, fn)
+}
+
+func safeObserver(logger *slog.Logger, fn func()) {
 	if fn == nil {
 		return
 	}
-	defer safego.Recover(r.logger, nil, "callback", "observer")
+	defer safego.Recover(logger, nil, "callback", "observer")
 	fn()
+}
+
+func notifyError(logger *slog.Logger, callbacks *LifecycleCallbacks, err error) {
+	if callbacks == nil || callbacks.OnError == nil {
+		return
+	}
+	safeObserver(logger, func() { callbacks.OnError(err) })
+}
+
+func (r *run) emitError(err error) bool {
+	if !r.emit(StepEvent{Type: StepEventError, Error: err}) {
+		return false
+	}
+	notifyError(r.logger, r.callbacks, err)
+	return true
 }
 
 // emit delivers ev to the consumer unless the context is cancelled first. A

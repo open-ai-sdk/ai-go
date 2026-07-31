@@ -8,7 +8,7 @@ import "context"
 //
 // An Agent is a facade: it binds a model, tools, and defaults, then delegates
 // each call to the stateless GenerateText/StreamText tool loop. It never runs
-// a loop of its own — internal/engine's tool loop is the only implementation,
+// a loop of its own — agent.Stream is the only implementation,
 // shared by every entry point. An Agent holds no per-call state (steps,
 // messages, and tool calls live on the stack of each Generate/Stream call),
 // so an implementation is safe for concurrent use provided its tools are.

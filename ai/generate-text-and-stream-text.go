@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/agent"
-	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	toolpkg "github.com/open-ai-sdk/ai-go/tool"
 )
 
@@ -127,7 +126,6 @@ func runParams(req GenerateTextRequest) agent.RunParams {
 		ParallelToolExecution: req.ParallelToolExecution,
 		MaxParallelTools:      req.MaxParallelTools,
 		Logger:                req.Logger,
-		Tracer:                tracing.NewTracer(),
 		TraceContent:          req.TraceContent,
 	}
 }

@@ -130,7 +130,7 @@ func (a *ToolLoopAgent) mergeRequest(opts []Option) GenerateTextRequest {
 // node's mergeCallbacks (util/merge-callbacks.ts), which runs callbacks under
 // Promise.allSettled: concurrent, and neither callback's panic can affect the
 // other or fail the run. When only one side is set, it is returned unchanged
-// (no goroutine needed; the engine already recovers it as a plain observer).
+// (no goroutine needed; the agent runtime already recovers it as an observer).
 //
 // Note the concurrency is real parallelism, unlike node's single-threaded
 // Promise.allSettled: the two callbacks run on separate goroutines, so if both

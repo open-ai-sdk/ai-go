@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
@@ -13,29 +14,18 @@ type (
 
 // IsStepCount returns a StopCondition that stops after n completed steps.
 func IsStepCount(n int) StopCondition {
-	return func(step int, _ *StepResult) bool {
-		return step >= n
-	}
+	return agent.IsStepCount(n)
 }
 
 // Never returns a StopCondition that never stops early (run until no tool calls or maxSteps).
 func Never() StopCondition {
-	return func(_ int, _ *StepResult) bool {
-		return false
-	}
+	return agent.Never()
 }
 
 // HasToolCall returns a StopCondition that stops after a step that called the named tool.
 // Useful for single-tool agentic flows that should halt once a specific action is taken.
 func HasToolCall(toolName string) StopCondition {
-	return func(_ int, r *StepResult) bool {
-		for _, name := range r.ToolNames {
-			if name == toolName {
-				return true
-			}
-		}
-		return false
-	}
+	return agent.HasToolCall(toolName)
 }
 
 // OutputText signals that plain text output is expected (no JSON constraint).

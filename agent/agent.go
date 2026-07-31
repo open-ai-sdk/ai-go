@@ -10,7 +10,7 @@ import (
 )
 
 // Shared model, message, request, loop, and tool-call contracts are aliases of
-// aikit. The engine therefore consumes the same values providers and callers
+// aikit. The agent therefore consumes the same values providers and callers
 // construct; no adapter or field-by-field conversion is needed.
 type (
 	Model                 = llm.Model
@@ -116,8 +116,7 @@ type EndEvent struct {
 	ProviderMetadata map[string]any
 }
 
-// RunParams configures a single engine run. It stays internal because tracing
-// and logging are execution concerns rather than shared vocabulary.
+// RunParams configures a single agent run.
 type RunParams struct {
 	Model                 Model
 	Request               Request
@@ -132,6 +131,11 @@ type RunParams struct {
 	ParallelToolExecution bool
 	MaxParallelTools      int
 	Logger                *slog.Logger
-	Tracer                tracing.Tracer
 	TraceContent          bool
+
+	// tracer and disableTracing are package-private seams for observability
+	// tests and benchmarks. Public runs use the process-global OTel tracer
+	// without exposing an internal interface in this public struct.
+	tracer         tracing.Tracer
+	disableTracing bool
 }

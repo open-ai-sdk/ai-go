@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -76,5 +77,33 @@ func TestStructuredOutput_InvalidJSON(t *testing.T) {
 	_, ok := findStructuredOutput(events)
 	if ok {
 		t.Error("expected no StepEventStructuredOutput for invalid JSON")
+	}
+}
+
+func TestStructuredOutput_ProviderErrorTerminatesWithoutDone(t *testing.T) {
+	providerErr := errors.New("structured provider failed")
+	model := &mockModel{calls: [][]StreamEvent{
+		{textEvt("analysis complete"), finishEvt(FinishReasonStop)},
+		{{Type: StreamEventError, Error: providerErr}},
+	}}
+	events := collectRunEvents(RunParams{
+		Model: model,
+		Request: Request{Output: &OutputSchema{
+			Type: "object",
+		}},
+	})
+
+	var sawOriginalError, sawDone bool
+	for _, event := range events {
+		if event.Type == StepEventError && errors.Is(event.Error, providerErr) {
+			sawOriginalError = true
+		}
+		sawDone = sawDone || event.Type == StepEventDone
+	}
+	if !sawOriginalError {
+		t.Fatalf("events = %#v, want structured provider error", events)
+	}
+	if sawDone {
+		t.Fatal("structured-output failure must not be followed by Done")
 	}
 }

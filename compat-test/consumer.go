@@ -1,13 +1,13 @@
 // Package compattest is an external consumer of github.com/open-ai-sdk/ai-go.
-// Every type it names comes from the public ai and aikit packages; it imports
-// nothing under internal/. Before the public aikit package existed, none of
-// this compiled: LanguageModel.Stream and NewStreamResult referenced
-// internal/engine types that an outside caller could not name.
+// Every type it names comes from public packages; it imports nothing under
+// internal/. The compile guard covers both the aikit vocabulary and the public
+// agent runtime.
 package compattest
 
 import (
 	"context"
 
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
@@ -31,6 +31,15 @@ func (fakeModel) Stream(_ context.Context, _ ai.LanguageModelRequest) (<-chan ai
 
 // Compile-time proof an external consumer can implement the model interface.
 var _ ai.LanguageModel = fakeModel{}
+
+// RunAgent proves an external module can configure and execute the public
+// runtime directly without importing the ai facade or any internal package.
+func RunAgent(ctx context.Context) <-chan aikit.StepEvent {
+	return agent.Run(ctx, agent.RunParams{
+		Model:   fakeModel{},
+		Request: llm.NewRequest("hello").Build(),
+	})
+}
 
 type externalCompat struct{}
 

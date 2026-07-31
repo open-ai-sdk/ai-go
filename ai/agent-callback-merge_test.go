@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestMergeCallback_BothNilReturnsNil verifies no wrapper is allocated when
@@ -81,5 +82,33 @@ func TestMergeCallback_PanicInOneDoesNotStopTheOther(t *testing.T) {
 
 	if atomic.LoadInt32(&callFired) != 1 {
 		t.Error("expected call-level callback to still fire despite the agent-level panic")
+	}
+}
+
+func TestMergeCallback_RunsBothCallbacksConcurrently(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	callback := func(int) {
+		started <- struct{}{}
+		<-release
+	}
+	done := make(chan struct{})
+	go func() {
+		mergeCallback(callback, callback)(1)
+		close(done)
+	}()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("callbacks did not start concurrently")
+		}
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("merged callback did not settle after both callbacks returned")
 	}
 }

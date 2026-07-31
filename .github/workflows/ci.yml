@@ -127,5 +127,19 @@ jobs:
             exit 1
           }
 
+      - name: Enforce agent dependency boundary
+        run: |
+          test ! -d internal/engine || {
+            echo "internal/engine must remain promoted to the public agent package"
+            exit 1
+          }
+          forbidden="$(go list -deps ./agent/... \
+            | grep -E '^github.com/open-ai-sdk/ai-go/(ai|aisdk|provider)(/|$)' || true)"
+          test -z "$forbidden" || {
+            echo "agent must not depend on ai, aisdk, or provider packages:"
+            echo "$forbidden"
+            exit 1
+          }
+
       - name: Verify external consumer surface
         run: go -C compat-test test ./...

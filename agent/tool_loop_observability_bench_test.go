@@ -31,13 +31,12 @@ func runBenchOnce(params RunParams) {
 }
 
 // BenchmarkToolLoop_InstrumentationDisabled is the default a caller gets with
-// neither ai.WithLogger nor any OTel provider configured: Logger and Tracer
-// are both nil, so runLoop substitutes tracing.NoopTracer{} and transport's
-// discard logger without ever touching OTel.
+// explicit instrumentation disabled. This test-only seam keeps the benchmark
+// useful even though public agent runs always bind the global OTel tracer.
 func BenchmarkToolLoop_InstrumentationDisabled(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		runBenchOnce(RunParams{Model: benchModel{}, MaxSteps: 1})
+		runBenchOnce(RunParams{Model: benchModel{}, MaxSteps: 1, disableTracing: true})
 	}
 }
 
@@ -53,6 +52,6 @@ func BenchmarkToolLoop_InstrumentationEnabled(b *testing.B) {
 	logger := slog.New(slog.DiscardHandler)
 	tracer := tracing.NewTracer()
 	for i := 0; i < b.N; i++ {
-		runBenchOnce(RunParams{Model: benchModel{}, MaxSteps: 1, Logger: logger, Tracer: tracer})
+		runBenchOnce(RunParams{Model: benchModel{}, MaxSteps: 1, Logger: logger, tracer: tracer})
 	}
 }
