@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 type ctxKey int
@@ -25,19 +26,19 @@ func ToolCallIDFromContext(ctx context.Context) string {
 // aikit. The engine therefore consumes the same values providers and callers
 // construct; no adapter or field-by-field conversion is needed.
 type (
-	Model                 = aikit.Model
+	Model                 = llm.Model
 	Message               = aikit.Message
 	ContentPart           = aikit.ContentPart
 	ToolChoice            = aikit.ToolChoice
-	Request               = aikit.ModelRequest
-	OutputSchema          = aikit.OutputSchema
-	CallSettings          = aikit.CallSettings
+	Request               = llm.Request
+	OutputSchema          = llm.OutputSchema
+	CallSettings          = llm.CallSettings
 	StopCondition         = aikit.StopCondition
 	StepResult            = aikit.StepResult
-	PrepareStepContext    = aikit.PrepareStepContext
-	StepResultInfo        = aikit.PrepareStepInfo
-	PrepareStepResult     = aikit.PrepareStepResult
-	PrepareStepFunc       = aikit.PrepareStepFunc
+	PrepareStepContext    = llm.PrepareStepContext
+	StepResultInfo        = llm.PrepareStepInfo
+	PrepareStepResult     = llm.PrepareStepResult
+	PrepareStepFunc       = llm.PrepareStepFunc
 	ToolCallInfo          = aikit.ToolCallInfo
 	ToolCallRepairContext = aikit.RepairToolCallInput
 	ToolCallRepairFunc    = aikit.RepairToolCallFunc

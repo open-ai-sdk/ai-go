@@ -16,6 +16,30 @@ func WrapLanguageModel(model LanguageModel, middlewares ...LanguageModelMiddlewa
 	return model
 }
 
+// applyDeferredMiddlewares wraps both the initial model and models selected by
+// PrepareStep. PrepareStepResult is copied before its Model is replaced so a
+// callback may safely reuse a result value across calls.
+func applyDeferredMiddlewares(request *GenerateTextRequest) {
+	if len(request.Middlewares) == 0 {
+		return
+	}
+	middlewares := append([]LanguageModelMiddleware(nil), request.Middlewares...)
+	request.Model = WrapLanguageModel(request.Model, middlewares...)
+	if request.PrepareStep != nil {
+		prepare := request.PrepareStep
+		request.PrepareStep = func(context PrepareStepContext) *PrepareStepResult {
+			result := prepare(context)
+			if result == nil || result.Model == nil {
+				return result
+			}
+			wrapped := *result
+			wrapped.Model = WrapLanguageModel(result.Model, middlewares...)
+			return &wrapped
+		}
+	}
+	request.Middlewares = nil
+}
+
 // WithMiddleware returns an Option that wraps the request's model with the given
 // middlewares. The middlewares are stored and applied after model resolution, so
 // this works correctly with both WithModel and Runtime.WithDefaultModel.

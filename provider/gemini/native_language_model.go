@@ -11,6 +11,7 @@ import (
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/httputil"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -27,6 +28,8 @@ type NativeLanguageModel struct {
 	cfg     Config
 	client  *http.Client
 }
+
+var _ llm.Model = (*NativeLanguageModel)(nil)
 
 // NewNativeLanguageModel creates a Gemini-backed ai.LanguageModel that uses the
 // native Gemini API directly (not the OpenAI-compatible endpoint).
@@ -53,7 +56,10 @@ func (m *NativeLanguageModel) ModelID() string { return m.modelID }
 
 // Stream sends a streaming request to the native Gemini API and returns a
 // channel of normalized ai.StreamEvents.
-func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
+	if _, err := resolveProviderOptions(req.ProviderOptions); err != nil {
+		return nil, err
+	}
 	// Build native request body.
 	nr := encodeNativeRequest(req)
 

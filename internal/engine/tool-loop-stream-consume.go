@@ -42,7 +42,8 @@ func applyStreamEvent(
 	emitChunk := func(stepEv StepEvent) {
 		r.emit(stepEv)
 		if cb != nil && cb.OnChunk != nil {
-			r.safeObserver(func() { cb.OnChunk(stepEv) })
+			callbackEvent := snapshotStepEvent(stepEv)
+			r.safeObserver(func() { cb.OnChunk(callbackEvent) })
 		}
 	}
 	switch ev.Type {
@@ -143,10 +144,10 @@ func handleToolCallDelta(
 // discarding fields populated by an earlier provider event.
 func mergeUsage(prior, incoming *Usage) *Usage {
 	if incoming == nil {
-		return prior
+		return snapshotUsage(prior)
 	}
 	if prior == nil {
-		return incoming
+		return snapshotUsage(incoming)
 	}
 	takeInt := func(current, next int) int {
 		if next != 0 {
@@ -179,7 +180,9 @@ func mergeUsage(prior, incoming *Usage) *Usage {
 		incoming.OutputTokenDetails.ReasoningTokens,
 	)
 	if incoming.Raw != nil {
-		merged.Raw = incoming.Raw
+		merged.Raw = snapshotJSONMap(incoming.Raw)
+	} else {
+		merged.Raw = snapshotJSONMap(prior.Raw)
 	}
 	return &merged
 }

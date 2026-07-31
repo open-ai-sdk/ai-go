@@ -1,29 +1,19 @@
 package ai
 
 import (
-	"context"
-
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // LanguageModel is the shared model contract. The alias keeps existing ai
 // consumers source-compatible while the engine consumes the same type directly.
-type LanguageModel = aikit.Model
+type LanguageModel = llm.Model
 
 // EmbeddingModel is the interface a provider must implement for text embeddings.
-type EmbeddingModel interface {
-	// ModelID returns the provider-specific model identifier.
-	ModelID() string
-
-	// Embed generates an embedding vector for a single text.
-	Embed(ctx context.Context, text string) ([]float32, error)
-
-	// EmbedBatch generates embedding vectors for multiple texts.
-	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
-}
+type EmbeddingModel = llm.EmbeddingModel
 
 // LanguageModelRequest is the normalized input passed to LanguageModel.Stream.
-type LanguageModelRequest = aikit.ModelRequest
+type LanguageModelRequest = llm.Request
 
 // Warning, Source, StreamEvent and the StreamEventType enum are aliases of the
 // shared aikit package (see ai/types.go for the full alias set).

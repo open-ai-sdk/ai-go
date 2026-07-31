@@ -71,11 +71,12 @@ func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <
 	// chunk is emitted by a different goroutine; a mutex guards it.
 	var (
 		totalUsage UsageInfo
+		usage      usageAccumulator
 		usageMu    sync.Mutex
 	)
 
 	if needIntercept {
-		filteredCh = interceptEvents(eventCh, opts, &totalUsage, &usageMu)
+		filteredCh = interceptEvents(eventCh, opts, &usage, &totalUsage, &usageMu)
 	}
 
 	producer := NewChunkProducer(msgID)
@@ -99,6 +100,7 @@ func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <
 func interceptEvents(
 	eventCh <-chan aikit.StepEvent,
 	opts ToUIStreamOptions,
+	usage *usageAccumulator,
 	totalUsage *UsageInfo,
 	usageMu *sync.Mutex,
 ) <-chan aikit.StepEvent {
@@ -108,17 +110,16 @@ func interceptEvents(
 		defer close(intercepted)
 		defer safego.Recover(nil, recoverToEvent(intercepted))
 		for ev := range eventCh {
+			if ev.Type == aikit.StepEventStepStart {
+				usageMu.Lock()
+				usage.startStep()
+				usageMu.Unlock()
+			}
 			// Track usage for metadata.
 			if ev.Type == aikit.StepEventUsage && ev.Usage != nil {
 				usageMu.Lock()
-				totalUsage.InputTokens += ev.Usage.InputTokens
-				totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
-				totalUsage.OutputTokens += ev.Usage.OutputTokens
-				totalUsage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
-				totalUsage.TotalTokens += ev.Usage.TotalTokens
-				totalUsage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
-				totalUsage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
-				totalUsage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
+				usage.apply(ev.Usage)
+				*totalUsage = usage.snapshot()
 				usageMu.Unlock()
 			}
 			// Filter reasoning events.

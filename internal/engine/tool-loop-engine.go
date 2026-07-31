@@ -85,7 +85,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) {
 		req := params.Request
 		req.Instructions = "" // already prepended as system message in history
 		req.Messages = history
-		if len(req.Tools) == 0 && params.Tools != nil && len(params.Tools.Definitions) > 0 {
+		if req.Tools == nil && params.Tools != nil && len(params.Tools.Definitions) > 0 {
 			req.Tools = params.Tools.Definitions
 		}
 
@@ -295,7 +295,7 @@ func applyPrepareStep(params RunParams, step int, completedSteps []StepResultInf
 	}
 	psResult := params.PrepareStep(PrepareStepContext{
 		StepNumber:     step,
-		Steps:          completedSteps,
+		Steps:          snapshotPrepareStepInfos(completedSteps),
 		ToolsContext:   req.ToolsContext,
 		RuntimeContext: req.RuntimeContext,
 	})

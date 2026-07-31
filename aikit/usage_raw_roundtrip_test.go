@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 type rawUsageModel struct{}
@@ -14,7 +15,7 @@ func (rawUsageModel) ModelID() string { return "raw-usage-test" }
 
 func (rawUsageModel) Stream(
 	_ context.Context,
-	_ aikit.ModelRequest,
+	_ llm.Request,
 ) (<-chan aikit.StreamEvent, error) {
 	events := make(chan aikit.StreamEvent, 2)
 	events <- aikit.StreamEvent{

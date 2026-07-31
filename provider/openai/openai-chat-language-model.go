@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -14,6 +15,8 @@ const chatProviderName = "openai-chat"
 type ChatLanguageModel struct {
 	inner *openaichat.LanguageModel
 }
+
+var _ llm.Model = (*ChatLanguageModel)(nil)
 
 // NewChatLanguageModel creates an OpenAI-backed ai.LanguageModel using the
 // Chat Completions API (/chat/completions).
@@ -44,8 +47,8 @@ func NewChatLanguageModel(modelID string, cfg Config) *ChatLanguageModel {
 			SupportsStreamUsage:      true,
 		},
 		ChunkTimeout: cfg.ChunkTimeout,
-		ExtraBodyFieldsForRequest: func(req ai.LanguageModelRequest) map[string]any {
-			opts := parseChatProviderOptions(req.ProviderOptions)
+		ExtraBodyFieldsForRequest: func(req llm.Request) map[string]any {
+			opts, _ := parseChatProviderOptions(req.ProviderOptions)
 			extra := make(map[string]any)
 			if opts.ReasoningEffort != "" {
 				extra["reasoning_effort"] = opts.ReasoningEffort
@@ -63,39 +66,35 @@ func NewChatLanguageModel(modelID string, cfg Config) *ChatLanguageModel {
 }
 
 // parseChatProviderOptions extracts ChatProviderOptions from a generic provider
-// options map. Returns zero-value ChatProviderOptions if the "openai" key is
-// missing or wrong type.
-func parseChatProviderOptions(opts map[string]any) ChatProviderOptions {
+// options map. A missing "openai" key returns zero options; a matching invalid
+// value returns an error.
+func parseChatProviderOptions(opts map[string]any) (ChatProviderOptions, error) {
 	if opts == nil {
-		return ChatProviderOptions{}
+		return ChatProviderOptions{}, nil
 	}
 	raw, ok := opts["openai"]
 	if !ok {
-		return ChatProviderOptions{}
+		return ChatProviderOptions{}, nil
 	}
 	switch p := raw.(type) {
 	case ChatProviderOptions:
-		return p
+		return p, nil
+	case *ChatProviderOptions:
+		if p == nil {
+			return ChatProviderOptions{}, llm.ProviderOptionTypeError("openai", raw)
+		}
+		return *p, nil
+	case reasoningEffortOption:
+		return ChatProviderOptions{ReasoningEffort: p.effort}, nil
 	case map[string]any:
-		return chatProviderOptionsFromMap(p)
+		var options ChatProviderOptions
+		if err := llm.DecodeJSONProviderOptions("openai", p, &options); err != nil {
+			return ChatProviderOptions{}, err
+		}
+		return options, nil
+	default:
+		return ChatProviderOptions{}, llm.ProviderOptionTypeError("openai", raw)
 	}
-	return ChatProviderOptions{}
-}
-
-// chatProviderOptionsFromMap builds ChatProviderOptions from a generic map,
-// supporting JSON-deserialized provider options.
-func chatProviderOptionsFromMap(m map[string]any) ChatProviderOptions {
-	var p ChatProviderOptions
-	if s, ok := m["user"].(string); ok {
-		p.User = s
-	}
-	if s, ok := m["reasoningEffort"].(string); ok {
-		p.ReasoningEffort = s
-	}
-	if b, ok := m["strictJsonSchema"].(*bool); ok {
-		p.StrictJSONSchema = b
-	}
-	return p
 }
 
 // ModelID returns the OpenAI model identifier.
@@ -105,7 +104,10 @@ func (m *ChatLanguageModel) ModelID() string { return m.inner.ModelID() }
 // normalized ai.StreamEvents.
 func (m *ChatLanguageModel) Stream(
 	ctx context.Context,
-	req ai.LanguageModelRequest,
+	req llm.Request,
 ) (<-chan ai.StreamEvent, error) {
+	if _, err := parseChatProviderOptions(req.ProviderOptions); err != nil {
+		return nil, err
+	}
 	return m.inner.Stream(ctx, req)
 }

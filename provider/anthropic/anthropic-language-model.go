@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // LanguageModel implements ai.LanguageModel using the Anthropic Messages API.
@@ -21,6 +22,8 @@ type LanguageModel struct {
 	config  Config
 	client  *http.Client
 }
+
+var _ llm.Model = (*LanguageModel)(nil)
 
 // NewLanguageModel creates a native Anthropic language model.
 func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
@@ -45,7 +48,7 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 func (m *LanguageModel) ModelID() string { return m.modelID }
 
 // Stream sends a streaming request to the Anthropic Messages API.
-func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
 	body, encodeWarnings, err := m.encodeRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: encode request: %w", err)
@@ -144,7 +147,7 @@ type thinkingConfig struct {
 
 // encodeRequest builds the Messages API body. Returned warnings describe content
 // the API cannot carry; they are surfaced on the stream's finish event.
-func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, []ai.Warning, error) {
+func (m *LanguageModel) encodeRequest(req llm.Request) ([]byte, []ai.Warning, error) {
 	if req.Output != nil {
 		return nil, nil, fmt.Errorf("anthropic: output schema is not yet supported")
 	}
@@ -160,7 +163,11 @@ func (m *LanguageModel) encodeRequest(req ai.LanguageModelRequest) ([]byte, []ai
 
 	ar.System = req.Instructions
 	ar.ToolChoice = mapToolChoice(req.ToolChoice)
-	ar.Thinking = extractThinkingConfig(req.ProviderOptions)
+	thinking, err := extractThinkingConfig(req.ProviderOptions)
+	if err != nil {
+		return nil, nil, err
+	}
+	ar.Thinking = thinking
 	msgs, warnings := encodeMessages(req.Messages)
 	ar.Messages = msgs
 	ar.Tools = encodeTools(req.Tools)
@@ -195,24 +202,19 @@ func mapToolChoice(tc *ai.ToolChoice) *anthropicToolChoice {
 	}
 }
 
-func extractThinkingConfig(opts map[string]any) *thinkingConfig {
-	anthOpts, ok := opts["anthropic"]
-	if !ok {
-		return nil
+func extractThinkingConfig(options map[string]any) (*thinkingConfig, error) {
+	opts, err := parseProviderOptions(options)
+	if err != nil {
+		return nil, err
 	}
-	om, ok := anthOpts.(map[string]any)
-	if !ok {
-		return nil
-	}
-	thinking, ok := om["thinking"].(bool)
-	if !ok || !thinking {
-		return nil
+	if !opts.Thinking {
+		return nil, nil
 	}
 	budget := 10000
-	if b, ok := om["thinkingBudget"].(int); ok {
-		budget = b
+	if opts.ThinkingBudget != 0 {
+		budget = opts.ThinkingBudget
 	}
-	return &thinkingConfig{Type: "enabled", BudgetTokens: budget}
+	return &thinkingConfig{Type: "enabled", BudgetTokens: budget}, nil
 }
 
 func encodeMessages(msgs []ai.Message) ([]anthropicMsg, []ai.Warning) {

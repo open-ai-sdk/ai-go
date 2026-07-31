@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -9,7 +10,7 @@ import (
 // using the Gemini-specific sanitization hook and stream-usage flag.
 func encodeRequest(
 	modelID string,
-	req ai.LanguageModelRequest,
+	req llm.Request,
 	streaming bool,
 ) (openaichat.ChatRequest, []ai.Warning, error) {
 	return openaichat.EncodeRequest(openaichat.EncodeRequestParams{

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -13,6 +14,8 @@ const defaultProviderName = "openaiCompatible"
 type LanguageModel struct {
 	core *openaichat.LanguageModel
 }
+
+var _ llm.Model = (*LanguageModel)(nil)
 
 // NewLanguageModel creates an OpenAI-compatible ai.LanguageModel.
 // The model delegates all chat-completions encoding and decoding to the
@@ -46,6 +49,6 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 func (m *LanguageModel) ModelID() string { return m.core.ModelID() }
 
 // Stream sends a streaming chat request and returns a channel of normalized ai.StreamEvents.
-func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
 	return m.core.Stream(ctx, req)
 }

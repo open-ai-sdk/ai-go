@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // ChatRequest is the JSON body for an OpenAI-style chat completions request.
@@ -56,7 +57,7 @@ type EncodeRequestParams struct {
 // carry; they are surfaced to the caller on the stream's finish event.
 func EncodeRequest(
 	params EncodeRequestParams,
-	req ai.LanguageModelRequest,
+	req llm.Request,
 	streaming bool,
 ) (ChatRequest, []ai.Warning, error) {
 	msgs, warnings, err := encodeMessages(req.Instructions, req.Messages)

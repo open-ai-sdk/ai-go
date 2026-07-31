@@ -52,7 +52,8 @@ type StepEvent struct {
 	// Tool result.
 	ToolResult *ToolResult
 
-	// Usage.
+	// Usage is the latest cumulative usage snapshot for the current step, not
+	// an additive delta.
 	Usage *Usage
 
 	// Step metadata.

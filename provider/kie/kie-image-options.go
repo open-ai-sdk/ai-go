@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // ImageOptions are Kie-specific knobs for a single Generate call. None are
@@ -13,39 +14,52 @@ import (
 // model's upstream API reference for the canonical schema.
 type ImageOptions struct {
 	// Resolution maps to `input.resolution`: "1K" | "2K" | "4K".
-	Resolution string
+	Resolution string `json:"resolution"`
 
 	// OutputFormat maps to `input.output_format` for nano-banana-2:
 	// "jpg" | "png".
-	OutputFormat string
+	OutputFormat string `json:"outputFormat"`
 
 	// CallBackURL is forwarded as the top-level `callBackUrl` field; when set
 	// Kie will POST a completion notification (we still poll either way).
-	CallBackURL string
+	CallBackURL string `json:"callBackUrl"`
 
 	// Extra adds arbitrary fields to `input`. Use this for fields that have
 	// not yet been promoted to a typed option (e.g. seed). Values overwrite
 	// builder defaults.
-	Extra map[string]any
+	Extra map[string]any `json:"extra"`
 }
 
+// ProviderName identifies the key used in llm.GenerateImageRequest.ProviderOptions.
+func (ImageOptions) ProviderName() string { return "kie" }
+
 // extractOptions pulls ImageOptions out of req.ProviderOptions["kie"], if any.
-// Returns the zero ImageOptions when the key is missing or the wrong type.
-func extractOptions(req ai.GenerateImageRequest) ImageOptions {
+// Typed ImageOptions are primary; map[string]any is the strict JSON fallback.
+func extractOptions(req llm.GenerateImageRequest) (ImageOptions, error) {
 	if req.ProviderOptions == nil {
-		return ImageOptions{}
+		return ImageOptions{}, nil
 	}
 	raw, ok := req.ProviderOptions["kie"]
 	if !ok {
-		return ImageOptions{}
+		return ImageOptions{}, nil
 	}
-	if v, ok := raw.(ImageOptions); ok {
-		return v
+	switch typed := raw.(type) {
+	case ImageOptions:
+		return typed, nil
+	case *ImageOptions:
+		if typed == nil {
+			return ImageOptions{}, llm.ProviderOptionTypeError("kie", raw)
+		}
+		return *typed, nil
+	case map[string]any:
+		var decoded ImageOptions
+		if err := llm.DecodeJSONProviderOptions("kie", typed, &decoded); err != nil {
+			return ImageOptions{}, err
+		}
+		return decoded, nil
+	default:
+		return ImageOptions{}, llm.ProviderOptionTypeError("kie", raw)
 	}
-	if v, ok := raw.(*ImageOptions); ok && v != nil {
-		return *v
-	}
-	return ImageOptions{}
 }
 
 // imageURLs returns the image-input URLs from req.Images. Inline data is

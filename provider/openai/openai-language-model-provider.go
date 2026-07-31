@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -24,6 +25,8 @@ type LanguageModel struct {
 	chunkTimeout time.Duration
 	client       *http.Client
 }
+
+var _ llm.Model = (*LanguageModel)(nil)
 
 // Config holds options for constructing an OpenAI LanguageModel.
 type Config struct {
@@ -60,7 +63,7 @@ func (m *LanguageModel) ModelID() string { return m.modelID }
 // Stream sends a streaming Responses API request and returns a channel of
 // normalized ai.StreamEvents. Warnings from request encoding are emitted as
 // the first event when non-empty.
-func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
 	apiReq, warnings, err := encodeRequest(m.modelID, req, true)
 	if err != nil {
 		return nil, fmt.Errorf("openai: encode request: %w", err)
@@ -89,7 +92,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 
 // GenerateText sends a non-streaming Responses API request and returns the
 // aggregated result directly. Use ai.GenerateText for the full tool-loop path.
-func (m *LanguageModel) GenerateText(ctx context.Context, req ai.LanguageModelRequest) (*ai.GenerateTextResult, error) {
+func (m *LanguageModel) GenerateText(ctx context.Context, req llm.Request) (*ai.GenerateTextResult, error) {
 	apiReq, warnings, err := encodeRequest(m.modelID, req, false)
 	if err != nil {
 		return nil, fmt.Errorf("openai: encode request: %w", err)

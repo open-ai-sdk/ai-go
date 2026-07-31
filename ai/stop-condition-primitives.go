@@ -1,11 +1,14 @@
 package ai
 
-import "github.com/open-ai-sdk/ai-go/aikit"
+import (
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
+)
 
 type (
 	StopCondition = aikit.StopCondition
 	StepResult    = aikit.StepResult
-	OutputSchema  = aikit.OutputSchema
+	OutputSchema  = llm.OutputSchema
 )
 
 // IsStepCount returns a StopCondition that stops after n completed steps.

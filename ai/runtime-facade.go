@@ -126,7 +126,9 @@ func WithPrepareStep(fn PrepareStepFunc) Option {
 
 // WithActiveTools filters the tool set to only these tool names for the run.
 func WithActiveTools(names ...string) Option {
-	return func(r *GenerateTextRequest) { r.ActiveTools = names }
+	return func(r *GenerateTextRequest) {
+		r.ActiveTools = append([]string{}, names...)
+	}
 }
 
 // WithOnChunk sets the callback invoked for every engine event during streaming.
@@ -194,19 +196,14 @@ func (rt *Runtime) resolveModel(req *GenerateTextRequest) {
 
 // buildRequest constructs a GenerateTextRequest from a prompt and call options.
 func (rt *Runtime) buildRequest(prompt string, opts []Option) GenerateTextRequest {
-	req := GenerateTextRequest{
-		Messages: []Message{UserMessage(prompt)},
-	}
+	req := NewRequest(nil, prompt).Build()
 	for _, o := range opts {
 		o(&req)
 	}
 	rt.resolveModel(&req)
 	// Apply deferred middlewares after model resolution so they wrap the
-	// resolved model (whether set via WithModel or WithDefaultModel).
-	if len(req.Middlewares) > 0 {
-		req.Model = WrapLanguageModel(req.Model, req.Middlewares...)
-		req.Middlewares = nil
-	}
+	// resolved model and any later PrepareStep model override.
+	applyDeferredMiddlewares(&req)
 	return req
 }
 

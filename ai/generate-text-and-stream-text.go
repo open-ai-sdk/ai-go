@@ -54,10 +54,7 @@ func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 	if err := validateToolsContext(req); err != nil {
 		return NewStreamResultWithTools(erroredEventChannel(err), req.Tools)
 	}
-	if len(req.Middlewares) > 0 {
-		req.Model = WrapLanguageModel(req.Model, req.Middlewares...)
-		req.Middlewares = nil
-	}
+	applyDeferredMiddlewares(&req)
 	ch := engine.Run(ctx, runParams(req))
 	if req.SmoothStream != nil {
 		ch = req.SmoothStream.Transform(ctx, ch)
@@ -91,7 +88,7 @@ func runParams(req GenerateTextRequest) engine.RunParams {
 	var tools *ToolSet
 	if req.Tools != nil {
 		modelRequest.Tools = req.Tools.Definitions
-		if len(req.ActiveTools) > 0 {
+		if req.ActiveTools != nil {
 			modelRequest.Tools = filterActiveTools(modelRequest.Tools, req.ActiveTools)
 		}
 		tools = &ToolSet{

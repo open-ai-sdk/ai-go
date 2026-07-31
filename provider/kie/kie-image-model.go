@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // ImageModel implements ai.ImageModel by submitting a Kie task and polling
@@ -21,6 +22,8 @@ type ImageModel struct {
 	modelID ImageModelID
 	cfg     Config
 }
+
+var _ llm.ImageModel = (*ImageModel)(nil)
 
 func newImageModel(modelID ImageModelID, cfg Config) *ImageModel {
 	return &ImageModel{modelID: modelID, cfg: cfg}
@@ -31,7 +34,7 @@ func (m *ImageModel) ModelID() string { return m.modelID.String() }
 
 // Generate submits a createTask, polls recordInfo until terminal, then
 // downloads the result images in parallel.
-func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) (*ai.GenerateImageResult, error) {
+func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest) (*llm.GenerateImageResult, error) {
 	taskID, err := m.submitTask(ctx, req)
 	if err != nil {
 		return nil, err
@@ -77,8 +80,11 @@ func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) 
 }
 
 // submitTask serializes the per-model `input` envelope and POSTs createTask.
-func (m *ImageModel) submitTask(ctx context.Context, req ai.GenerateImageRequest) (string, error) {
-	opts := extractOptions(req)
+func (m *ImageModel) submitTask(ctx context.Context, req llm.GenerateImageRequest) (string, error) {
+	opts, err := extractOptions(req)
+	if err != nil {
+		return "", err
+	}
 	input, err := m.buildInput(req, opts)
 	if err != nil {
 		return "", err
@@ -153,7 +159,7 @@ func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfo
 }
 
 // buildInput dispatches to the per-model option builder.
-func (m *ImageModel) buildInput(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
+func (m *ImageModel) buildInput(req llm.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	switch m.modelID {
 	case ModelGPTImage2TextToImage:
 		return buildGPTImage2TextInput(req, opts)

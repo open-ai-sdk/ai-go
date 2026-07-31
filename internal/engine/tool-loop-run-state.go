@@ -52,7 +52,7 @@ func (r *run) safeObserver(fn func()) {
 // bug — the consumer asked to stop receiving.
 func (r *run) emit(ev StepEvent) bool {
 	select {
-	case r.out <- ev:
+	case r.out <- snapshotStepEvent(ev):
 		return true
 	case <-r.ctx.Done():
 		return false

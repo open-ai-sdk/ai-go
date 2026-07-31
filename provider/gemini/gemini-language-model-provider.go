@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
 )
 
@@ -16,6 +17,8 @@ type LanguageModel struct {
 	modelID string
 	core    *openaichat.LanguageModel
 }
+
+var _ llm.Model = (*LanguageModel)(nil)
 
 // Config holds options for constructing a Gemini LanguageModel or EmbeddingModel.
 type Config struct {
@@ -43,7 +46,7 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 			SupportsStreamUsage:      true,
 		},
 		SanitizeTools: sanitizeToolSchemas,
-		ExtraToolsForRequest: func(req ai.LanguageModelRequest) []map[string]any {
+		ExtraToolsForRequest: func(req llm.Request) []map[string]any {
 			return extraToolsForRequest(modelID, req)
 		},
 		ExtraBodyFieldsForRequest: extraBodyFieldsForRequest,
@@ -59,7 +62,10 @@ func (m *LanguageModel) ModelID() string { return m.core.ModelID() }
 // Stream sends a streaming chat request and returns a channel of normalized ai.StreamEvents.
 // Warnings for unsupported option combinations (e.g. TopK or Seed with Google Search)
 // are injected into the first StreamEventFinish event.
-func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
+	if _, err := resolveProviderOptions(req.ProviderOptions); err != nil {
+		return nil, err
+	}
 	warnings := warningsForRequest(m.modelID, req)
 
 	coreCh, err := m.core.Stream(ctx, req)
@@ -99,7 +105,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest)
 // Google Search grounding is passed via extra body fields (not the tools array) because
 // the OpenAI-compatible endpoint only supports {"type":"function"} tools. The native
 // google_search tool is injected via extraBodyFieldsForRequest instead.
-func extraToolsForRequest(modelID string, req ai.LanguageModelRequest) []map[string]any {
+func extraToolsForRequest(modelID string, req llm.Request) []map[string]any {
 	// google_search is no longer sent as a tool — it goes via extra body fields.
 	return nil
 }
@@ -108,7 +114,7 @@ func extraToolsForRequest(modelID string, req ai.LanguageModelRequest) []map[str
 // based on provider options. Handles thinkingConfig.
 // Google Search is handled separately via TransformRequestBody to merge into tools.
 // Wired via openaichat.ModelConfig.ExtraBodyFieldsForRequest in NewLanguageModel.
-func extraBodyFieldsForRequest(req ai.LanguageModelRequest) map[string]any {
+func extraBodyFieldsForRequest(req llm.Request) map[string]any {
 	opts := parseProviderOptions(req.ProviderOptions)
 
 	result := make(map[string]any)

@@ -83,9 +83,9 @@ func (a *Adapter) Writer(w io.Writer) *Writer {
 // interceptState holds shared mutable state between the intercept goroutine and
 // the main Stream loop, protected by a mutex.
 type interceptState struct {
-	mu         sync.Mutex
-	totalUsage UsageInfo
-	toolCache  map[string]toolData
+	mu        sync.Mutex
+	usage     usageAccumulator
+	toolCache map[string]toolData
 }
 
 // interceptEvents wraps an event channel to track usage and cache tool results.
@@ -99,16 +99,14 @@ func (a *Adapter) interceptEvents(
 		defer close(intercepted)
 		defer safego.Recover(nil, recoverToEvent(intercepted))
 		for ev := range ch {
+			if ev.Type == aikit.StepEventStepStart {
+				state.mu.Lock()
+				state.usage.startStep()
+				state.mu.Unlock()
+			}
 			if ev.Type == aikit.StepEventUsage && ev.Usage != nil {
 				state.mu.Lock()
-				state.totalUsage.InputTokens += ev.Usage.InputTokens
-				state.totalUsage.InputTokenDetails.NoCacheTokens += ev.Usage.InputTokenDetails.NoCacheTokens
-				state.totalUsage.OutputTokens += ev.Usage.OutputTokens
-				state.totalUsage.OutputTokenDetails.TextTokens += ev.Usage.OutputTokenDetails.TextTokens
-				state.totalUsage.TotalTokens += ev.Usage.TotalTokens
-				state.totalUsage.OutputTokenDetails.ReasoningTokens += ev.Usage.OutputTokenDetails.ReasoningTokens
-				state.totalUsage.InputTokenDetails.CacheReadTokens += ev.Usage.InputTokenDetails.CacheReadTokens
-				state.totalUsage.InputTokenDetails.CacheWriteTokens += ev.Usage.InputTokenDetails.CacheWriteTokens
+				state.usage.apply(ev.Usage)
 				state.mu.Unlock()
 			}
 			if state.toolCache != nil && ev.Type == aikit.StepEventToolResult && ev.ToolResult != nil {
@@ -223,7 +221,7 @@ func (a *Adapter) Stream(ch <-chan aikit.StepEvent, w io.Writer) string {
 				lastFinishReason = reason
 			}
 			state.mu.Lock()
-			usage := state.totalUsage
+			usage := state.usage.snapshot()
 			state.mu.Unlock()
 			writeErr = wr.WriteFinishWithReason(lastFinishReason, usageMetadata(usage))
 		case ChunkError:

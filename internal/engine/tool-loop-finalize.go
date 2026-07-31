@@ -88,12 +88,12 @@ func emitOnStepEnd(
 		StepNumber:       step,
 		Text:             sr.text,
 		Reasoning:        sr.reasoning,
-		ToolCalls:        toolCalls,
-		ToolResults:      toolResults,
+		ToolCalls:        snapshotToolCallInfos(toolCalls),
+		ToolResults:      snapshotToolResults(toolResults),
 		FinishReason:     sr.finish,
-		Usage:            sr.usage,
-		ProviderMetadata: sr.providerMeta,
-		Warnings:         sr.warnings,
+		Usage:            snapshotUsage(sr.usage),
+		ProviderMetadata: snapshotJSONMap(sr.providerMeta),
+		Warnings:         append([]Warning(nil), sr.warnings...),
 	})
 }
 
@@ -135,9 +135,9 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 	cb.OnEnd(EndEvent{
 		Text:             totalText,
 		Reasoning:        totalReasoning,
-		Steps:            steps,
-		Usage:            totalUsage,
+		Steps:            snapshotPrepareStepInfos(steps),
+		Usage:            *snapshotUsage(&totalUsage),
 		FinishReason:     lastFinish,
-		ProviderMetadata: lastMeta,
+		ProviderMetadata: snapshotJSONMap(lastMeta),
 	})
 }

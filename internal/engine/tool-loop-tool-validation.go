@@ -58,15 +58,15 @@ func validateAndRepairToolCall(
 
 	repaired, repairErr := repair(ctx, ToolCallRepairContext{
 		Instructions: req.Instructions,
-		Messages:     req.Messages,
+		Messages:     snapshotMessages(req.Messages),
 		ToolCall: ToolCallInfo{
 			ID:               tc.id,
 			Name:             tc.name,
-			Args:             json.RawMessage(tc.args),
+			Args:             append(json.RawMessage(nil), tc.args...),
 			ArgsSet:          true,
 			ThoughtSignature: tc.thoughtSignature,
 		},
-		Tools: tools,
+		Tools: snapshotToolSetForCallback(tools),
 		Error: err,
 	})
 	if repairErr != nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/httputil"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // ModelConfig holds all configuration for the shared chat completions LanguageModel.
@@ -37,11 +38,11 @@ type ModelConfig struct {
 	// ExtraToolsForRequest is an optional hook to supply additional provider-specific
 	// tool entries per request (e.g. {"type": "google_search"} for Gemini grounding).
 	// Called with the current ai.LanguageModelRequest; may return nil.
-	ExtraToolsForRequest func(req ai.LanguageModelRequest) []map[string]any
+	ExtraToolsForRequest func(req llm.Request) []map[string]any
 	// ExtraBodyFieldsForRequest is an optional hook to supply additional top-level
 	// request body fields per request (e.g. thinkingConfig for Gemini).
 	// Returned map keys are merged into the JSON body before sending.
-	ExtraBodyFieldsForRequest func(req ai.LanguageModelRequest) map[string]any
+	ExtraBodyFieldsForRequest func(req llm.Request) map[string]any
 	// MetadataExtractor is an optional hook to extract provider metadata from SSE chunks.
 	MetadataExtractor func(chunk StreamChunk) map[string]any
 	// ChunkTimeout is the per-chunk SSE read timeout. Each received chunk resets
@@ -59,6 +60,8 @@ type LanguageModel struct {
 	cfg    ModelConfig
 	client *http.Client
 }
+
+var _ llm.Model = (*LanguageModel)(nil)
 
 // NewLanguageModel creates a LanguageModel with the given configuration.
 func NewLanguageModel(cfg ModelConfig) *LanguageModel {
@@ -82,7 +85,7 @@ func NewLanguageModel(cfg ModelConfig) *LanguageModel {
 func (m *LanguageModel) ModelID() string { return m.cfg.ModelID }
 
 // Stream sends a streaming chat request and returns a channel of normalized ai.StreamEvents.
-func (m *LanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
 	params := EncodeRequestParams{
 		ModelID:            m.cfg.ModelID,
 		SanitizeTools:      m.cfg.SanitizeTools,

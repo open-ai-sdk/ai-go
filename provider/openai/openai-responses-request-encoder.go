@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // responsesRequest is the JSON body sent to the OpenAI Responses API POST /v1/responses.
@@ -81,8 +82,11 @@ type responsesTool struct {
 }
 
 // encodeRequest builds a responsesRequest from an ai.LanguageModelRequest.
-func encodeRequest(modelID string, req ai.LanguageModelRequest, stream bool) (responsesRequest, []ai.Warning, error) {
-	opts := parseProviderOptions(req.ProviderOptions)
+func encodeRequest(modelID string, req llm.Request, stream bool) (responsesRequest, []ai.Warning, error) {
+	opts, err := parseProviderOptions(req.ProviderOptions)
+	if err != nil {
+		return responsesRequest{}, nil, err
+	}
 	var warnings []ai.Warning
 
 	input, encWarnings, err := encodeInput(req)

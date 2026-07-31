@@ -120,7 +120,7 @@ func (sr *StreamResult) broadcast(ev StepEvent) {
 	sr.mu.Unlock()
 	for _, b := range branches {
 		select {
-		case b.ch <- ev:
+		case b.ch <- snapshotStepEvent(ev):
 		case <-b.done:
 		}
 	}
@@ -213,11 +213,13 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 
 	result := &GenerateTextResult{}
 	var currentStep *StepOutput
+	var currentUsage Usage
 
 	for ev := range b.ch {
 		switch ev.Type {
 		case StepEventStepStart:
 			currentStep = &StepOutput{}
+			currentUsage = Usage{}
 
 		case StepEventTextDelta:
 			result.Text += ev.TextDelta
@@ -244,7 +246,7 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 			handleToolResult(ev, result, currentStep)
 
 		case StepEventUsage:
-			handleUsage(ev, result, currentStep)
+			handleUsage(ev, result, currentStep, &currentUsage)
 
 		case StepEventSource:
 			handleSource(ev, result, currentStep)
@@ -325,23 +327,34 @@ func handleToolResult(event StepEvent, result *GenerateTextResult, step *StepOut
 	}
 }
 
-func handleUsage(event StepEvent, result *GenerateTextResult, step *StepOutput) {
+func handleUsage(
+	event StepEvent,
+	result *GenerateTextResult,
+	step *StepOutput,
+	current *Usage,
+) {
 	if event.Usage == nil {
 		return
 	}
-	result.Usage.InputTokens += event.Usage.InputTokens
-	result.Usage.InputTokenDetails.NoCacheTokens += event.Usage.InputTokenDetails.NoCacheTokens
-	result.Usage.InputTokenDetails.CacheReadTokens += event.Usage.InputTokenDetails.CacheReadTokens
-	result.Usage.InputTokenDetails.CacheWriteTokens += event.Usage.InputTokenDetails.CacheWriteTokens
-	result.Usage.OutputTokens += event.Usage.OutputTokens
-	result.Usage.OutputTokenDetails.TextTokens += event.Usage.OutputTokenDetails.TextTokens
-	result.Usage.OutputTokenDetails.ReasoningTokens += event.Usage.OutputTokenDetails.ReasoningTokens
-	result.Usage.TotalTokens += event.Usage.TotalTokens
+	result.Usage.InputTokens += event.Usage.InputTokens - current.InputTokens
+	result.Usage.InputTokenDetails.NoCacheTokens +=
+		event.Usage.InputTokenDetails.NoCacheTokens - current.InputTokenDetails.NoCacheTokens
+	result.Usage.InputTokenDetails.CacheReadTokens +=
+		event.Usage.InputTokenDetails.CacheReadTokens - current.InputTokenDetails.CacheReadTokens
+	result.Usage.InputTokenDetails.CacheWriteTokens +=
+		event.Usage.InputTokenDetails.CacheWriteTokens - current.InputTokenDetails.CacheWriteTokens
+	result.Usage.OutputTokens += event.Usage.OutputTokens - current.OutputTokens
+	result.Usage.OutputTokenDetails.TextTokens +=
+		event.Usage.OutputTokenDetails.TextTokens - current.OutputTokenDetails.TextTokens
+	result.Usage.OutputTokenDetails.ReasoningTokens +=
+		event.Usage.OutputTokenDetails.ReasoningTokens - current.OutputTokenDetails.ReasoningTokens
+	result.Usage.TotalTokens += event.Usage.TotalTokens - current.TotalTokens
 	if event.Usage.Raw != nil {
-		result.Usage.Raw = event.Usage.Raw
+		result.Usage.Raw = snapshotJSONMap(event.Usage.Raw)
 	}
+	*current = *snapshotUsage(event.Usage)
 	if step != nil {
-		step.Usage = *event.Usage
+		step.Usage = *current
 	}
 }
 

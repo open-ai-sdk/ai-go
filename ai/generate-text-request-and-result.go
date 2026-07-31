@@ -5,9 +5,11 @@ import (
 	"log/slog"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
-// GenerateTextRequest is the input to GenerateText and StreamText.
+// GenerateTextRequest is the explicit input to GenerateText and StreamText.
+// New code can prefer [NewRequest] for fluent construction.
 type GenerateTextRequest struct {
 	// Model is the language model to call.
 	Model LanguageModel
@@ -35,7 +37,8 @@ type GenerateTextRequest struct {
 	// only gate. There is no implicit default step count.
 	MaxSteps int
 	// ProviderOptions carries provider-specific options keyed by provider name.
-	// Example: map[string]any{"openai": map[string]any{"previousResponseId": "r_abc"}}.
+	// Prefer typed options through RequestBuilder.With. A map value is reserved
+	// for input decoded from JSON.
 	ProviderOptions map[string]any
 	// PrepareStep is called before each tool-loop step to allow per-step overrides.
 	PrepareStep PrepareStepFunc
@@ -123,10 +126,10 @@ type GenerateTextResult struct {
 }
 
 type (
-	PrepareStepContext = aikit.PrepareStepContext
-	PrepareStepInfo    = aikit.PrepareStepInfo
-	PrepareStepResult  = aikit.PrepareStepResult
-	PrepareStepFunc    = aikit.PrepareStepFunc
+	PrepareStepContext = llm.PrepareStepContext
+	PrepareStepInfo    = llm.PrepareStepInfo
+	PrepareStepResult  = llm.PrepareStepResult
+	PrepareStepFunc    = llm.PrepareStepFunc
 )
 
 // StepEndEvent is passed to the OnStepEnd callback after each step.

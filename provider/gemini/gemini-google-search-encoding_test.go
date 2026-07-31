@@ -168,11 +168,11 @@ func TestGoogleSearch_ExplicitlyDisabled(t *testing.T) {
 }
 
 func TestGoogleSearch_ParseProviderOptions_WrongType(t *testing.T) {
-	opts := parseProviderOptions(map[string]any{
+	_, err := resolveProviderOptions(map[string]any{
 		"gemini": "not-a-struct",
 	})
-	if opts.EnableGoogleSearch {
-		t.Error("expected EnableGoogleSearch=false for wrong type")
+	if err == nil {
+		t.Fatal("expected wrong provider-option type to return an error")
 	}
 }
 

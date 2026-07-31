@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // nativeRequest is the top-level JSON body for :streamGenerateContent.
@@ -90,7 +91,7 @@ type nativeImageConfig struct {
 
 // encodeNativeRequest converts an ai.LanguageModelRequest to the native Gemini
 // request body for the :streamGenerateContent endpoint.
-func encodeNativeRequest(req ai.LanguageModelRequest) nativeRequest {
+func encodeNativeRequest(req llm.Request) nativeRequest {
 	nr := nativeRequest{}
 
 	// System instruction: collect from req.Instructions and any leading system messages.
@@ -107,7 +108,7 @@ func encodeNativeRequest(req ai.LanguageModelRequest) nativeRequest {
 
 // buildSystemInstruction collects system text from req.Instructions and any leading
 // RoleSystem messages in req.Messages.
-func buildSystemInstruction(req ai.LanguageModelRequest) *nativeSystemInstruction {
+func buildSystemInstruction(req llm.Request) *nativeSystemInstruction {
 	var parts []nativeTextPart
 
 	if req.Instructions != "" {
@@ -290,7 +291,7 @@ func encodeFilePart(p ai.ContentPart) nativePart {
 }
 
 // buildGenerationConfig constructs the generationConfig from settings, provider options, and output schema.
-func buildGenerationConfig(req ai.LanguageModelRequest) *nativeGenerationConfig {
+func buildGenerationConfig(req llm.Request) *nativeGenerationConfig {
 	cfg := &nativeGenerationConfig{}
 	opts := parseProviderOptions(req.ProviderOptions)
 
@@ -306,7 +307,7 @@ func buildGenerationConfig(req ai.LanguageModelRequest) *nativeGenerationConfig 
 
 // applyCallSettings maps CallSettings fields onto the generation config.
 // Returns true if any field was set.
-func applyCallSettings(cfg *nativeGenerationConfig, s ai.CallSettings) bool {
+func applyCallSettings(cfg *nativeGenerationConfig, s llm.CallSettings) bool {
 	set := false
 	if s.MaxTokens > 0 {
 		cfg.MaxOutputTokens = &s.MaxTokens

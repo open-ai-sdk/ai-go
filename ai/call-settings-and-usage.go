@@ -1,11 +1,12 @@
 package ai
 
 import "github.com/open-ai-sdk/ai-go/aikit"
+import "github.com/open-ai-sdk/ai-go/llm"
 
 // Usage, token-detail, and FinishReason types are aliases of the shared aikit
 // package so the ai and engine layers name one identical set (see ai/types.go).
 type (
-	CallSettings       = aikit.CallSettings
+	CallSettings       = llm.CallSettings
 	Usage              = aikit.Usage
 	InputTokenDetails  = aikit.InputTokenDetails
 	OutputTokenDetails = aikit.OutputTokenDetails

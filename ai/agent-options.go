@@ -145,16 +145,33 @@ func mergeCallback[T any](agent, call func(T)) func(T) {
 	return func(ev T) {
 		var wg sync.WaitGroup
 		wg.Add(2)
+		agentEvent := snapshotCallbackValue(ev)
+		callEvent := snapshotCallbackValue(ev)
 		go func() {
 			defer wg.Done()
 			defer safego.Recover(nil, nil, "callback", "agent-merge")
-			agent(ev)
+			agent(agentEvent)
 		}()
 		go func() {
 			defer wg.Done()
 			defer safego.Recover(nil, nil, "callback", "call-merge")
-			call(ev)
+			call(callEvent)
 		}()
 		wg.Wait()
 	}
+}
+
+func snapshotCallbackValue[T any](value T) T {
+	var snapshot any
+	switch event := any(value).(type) {
+	case StepEndEvent:
+		snapshot = snapshotStepEndEvent(event)
+	case EndEvent:
+		snapshot = snapshotEndEvent(event)
+	case ChunkEvent:
+		snapshot = snapshotChunkEvent(event)
+	default:
+		return value
+	}
+	return snapshot.(T)
 }
