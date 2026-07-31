@@ -107,3 +107,32 @@ func TestStructuredOutput_ProviderErrorTerminatesWithoutDone(t *testing.T) {
 		t.Fatal("structured-output failure must not be followed by Done")
 	}
 }
+
+func TestStructuredOutput_PreservesEffectiveProviderOptions(t *testing.T) {
+	model := &recordingModel{mockModel: mockModel{calls: [][]StreamEvent{
+		{textEvt("draft"), finishEvt(FinishReasonStop)},
+		{textEvt(`{"ok":true}`), finishEvt(FinishReasonStop)},
+	}}}
+	events := collectRunEvents(RunParams{
+		Model: model,
+		Request: Request{
+			Output:          &OutputSchema{Type: "object"},
+			ProviderOptions: map[string]any{"base": "kept"},
+		},
+		PrepareStep: func(PrepareStepContext) *PrepareStepResult {
+			return &PrepareStepResult{ProviderOptions: map[string]any{"override": "applied"}}
+		},
+	})
+	for _, event := range events {
+		if event.Type == StepEventError {
+			t.Fatalf("unexpected error: %v", event.Error)
+		}
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("model requests = %d, want 2", len(model.requests))
+	}
+	options := model.requests[1].ProviderOptions
+	if options["base"] != "kept" || options["override"] != "applied" {
+		t.Fatalf("structured provider options = %#v", options)
+	}
+}

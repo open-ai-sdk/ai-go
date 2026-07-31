@@ -86,10 +86,15 @@ complete:
 	}
 
 	parsed := parseStructuredOutput(b.String())
-	if parsed != nil {
-		return r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
+	if parsed == nil {
+		r.emitError(&StructuredOutputError{Path: "$", Reason: "is invalid JSON"})
+		return false
 	}
-	return true
+	if err := validateStructuredOutput(parsed, request.Output); err != nil {
+		r.emitError(err)
+		return false
+	}
+	return r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
 }
 
 // parseStructuredOutput extracts valid JSON from content, stripping markdown fences if present.
