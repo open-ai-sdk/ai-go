@@ -9,7 +9,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"time"
 
 	"github.com/open-ai-sdk/ai-go/transport"
 )
@@ -58,36 +57,10 @@ type UploadFileRequest struct {
 	MediaType string
 }
 
-// fileClient performs file upload operations against the OpenAI Files API.
-type fileClient struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
-}
-
-// newFileClient creates a file client from a LanguageModel's config.
-func newFileClient(apiKey, baseURL string) *fileClient {
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	return &fileClient{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		// One-shot file upload (not a stream), so a client-wide timeout is safe
-		// here — it bounds the whole upload rather than capping a stream.
-		client: &http.Client{Timeout: 120 * time.Second},
-	}
-}
-
 // UploadFile uploads data to the OpenAI /v1/files endpoint and returns the
 // resulting file metadata. It supports all FilePurpose values including
 // user_data for multimodal model inputs via file_id.
 func (m *LanguageModel) UploadFile(ctx context.Context, req UploadFileRequest) (*UploadedFile, error) {
-	fc := newFileClient(m.apiKey, m.baseURL)
-	return fc.upload(ctx, req)
-}
-
-func (fc *fileClient) upload(ctx context.Context, req UploadFileRequest) (*UploadedFile, error) {
 	if req.Filename == "" {
 		return nil, fmt.Errorf("openai: upload file: filename is required")
 	}
@@ -108,15 +81,16 @@ func (fc *fileClient) upload(ctx context.Context, req UploadFileRequest) (*Uploa
 		return nil, fmt.Errorf("openai: upload file: build multipart: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fc.baseURL+"/files", body)
+	if m.uploadErr != nil {
+		return nil, fmt.Errorf("openai: upload file: configure transport: %w", m.uploadErr)
+	}
+	httpReq, err := m.uploadClient.NewRequest(ctx, http.MethodPost, "files", body)
 	if err != nil {
 		return nil, fmt.Errorf("openai: upload file: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", contentType)
-	httpReq.Header.Set("Authorization", "Bearer "+fc.apiKey)
 
-	resp, err := fc.client.Do(httpReq)
+	resp, err := m.uploadClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("openai: upload file: http: %w", err)
 	}

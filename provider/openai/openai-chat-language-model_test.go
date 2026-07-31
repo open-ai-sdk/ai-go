@@ -155,6 +155,40 @@ func TestChatLanguageModel_Stream_RequestShape(t *testing.T) {
 	}
 }
 
+func TestChatLanguageModel_StrictJSONSchemaOption(t *testing.T) {
+	server, captured := chatServer(t, chatSSE("ok"))
+	defer server.Close()
+	strict := false
+	model := openai.NewChatLanguageModel("gpt-4o", openai.Config{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+	})
+	events, err := model.Stream(context.Background(), ai.LanguageModelRequest{
+		Messages: []ai.Message{ai.UserMessage("return JSON")},
+		Output: ai.OutputObject(map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"value": map[string]any{"type": "string"}},
+		}),
+		ProviderOptions: map[string]any{
+			"openai": openai.ChatProviderOptions{StrictJSONSchema: &strict},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range events {
+	}
+	var body map[string]any
+	if err := json.Unmarshal(*captured, &body); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	format := body["response_format"].(map[string]any)
+	schema := format["json_schema"].(map[string]any)
+	if schema["strict"] != false {
+		t.Fatalf("json_schema.strict = %#v", schema["strict"])
+	}
+}
+
 func TestChatLanguageModel_Stream_FinishReason(t *testing.T) {
 	sse := `data: {"choices":[{"delta":{"content":"done"},"finish_reason":null}]}
 data: {"choices":[{"delta":{},"finish_reason":"stop"}]}

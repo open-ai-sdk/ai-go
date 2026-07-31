@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // makeFakeServer creates an httptest server that returns a batchEmbedContents response
@@ -34,36 +33,9 @@ func makeFakeServer(t *testing.T) *httptest.Server {
 // newTestEmbeddingModel creates an EmbeddingModel pointed at a fake server URL.
 func newTestEmbeddingModel(t *testing.T, server *httptest.Server) *EmbeddingModel {
 	t.Helper()
-	m := &EmbeddingModel{
-		modelID: "text-embedding-004",
-		apiKey:  "fake-key",
-		client:  &http.Client{Timeout: 5 * time.Second},
-	}
-	// Override the embed base URL by patching the URL construction inline via
-	// a custom RoundTripper that rewrites the host.
-	m.client.Transport = &rewriteTransport{target: server.URL}
-	return m
-}
-
-// rewriteTransport rewrites all request URLs to point to target host.
-type rewriteTransport struct {
-	target string
-}
-
-func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Replace scheme+host with the test server URL.
-	newURL := rt.target + req.URL.Path
-	if req.URL.RawQuery != "" {
-		newURL += "?" + req.URL.RawQuery
-	}
-	cloned := req.Clone(req.Context())
-	parsed, err := req.URL.Parse(newURL)
-	if err != nil {
-		return nil, err
-	}
-	cloned.URL = parsed
-	cloned.Host = parsed.Host
-	return http.DefaultTransport.RoundTrip(cloned)
+	return NewEmbeddingModel("text-embedding-004", Config{
+		APIKey: "fake-key", BaseURL: server.URL,
+	})
 }
 
 func TestEmbeddingModel_ModelID(t *testing.T) {
@@ -109,7 +81,7 @@ func TestEmbeddingModel_EmbedBatch(t *testing.T) {
 }
 
 func TestEmbeddingModel_EmbedBatch_Empty(t *testing.T) {
-	m := &EmbeddingModel{modelID: "text-embedding-004", apiKey: "k", client: http.DefaultClient}
+	m := NewEmbeddingModel("text-embedding-004", Config{APIKey: "k"})
 	vecs, err := m.EmbedBatch(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

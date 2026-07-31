@@ -3,7 +3,6 @@ package kie
 import (
 	"fmt"
 
-	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
 
@@ -68,7 +67,7 @@ func extractOptions(req llm.GenerateImageRequest) (ImageOptions, error) {
 //
 // An error is returned if any image has an empty URL (indicating inline data
 // that was not uploaded), referencing the image index for context.
-func imageURLs(req ai.GenerateImageRequest) ([]string, error) {
+func imageURLs(req llm.GenerateImageRequest) ([]string, error) {
 	if len(req.Images) == 0 {
 		return nil, nil
 	}
@@ -86,7 +85,7 @@ func imageURLs(req ai.GenerateImageRequest) ([]string, error) {
 
 // buildGPTImage2TextInput builds the `input` for `gpt-image-2-text-to-image`.
 // Schema fields: prompt, aspect_ratio, resolution, n, seed.
-func buildGPTImage2TextInput(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
+func buildGPTImage2TextInput(req llm.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	in := map[string]any{}
 	if req.Prompt != "" {
 		in["prompt"] = req.Prompt
@@ -109,7 +108,7 @@ func buildGPTImage2TextInput(req ai.GenerateImageRequest, opts ImageOptions) (ma
 
 // buildGPTImage2EditInput builds the `input` for `gpt-image-2-image-to-image`.
 // Schema fields: prompt, input_urls, aspect_ratio, resolution, n, seed.
-func buildGPTImage2EditInput(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
+func buildGPTImage2EditInput(req llm.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	in := map[string]any{}
 	if req.Prompt != "" {
 		in["prompt"] = req.Prompt
@@ -140,7 +139,7 @@ func buildGPTImage2EditInput(req ai.GenerateImageRequest, opts ImageOptions) (ma
 // buildNanoBanana2Input builds the `input` for `nano-banana-2`.
 // Schema fields: prompt, image_input, aspect_ratio, resolution, output_format,
 // n, seed.
-func buildNanoBanana2Input(req ai.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
+func buildNanoBanana2Input(req llm.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
 	in := map[string]any{}
 	if req.Prompt != "" {
 		in["prompt"] = req.Prompt

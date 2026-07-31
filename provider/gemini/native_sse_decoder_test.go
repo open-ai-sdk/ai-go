@@ -209,6 +209,66 @@ func TestDecodeNativeSSE_GroundingSources(t *testing.T) {
 	}
 }
 
+func TestDecodeNativeSSE_AccumulatesMetadataAcrossChunks(t *testing.T) {
+	sse := `data: {"candidates":[{"groundingMetadata":{"webSearchQueries":["first"],"groundingChunks":[{"web":{"uri":"https://one.example","title":"One"}}],"searchEntryPoint":{"renderedContent":"entry"}},"citationMetadata":{"citations":[{"uri":"https://citation.example"}]}}]}
+
+data: {"candidates":[{"finishReason":"STOP","groundingMetadata":{"imageSearchQueries":["second"],"groundingChunks":[{"image":{"sourceUri":"https://source.example","imageUri":"https://image.example/image.png"}}]},"urlContextMetadata":{"urlMetadata":[{"retrievedUrl":"https://context.example"}]}}]}
+`
+	events := collectNativeEvents(nativeStreamFromString(sse))
+
+	var image *ai.Source
+	var finish *ai.StreamEvent
+	for index := range events {
+		event := &events[index]
+		if event.Type == ai.StreamEventSource &&
+			event.Source.SourceType == "image" {
+			image = event.Source
+		}
+		if event.Type == ai.StreamEventFinish {
+			finish = event
+		}
+	}
+	if image == nil || image.URL != "https://image.example/image.png" {
+		t.Fatalf("image source = %#v", image)
+	}
+	if finish == nil {
+		t.Fatal("missing finish event")
+	}
+	google := finish.ProviderMetadata["google"].(map[string]any)
+	grounding := google["groundingMetadata"].(map[string]any)
+	if len(grounding["groundingChunks"].([]any)) != 2 {
+		t.Fatalf("groundingChunks = %#v", grounding["groundingChunks"])
+	}
+	for _, key := range []string{
+		"citationMetadata",
+		"urlContextMetadata",
+	} {
+		if google[key] == nil {
+			t.Fatalf("missing %s in %#v", key, google)
+		}
+	}
+	if grounding["searchEntryPoint"] == nil {
+		t.Fatalf("missing searchEntryPoint in %#v", grounding)
+	}
+}
+
+func TestDecodeNativeSSE_ToolCallAcrossChunksFinishesAsToolCalls(t *testing.T) {
+	sse := `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"x"}}}]}}]}
+
+data: {"candidates":[{"finishReason":"STOP"}]}
+`
+	events := collectNativeEvents(nativeStreamFromString(sse))
+	for _, event := range events {
+		if event.Type == ai.StreamEventFinish {
+			if event.FinishReason != ai.FinishReasonToolCalls {
+				t.Fatalf("finish reason = %v", event.FinishReason)
+			}
+			return
+		}
+	}
+	t.Fatal("missing finish event")
+}
+
 func TestDecodeNativeSSE_MaxTokensFinish(t *testing.T) {
 	sse := `data: {"candidates":[{"content":{"parts":[{"text":"truncated output"}],"role":"model"},"finishReason":"MAX_TOKENS","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":100,"totalTokenCount":110},"modelVersion":"gemini-2.5-flash"}
 `

@@ -11,22 +11,27 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// ImageModel implements ai.ImageModel by submitting a Kie task and polling
+// ImageModel implements aikit.ImageModel by submitting a Kie task and polling
 // the unified job-status endpoint until terminal.
 type ImageModel struct {
-	modelID ImageModelID
-	cfg     Config
+	modelID   ImageModelID
+	cfg       Config
+	client    *transport.Client
+	clientErr error
 }
 
 var _ llm.ImageModel = (*ImageModel)(nil)
 
 func newImageModel(modelID ImageModelID, cfg Config) *ImageModel {
-	return &ImageModel{modelID: modelID, cfg: cfg}
+	cfg = cfg.resolved()
+	client, clientErr := newTransportClient(cfg)
+	return &ImageModel{
+		modelID: modelID, cfg: cfg, client: client, clientErr: clientErr,
+	}
 }
 
 // ModelID returns the Kie model identifier.
@@ -76,7 +81,7 @@ func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest)
 	if err != nil {
 		return nil, err
 	}
-	return &ai.GenerateImageResult{Images: images}, nil
+	return &llm.GenerateImageResult{Images: images}, nil
 }
 
 // submitTask serializes the per-model `input` envelope and POSTs createTask.
@@ -100,13 +105,18 @@ func (m *ImageModel) submitTask(ctx context.Context, req llm.GenerateImageReques
 	}
 
 	url := buildKieURL(&m.cfg, "/api/v1/jobs/createTask")
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if m.clientErr != nil {
+		return "", fmt.Errorf("kie: configure transport: %w", m.clientErr)
+	}
+	httpReq, err := m.client.NewRequest(
+		ctx, http.MethodPost, url, bytes.NewReader(body),
+	)
 	if err != nil {
 		return "", fmt.Errorf("kie: build createTask request: %w", err)
 	}
-	m.applyHeaders(httpReq, "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	respBody, status, err := doHTTP(m.cfg.HTTPClient, httpReq)
+	respBody, status, err := doHTTP(m.client, httpReq)
 	if err != nil {
 		return "", err
 	}
@@ -131,13 +141,18 @@ func (m *ImageModel) submitTask(ctx context.Context, req llm.GenerateImageReques
 // one place — the rest of the SDK is endpoint-agnostic.
 func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfoData, error) {
 	url := buildKieURL(&m.cfg, "/api/v1/jobs/recordInfo") + "?taskId=" + taskID
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if m.clientErr != nil {
+		return recordInfoData{}, fmt.Errorf(
+			"kie: configure transport: %w",
+			m.clientErr,
+		)
+	}
+	httpReq, err := m.client.NewRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return recordInfoData{}, fmt.Errorf("kie: build recordInfo request: %w", err)
 	}
-	m.applyHeaders(httpReq, "")
 
-	respBody, status, err := doHTTP(m.cfg.HTTPClient, httpReq)
+	respBody, status, err := doHTTP(m.client, httpReq)
 	if err != nil {
 		return recordInfoData{}, err
 	}
@@ -174,8 +189,8 @@ func (m *ImageModel) buildInput(req llm.GenerateImageRequest, opts ImageOptions)
 
 // downloadImages fetches each URL in parallel. HTTPS-only — non-https URLs are
 // rejected to avoid accidental plaintext fetches.
-func (m *ImageModel) downloadImages(ctx context.Context, urls []string) ([]ai.GeneratedImage, error) {
-	results := make([]ai.GeneratedImage, len(urls))
+func (m *ImageModel) downloadImages(ctx context.Context, urls []string) ([]llm.GeneratedImage, error) {
+	results := make([]llm.GeneratedImage, len(urls))
 	errs := make([]error, len(urls))
 
 	var wg sync.WaitGroup
@@ -189,7 +204,7 @@ func (m *ImageModel) downloadImages(ctx context.Context, urls []string) ([]ai.Ge
 			defer wg.Done()
 			// A panic in a single download surfaces as that entry's error
 			// instead of crashing the process; wg.Done still runs.
-			defer safego.Recover(nil, func(err error) { errs[idx] = err })
+			defer recoverAsError(func(err error) { errs[idx] = err })
 			img, err := m.downloadOne(ctx, url)
 			if err != nil {
 				errs[idx] = err
@@ -208,41 +223,28 @@ func (m *ImageModel) downloadImages(ctx context.Context, urls []string) ([]ai.Ge
 	return results, nil
 }
 
-func (m *ImageModel) downloadOne(ctx context.Context, url string) (ai.GeneratedImage, error) {
+func (m *ImageModel) downloadOne(ctx context.Context, url string) (llm.GeneratedImage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return ai.GeneratedImage{}, fmt.Errorf("kie: build download request: %w", err)
+		return llm.GeneratedImage{}, fmt.Errorf("kie: build download request: %w", err)
 	}
 	resp, err := m.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return ai.GeneratedImage{}, fmt.Errorf("kie: download image: %w", err)
+		return llm.GeneratedImage{}, fmt.Errorf("kie: download image: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return ai.GeneratedImage{}, fmt.Errorf("kie: download status %d", resp.StatusCode)
+		return llm.GeneratedImage{}, fmt.Errorf("kie: download status %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ai.GeneratedImage{}, fmt.Errorf("kie: read image body: %w", err)
+		return llm.GeneratedImage{}, fmt.Errorf("kie: read image body: %w", err)
 	}
-	return ai.GeneratedImage{
+	return llm.GeneratedImage{
 		Data:      data,
 		MediaType: resp.Header.Get("Content-Type"),
 	}, nil
-}
-
-// applyHeaders sets Auth + content-type + caller-supplied extra headers.
-func (m *ImageModel) applyHeaders(req *http.Request, contentType string) {
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	if m.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
-	}
-	for k, v := range m.cfg.Headers {
-		req.Header.Set(k, v)
-	}
 }
 
 // taskState is the canonical (lowercased) state enum.
@@ -270,7 +272,7 @@ func normalizeState(s string) taskState {
 
 // doHTTP runs req, returning body + status. Errors at the transport layer are
 // returned verbatim so callers (and tests) can match on them.
-func doHTTP(client *http.Client, req *http.Request) ([]byte, int, error) {
+func doHTTP(client transport.Doer, req *http.Request) ([]byte, int, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		// Surface ctx errors directly so callers can errors.Is(ctx.Err()).

@@ -108,19 +108,13 @@ func TestGenerate_TextToImage_Success(t *testing.T) {
 		BaseURL:      "", // direct mode
 		PollInterval: 1 * time.Millisecond,
 		PollTimeout:  2 * time.Second,
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai",
+			to:   srv.server.URL,
+			base: http.DefaultTransport,
+		}},
 	}
-	// Re-route api.kie.ai to the fake server by setting BaseURL=fake AND
-	// using a transport that swaps the proxy mirror back to /api/v1/.
 	model := newImageModel(ModelNanoBanana2, cfg.resolved())
-	model.cfg.HTTPClient = srv.server.Client()
-	// Trick: set BaseURL to the fake server then patch buildKieURL via a
-	// per-test transport. Simplest: skip BaseURL and pass through an HTTP
-	// transport that rewrites api.kie.ai to the fake host.
-	model.cfg.HTTPClient.Transport = rewriteTransport{
-		from: "https://api.kie.ai",
-		to:   srv.server.URL,
-		base: http.DefaultTransport,
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -153,13 +147,13 @@ func TestGenerate_TextToImage_Success(t *testing.T) {
 func TestGenerate_RejectsHTTP(t *testing.T) {
 	srv := newFakeKieServer(t, 0)
 	srv.httpResult = true
-	cfg := Config{APIKey: "k", PollInterval: 1 * time.Millisecond, PollTimeout: 1 * time.Second}.resolved()
+	cfg := Config{
+		APIKey: "k", PollInterval: time.Millisecond, PollTimeout: time.Second,
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai", to: srv.server.URL, base: http.DefaultTransport,
+		}},
+	}.resolved()
 	model := newImageModel(ModelNanoBanana2, cfg)
-	model.cfg.HTTPClient.Transport = rewriteTransport{
-		from: "https://api.kie.ai",
-		to:   srv.server.URL,
-		base: http.DefaultTransport,
-	}
 	_, err := model.Generate(context.Background(), ai.GenerateImageRequest{Prompt: "x"})
 	if err == nil || !strings.Contains(err.Error(), "non-https") {
 		t.Errorf("err = %v; want non-https rejection", err)
@@ -168,13 +162,13 @@ func TestGenerate_RejectsHTTP(t *testing.T) {
 
 func TestGenerate_ImageToImagePreservesURLs(t *testing.T) {
 	srv := newFakeKieServer(t, 0)
-	cfg := Config{APIKey: "k", PollInterval: 1 * time.Millisecond, PollTimeout: 2 * time.Second}.resolved()
+	cfg := Config{
+		APIKey: "k", PollInterval: time.Millisecond, PollTimeout: 2 * time.Second,
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai", to: srv.server.URL, base: http.DefaultTransport,
+		}},
+	}.resolved()
 	model := newImageModel(ModelGPTImage2ImageToImage, cfg)
-	model.cfg.HTTPClient.Transport = rewriteTransport{
-		from: "https://api.kie.ai",
-		to:   srv.server.URL,
-		base: http.DefaultTransport,
-	}
 	_, _ = model.Generate(context.Background(), ai.GenerateImageRequest{
 		Prompt: "edit",
 		Images: []ai.ImageInput{{URL: "https://cdn/in1.png"}, {URL: "https://cdn/in2.png"}},

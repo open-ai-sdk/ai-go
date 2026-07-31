@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
 
@@ -81,13 +81,13 @@ type responsesTool struct {
 	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
-// encodeRequest builds a responsesRequest from an ai.LanguageModelRequest.
-func encodeRequest(modelID string, req llm.Request, stream bool) (responsesRequest, []ai.Warning, error) {
+// encodeRequest builds a responsesRequest from an llm.Request.
+func encodeRequest(modelID string, req llm.Request, stream bool) (responsesRequest, []aikit.Warning, error) {
 	opts, err := parseProviderOptions(req.ProviderOptions)
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
-	var warnings []ai.Warning
+	var warnings []aikit.Warning
 
 	input, encWarnings, err := encodeInput(req)
 	if err != nil {
@@ -116,7 +116,7 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	}
 
 	if len(req.Settings.StopSequences) > 0 {
-		warnings = append(warnings, ai.Warning{
+		warnings = append(warnings, aikit.Warning{
 			Type:    "unsupported-setting",
 			Setting: "stopSequences",
 			Message: "stopSequences is not supported by the OpenAI Responses API",
@@ -164,9 +164,9 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 }
 
 // encodeInput converts system prompt + messages to Responses API input items.
-func encodeInput(req ai.LanguageModelRequest) ([]inputItem, []ai.Warning, error) {
+func encodeInput(req llm.Request) ([]inputItem, []aikit.Warning, error) {
 	var items []inputItem
-	var warnings []ai.Warning
+	var warnings []aikit.Warning
 
 	if req.Instructions != "" {
 		items = append(items, inputItem{
@@ -186,29 +186,29 @@ func encodeInput(req ai.LanguageModelRequest) ([]inputItem, []ai.Warning, error)
 	return items, warnings, nil
 }
 
-func encodeMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
+func encodeMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 	switch m.Role {
-	case ai.RoleUser:
+	case aikit.RoleUser:
 		return encodeUserMessage(m)
-	case ai.RoleAssistant:
+	case aikit.RoleAssistant:
 		return encodeAssistantMessage(m)
-	case ai.RoleTool:
+	case aikit.RoleTool:
 		return encodeToolResultMessage(m)
 	default:
 		return nil, nil, fmt.Errorf("openai: unsupported message role %q", m.Role)
 	}
 }
 
-func encodeUserMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
+func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 	var parts []inputPart
-	var warnings []ai.Warning
+	var warnings []aikit.Warning
 
 	for _, p := range m.Content {
 		switch p.Type {
-		case ai.ContentPartTypeText:
+		case aikit.ContentPartTypeText:
 			parts = append(parts, inputPart{Type: "input_text", Text: p.Text})
 
-		case ai.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				switch {
 				case p.FileID != "":
@@ -248,7 +248,7 @@ func encodeUserMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 			}
 
 		default:
-			warnings = append(warnings, ai.Warning{
+			warnings = append(warnings, aikit.Warning{
 				Type:    "unsupported-setting",
 				Setting: string(p.Type),
 				Message: fmt.Sprintf("openai: unsupported user content part type %q, skipping", p.Type),
@@ -262,15 +262,15 @@ func encodeUserMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 	return []inputItem{{Role: "user", Content: parts}}, warnings, nil
 }
 
-func encodeAssistantMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
+func encodeAssistantMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 	var items []inputItem
 
 	var textParts []inputPart
 	for _, p := range m.Content {
 		switch p.Type {
-		case ai.ContentPartTypeText:
+		case aikit.ContentPartTypeText:
 			textParts = append(textParts, inputPart{Type: "output_text", Text: p.Text})
-		case ai.ContentPartTypeToolCall:
+		case aikit.ContentPartTypeToolCall:
 			// Flush any accumulated text first.
 			if len(textParts) > 0 {
 				items = append(items, inputItem{Role: "assistant", Content: textParts})
@@ -290,10 +290,10 @@ func encodeAssistantMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 	return items, nil, nil
 }
 
-func encodeToolResultMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
+func encodeToolResultMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 	var items []inputItem
 	for _, p := range m.Content {
-		if p.Type == ai.ContentPartTypeToolResult {
+		if p.Type == aikit.ContentPartTypeToolResult {
 			items = append(items, inputItem{
 				Type:   "function_call_output",
 				CallID: p.ToolResultID,
@@ -304,7 +304,7 @@ func encodeToolResultMessage(m ai.Message) ([]inputItem, []ai.Warning, error) {
 	return items, nil, nil
 }
 
-func encodeTools(defs []ai.ToolDefinition, opts ProviderOptions) ([]responsesTool, []ai.Warning) {
+func encodeTools(defs []aikit.ToolDefinition, opts ProviderOptions) ([]responsesTool, []aikit.Warning) {
 	var tools []responsesTool
 
 	for _, d := range defs {
@@ -323,7 +323,7 @@ func encodeTools(defs []ai.ToolDefinition, opts ProviderOptions) ([]responsesToo
 	return tools, nil
 }
 
-func encodeOutputSchema(o *ai.OutputSchema) *textConfig {
+func encodeOutputSchema(o *llm.OutputSchema) *textConfig {
 	schema := o.Schema
 	if o.Type == "object" && schema != nil {
 		if _, ok := schema["type"]; !ok {

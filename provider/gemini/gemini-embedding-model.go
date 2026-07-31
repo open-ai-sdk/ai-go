@@ -17,9 +17,9 @@ const embedBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 // EmbeddingModel implements ai.EmbeddingModel using the Gemini native embedding API.
 type EmbeddingModel struct {
 	modelID              string
-	apiKey               string
 	outputDimensionality int
-	client               *http.Client
+	client               *transport.Client
+	clientErr            error
 }
 
 // NewEmbeddingModel creates a Gemini-backed ai.EmbeddingModel.
@@ -29,13 +29,28 @@ func NewEmbeddingModel(modelID string, cfg Config) *EmbeddingModel {
 	if timeout == 0 {
 		timeout = 60 * time.Second
 	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = embedBaseURL
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: baseURL,
+		Headers: http.Header{"Content-Type": []string{"application/json"}},
+		Auth: func(request *http.Request) {
+			request.Header.Set("x-goog-api-key", cfg.APIKey)
+		},
+		HTTPClient: httpClient,
+		Provider:   "gemini-embed",
+	})
 	return &EmbeddingModel{
 		modelID:              modelID,
-		apiKey:               cfg.APIKey,
 		outputDimensionality: cfg.OutputDimensionality,
-		// One-shot request/response (not a stream), so a client-wide timeout is
-		// safe here — it bounds the whole embed call rather than capping a stream.
-		client: &http.Client{Timeout: timeout},
+		client:               client,
+		clientErr:            clientErr,
 	}
 }
 
@@ -63,16 +78,19 @@ func (m *EmbeddingModel) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("gemini embed: build request: %w", err)
 	}
 
-	// The API key travels in the x-goog-api-key header, never the URL: a
-	// transport error wraps a *url.Error that renders the full URL into its
-	// message, which would leak a live key into consumer logs.
-	url := fmt.Sprintf("%s/models/%s:batchEmbedContents", embedBaseURL, m.modelID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if m.clientErr != nil {
+		return nil, fmt.Errorf("gemini embed: configure transport: %w", m.clientErr)
+	}
+	target := fmt.Sprintf("models/%s:batchEmbedContents", m.modelID)
+	httpReq, err := m.client.NewRequest(
+		ctx,
+		http.MethodPost,
+		target,
+		bytes.NewReader(reqBody),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("gemini embed: build http request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", m.apiKey)
 
 	resp, err := m.client.Do(httpReq)
 	if err != nil {

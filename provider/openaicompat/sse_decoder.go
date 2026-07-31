@@ -1,4 +1,4 @@
-package openaichat
+package openaicompat
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
@@ -60,20 +60,20 @@ type SSEDecodeParams struct {
 	ProviderName string
 	// MetadataExtractor is an optional hook to populate ProviderMetadata on finish events.
 	MetadataExtractor func(chunk StreamChunk) map[string]any
-	// SourceExtractor is an optional hook to extract ai.Source events from a chunk.
+	// SourceExtractor is an optional hook to extract aikit.Source events from a chunk.
 	// Called for every chunk; returned sources are emitted before text/tool deltas.
-	SourceExtractor func(chunk StreamChunk) []ai.Source
+	SourceExtractor func(chunk StreamChunk) []aikit.Source
 	// EncodeWarnings are advisories raised while encoding the request. They are
 	// merged onto the finish event so callers see them in the aggregated result.
-	EncodeWarnings []ai.Warning
+	EncodeWarnings []aikit.Warning
 }
 
-// DecodeSSEStream reads SSE lines from body and emits normalized ai.StreamEvents onto ch.
+// DecodeSSEStream reads SSE lines from body and emits normalized aikit.StreamEvents onto ch.
 // It closes ch when done or on error.
 func DecodeSSEStream(
 	ctx context.Context,
 	reader *transport.SSEReader,
-	ch chan<- ai.StreamEvent,
+	ch chan<- aikit.StreamEvent,
 	params SSEDecodeParams,
 ) error {
 	providerName := params.ProviderName
@@ -100,9 +100,9 @@ func DecodeSSEStream(
 		lineCount++
 		if data == "[DONE]" {
 			if !finishEmitted {
-				ch <- ai.StreamEvent{
-					Type:            ai.StreamEventFinish,
-					FinishReason:    ai.FinishReasonStop,
+				ch <- aikit.StreamEvent{
+					Type:            aikit.StreamEventFinish,
+					FinishReason:    aikit.FinishReasonStop,
 					RawFinishReason: "stop",
 					Warnings:        params.EncodeWarnings,
 				}
@@ -127,7 +127,7 @@ func DecodeSSEStream(
 // emitUsageEvent emits a StreamEventUsage for a chunk that carries token counts.
 // Usage may arrive on a chunk with empty choices, so it is handled separately
 // from the choice-driven events below.
-func emitUsageEvent(chunk StreamChunk, ch chan<- ai.StreamEvent) {
+func emitUsageEvent(chunk StreamChunk, ch chan<- aikit.StreamEvent) {
 	if chunk.Usage == nil {
 		return
 	}
@@ -147,17 +147,17 @@ func emitUsageEvent(chunk StreamChunk, ch chan<- ai.StreamEvent) {
 	if noCache < 0 {
 		noCache = 0
 	}
-	ch <- ai.StreamEvent{
-		Type: ai.StreamEventUsage,
-		Usage: &ai.Usage{
+	ch <- aikit.StreamEvent{
+		Type: aikit.StreamEventUsage,
+		Usage: &aikit.Usage{
 			InputTokens: u.PromptTokens,
-			InputTokenDetails: ai.InputTokenDetails{
+			InputTokenDetails: aikit.InputTokenDetails{
 				NoCacheTokens:    noCache,
 				CacheReadTokens:  cachedTokens,
 				CacheWriteTokens: cacheWriteTokens,
 			},
 			OutputTokens: u.CompletionTokens,
-			OutputTokenDetails: ai.OutputTokenDetails{
+			OutputTokenDetails: aikit.OutputTokenDetails{
 				TextTokens:      u.CompletionTokens - reasoningTokens,
 				ReasoningTokens: reasoningTokens,
 			},
@@ -175,7 +175,7 @@ func emitUsageEvent(chunk StreamChunk, ch chan<- ai.StreamEvent) {
 
 func emitChunkEvents(
 	chunk StreamChunk,
-	ch chan<- ai.StreamEvent,
+	ch chan<- aikit.StreamEvent,
 	params SSEDecodeParams,
 	finishEmitted *bool,
 ) {
@@ -188,7 +188,7 @@ func emitChunkEvents(
 	// Emit sources extracted from this chunk (e.g. Gemini grounding chunks).
 	if sourceExtractor != nil {
 		for _, src := range sourceExtractor(chunk) {
-			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &src}
+			ch <- aikit.StreamEvent{Type: aikit.StreamEventSource, Source: &src}
 		}
 	}
 
@@ -203,8 +203,8 @@ func emitChunkEvents(
 		if metaExtractor != nil {
 			meta = metaExtractor(chunk)
 		}
-		ch <- ai.StreamEvent{
-			Type:             ai.StreamEventFinish,
+		ch <- aikit.StreamEvent{
+			Type:             aikit.StreamEventFinish,
 			FinishReason:     MapFinishReason(choice.FinishReason),
 			RawFinishReason:  choice.FinishReason,
 			ProviderMetadata: meta,
@@ -219,8 +219,8 @@ func emitChunkEvents(
 		reasoningText = choice.Delta.Reasoning
 	}
 	if reasoningText != "" {
-		ch <- ai.StreamEvent{
-			Type:      ai.StreamEventReasoningDelta,
+		ch <- aikit.StreamEvent{
+			Type:      aikit.StreamEventReasoningDelta,
 			TextDelta: reasoningText,
 		}
 	}
@@ -228,14 +228,14 @@ func emitChunkEvents(
 	// Text or reasoning delta (Gemini thought flag pattern).
 	if choice.Delta.Content != "" || choice.Delta.ThoughtSignature != "" {
 		if choice.Delta.Thought != nil && *choice.Delta.Thought {
-			ch <- ai.StreamEvent{
-				Type:             ai.StreamEventReasoningDelta,
+			ch <- aikit.StreamEvent{
+				Type:             aikit.StreamEventReasoningDelta,
 				TextDelta:        choice.Delta.Content,
 				ThoughtSignature: choice.Delta.ThoughtSignature,
 			}
 		} else if choice.Delta.Content != "" {
-			ch <- ai.StreamEvent{
-				Type:             ai.StreamEventTextDelta,
+			ch <- aikit.StreamEvent{
+				Type:             aikit.StreamEventTextDelta,
 				TextDelta:        choice.Delta.Content,
 				ThoughtSignature: choice.Delta.ThoughtSignature,
 			}
@@ -248,8 +248,8 @@ func emitChunkEvents(
 		if tc.ExtraContent != nil {
 			sig = tc.ExtraContent.Google.ThoughtSignature
 		}
-		ch <- ai.StreamEvent{
-			Type:              ai.StreamEventToolCallDelta,
+		ch <- aikit.StreamEvent{
+			Type:              aikit.StreamEventToolCallDelta,
 			ToolCallIndex:     tc.Index,
 			ToolCallID:        tc.ID,
 			ToolCallName:      tc.Function.Name,

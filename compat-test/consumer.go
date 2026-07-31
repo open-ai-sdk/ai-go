@@ -10,6 +10,8 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/provider/openaicompat"
 	"github.com/open-ai-sdk/ai-go/uistream"
 )
 
@@ -29,6 +31,25 @@ func (fakeModel) Stream(_ context.Context, _ ai.LanguageModelRequest) (<-chan ai
 
 // Compile-time proof an external consumer can implement the model interface.
 var _ ai.LanguageModel = fakeModel{}
+
+type externalCompat struct{}
+
+func (externalCompat) BaseURL() string { return "https://example.com/v1" }
+func (externalCompat) AuthHeader(key string) (string, string) {
+	return "Authorization", "Bearer " + key
+}
+
+var _ openaicompat.Compat = externalCompat{}
+
+// CompatibleModel proves a separate module can construct the generic provider
+// without importing any internal package.
+func CompatibleModel() llm.Model {
+	return openaicompat.NewModel(openaicompat.Config{
+		Provider: externalCompat{},
+		ModelID:  "external-model",
+		APIKey:   "key",
+	})
+}
 
 // fakeStreamEventer implements uistream.StreamEventer from outside the module,
 // proving the UI-stream surface is mockable — its Stream() returns the public

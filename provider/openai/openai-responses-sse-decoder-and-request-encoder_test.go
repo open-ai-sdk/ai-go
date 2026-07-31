@@ -437,53 +437,6 @@ func TestEncodeRequest_StopSequencesWarning(t *testing.T) {
 	}
 }
 
-// Non-stream decoder tests
-
-func TestDecodeNonStream_TextResponse(t *testing.T) {
-	body := []byte(`{
-		"id": "resp_abc",
-		"status": "completed",
-		"output": [
-			{
-				"type": "message",
-				"content": [
-					{"type": "output_text", "text": "Hello, world!"}
-				]
-			}
-		],
-		"usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-	}`)
-
-	result, err := decodeResponsesNonStream(body, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Text != "Hello, world!" {
-		t.Errorf("expected Text=Hello, world!, got %q", result.Text)
-	}
-	if result.Usage.InputTokens != 10 {
-		t.Errorf("expected 10 prompt tokens, got %d", result.Usage.InputTokens)
-	}
-	if result.FinishReason != ai.FinishReasonStop {
-		t.Errorf("expected FinishReasonStop, got %q", result.FinishReason)
-	}
-	if result.RawFinishReason != "completed" {
-		t.Errorf("expected RawFinishReason=completed, got %q", result.RawFinishReason)
-	}
-	meta, _ := result.ProviderMetadata["openai"].(map[string]any)
-	if meta["responseId"] != "resp_abc" {
-		t.Errorf("expected responseId=resp_abc, got %v", meta["responseId"])
-	}
-}
-
-func TestDecodeNonStream_ErrorResponse(t *testing.T) {
-	body := []byte(`{"error":{"code":"invalid_request","message":"bad request"}}`)
-	_, err := decodeResponsesNonStream(body, nil)
-	if err == nil {
-		t.Error("expected error, got nil")
-	}
-}
-
 // An image URL must be encoded as input_image. Before media-type routing
 // replaced the old type discriminator, an ImageURLPart carried no media type
 // and fell through to the input_file branch, so the model never saw an image.

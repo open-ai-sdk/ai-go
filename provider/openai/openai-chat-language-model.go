@@ -1,22 +1,52 @@
 package openai
 
 import (
-	"context"
-
-	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/llm"
-	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
+	"github.com/open-ai-sdk/ai-go/provider/openaicompat"
 )
 
 const chatProviderName = "openai-chat"
 
-// ChatLanguageModel implements ai.LanguageModel for the OpenAI Chat Completions API.
-// Use NewChatLanguageModel to construct one.
-type ChatLanguageModel struct {
-	inner *openaichat.LanguageModel
+// ChatLanguageModel implements [llm.Model] for Chat Completions.
+type ChatLanguageModel = openaicompat.Model
+
+type chatBackend struct{ baseURL string }
+
+func (b chatBackend) BaseURL() string { return b.baseURL }
+func (chatBackend) AuthHeader(key string) (string, string) {
+	return "Authorization", "Bearer " + key
+}
+func (chatBackend) ProviderName() string { return chatProviderName }
+func (chatBackend) Capabilities() openaicompat.CapabilityFlags {
+	return openaicompat.CapabilityFlags{
+		SupportsStructuredOutput: true,
+		SupportsStreamUsage:      true,
+	}
 }
 
-var _ llm.Model = (*ChatLanguageModel)(nil)
+func (chatBackend) RewriteRequest(
+	req llm.Request,
+	body map[string]any,
+) (map[string]any, error) {
+	opts, err := parseChatProviderOptions(req.ProviderOptions)
+	if err != nil {
+		return nil, err
+	}
+	if opts.ReasoningEffort != "" {
+		body["reasoning_effort"] = opts.ReasoningEffort
+	}
+	if opts.User != "" {
+		body["user"] = opts.User
+	}
+	if opts.StrictJSONSchema != nil {
+		if format, ok := body["response_format"].(map[string]any); ok {
+			if schema, ok := format["json_schema"].(map[string]any); ok {
+				schema["strict"] = *opts.StrictJSONSchema
+			}
+		}
+	}
+	return body, nil
+}
 
 // NewChatLanguageModel creates an OpenAI-backed ai.LanguageModel using the
 // Chat Completions API (/chat/completions).
@@ -36,33 +66,14 @@ func NewChatLanguageModel(modelID string, cfg Config) *ChatLanguageModel {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	inner := openaichat.NewLanguageModel(openaichat.ModelConfig{
+	return openaicompat.NewModel(openaicompat.Config{
+		Provider:     chatBackend{baseURL: base},
 		ModelID:      modelID,
-		ProviderName: chatProviderName,
-		BaseURL:      base,
 		APIKey:       cfg.APIKey,
 		Timeout:      cfg.Timeout,
-		Capabilities: openaichat.CapabilityFlags{
-			SupportsStructuredOutput: true,
-			SupportsStreamUsage:      true,
-		},
 		ChunkTimeout: cfg.ChunkTimeout,
-		ExtraBodyFieldsForRequest: func(req llm.Request) map[string]any {
-			opts, _ := parseChatProviderOptions(req.ProviderOptions)
-			extra := make(map[string]any)
-			if opts.ReasoningEffort != "" {
-				extra["reasoning_effort"] = opts.ReasoningEffort
-			}
-			if opts.User != "" {
-				extra["user"] = opts.User
-			}
-			if len(extra) == 0 {
-				return nil
-			}
-			return extra
-		},
+		HTTPClient:   cfg.HTTPClient,
 	})
-	return &ChatLanguageModel{inner: inner}
 }
 
 // parseChatProviderOptions extracts ChatProviderOptions from a generic provider
@@ -95,19 +106,4 @@ func parseChatProviderOptions(opts map[string]any) (ChatProviderOptions, error) 
 	default:
 		return ChatProviderOptions{}, llm.ProviderOptionTypeError("openai", raw)
 	}
-}
-
-// ModelID returns the OpenAI model identifier.
-func (m *ChatLanguageModel) ModelID() string { return m.inner.ModelID() }
-
-// Stream sends a streaming Chat Completions request and returns a channel of
-// normalized ai.StreamEvents.
-func (m *ChatLanguageModel) Stream(
-	ctx context.Context,
-	req llm.Request,
-) (<-chan ai.StreamEvent, error) {
-	if _, err := parseChatProviderOptions(req.ProviderOptions); err != nil {
-		return nil, err
-	}
-	return m.inner.Stream(ctx, req)
 }

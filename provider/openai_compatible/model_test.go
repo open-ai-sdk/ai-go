@@ -242,6 +242,49 @@ func TestStream_NoStreamOptions_WhenCapabilityOff(t *testing.T) {
 	}
 }
 
+func TestStream_StructuredOutputCapability(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		supported  bool
+		formatType string
+	}{
+		{name: "fallback", formatType: "json_object"},
+		{name: "json schema", supported: true, formatType: "json_schema"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var received map[string]any
+			server := newTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+				_ = json.NewDecoder(request.Body).Decode(&received)
+				writer.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(writer, sseResponse(textChunk("ok")))
+			})
+			defer server.Close()
+
+			model := compat.NewLanguageModel("test", compat.Config{
+				APIKey:                   "key",
+				BaseURL:                  server.URL,
+				SupportsStructuredOutput: test.supported,
+			})
+			events, err := model.Stream(context.Background(), ai.LanguageModelRequest{
+				Messages: []ai.Message{ai.UserMessage("hi")},
+				Output: &ai.OutputSchema{
+					Type:   "object",
+					Schema: map[string]any{"type": "object"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Stream() error = %v", err)
+			}
+			for range events {
+			}
+			format := received["response_format"].(map[string]any)
+			if format["type"] != test.formatType {
+				t.Fatalf("response_format = %#v", format)
+			}
+		})
+	}
+}
+
 func TestStream_ProviderName_InError(t *testing.T) {
 	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

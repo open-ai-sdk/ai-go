@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
@@ -84,14 +84,14 @@ type pendingCall struct {
 }
 
 // decodeResponsesSSEStream reads OpenAI Responses API SSE lines and emits
-// normalized ai.StreamEvents onto ch. Closes ch when done or on error.
+// normalized aikit.StreamEvents onto ch. Closes ch when done or on error.
 // encodingWarnings are merged onto the finish event so callers see them in the
 // GenerateTextResult.Warnings field without a separate event.
 func decodeResponsesSSEStream(
 	ctx context.Context,
 	reader *transport.SSEReader,
-	ch chan<- ai.StreamEvent,
-	encodingWarnings ...ai.Warning,
+	ch chan<- aikit.StreamEvent,
+	encodingWarnings ...aikit.Warning,
 ) error {
 	state := &streamState{callsByItemID: make(map[string]*pendingCall)}
 
@@ -135,8 +135,8 @@ func decodeResponsesSSEStream(
 func dispatchChunk(
 	chunk responsesChunk,
 	state *streamState,
-	ch chan<- ai.StreamEvent,
-	encodingWarnings []ai.Warning,
+	ch chan<- aikit.StreamEvent,
+	encodingWarnings []aikit.Warning,
 ) bool {
 	switch chunk.Type {
 	case "response.created":
@@ -148,8 +148,8 @@ func dispatchChunk(
 		handleResponseCompleted(chunk, state, ch, encodingWarnings)
 
 	case "response.failed", "response.cancelled", "response.incomplete":
-		ch <- ai.StreamEvent{
-			Type:            ai.StreamEventFinish,
+		ch <- aikit.StreamEvent{
+			Type:            aikit.StreamEventFinish,
 			FinishReason:    mapResponsesFinishReason(chunk.Type, false),
 			RawFinishReason: chunk.Type,
 		}
@@ -157,8 +157,8 @@ func dispatchChunk(
 
 	case "error":
 		if chunk.Error != nil {
-			ch <- ai.StreamEvent{
-				Type:  ai.StreamEventError,
+			ch <- aikit.StreamEvent{
+				Type:  aikit.StreamEventError,
 				Error: fmt.Errorf("openai: %s: %s", chunk.Error.Code, chunk.Error.Message),
 			}
 		}
@@ -166,12 +166,12 @@ func dispatchChunk(
 
 	case "response.output_text.delta":
 		if chunk.Delta != "" {
-			ch <- ai.StreamEvent{Type: ai.StreamEventTextDelta, TextDelta: chunk.Delta}
+			ch <- aikit.StreamEvent{Type: aikit.StreamEventTextDelta, TextDelta: chunk.Delta}
 		}
 
 	case "response.reasoning_summary_text.delta":
 		if chunk.Delta != "" {
-			ch <- ai.StreamEvent{Type: ai.StreamEventReasoningDelta, TextDelta: chunk.Delta}
+			ch <- aikit.StreamEvent{Type: aikit.StreamEventReasoningDelta, TextDelta: chunk.Delta}
 		}
 
 	case "response.output_item.added":
@@ -182,9 +182,9 @@ func dispatchChunk(
 
 	case "response.web_search_call.sources":
 		for _, s := range chunk.Sources {
-			ch <- ai.StreamEvent{
-				Type:   ai.StreamEventSource,
-				Source: &ai.Source{SourceType: "url", ID: s.ID, URL: s.URL, Title: s.Title},
+			ch <- aikit.StreamEvent{
+				Type:   aikit.StreamEventSource,
+				Source: &aikit.Source{SourceType: "url", ID: s.ID, URL: s.URL, Title: s.Title},
 			}
 		}
 	}
@@ -194,8 +194,8 @@ func dispatchChunk(
 func handleResponseCompleted(
 	chunk responsesChunk,
 	state *streamState,
-	ch chan<- ai.StreamEvent,
-	encodingWarnings []ai.Warning,
+	ch chan<- aikit.StreamEvent,
+	encodingWarnings []aikit.Warning,
 ) {
 	if chunk.Response == nil {
 		return
@@ -217,15 +217,15 @@ func handleResponseCompleted(
 		if noCache < 0 {
 			noCache = 0
 		}
-		ch <- ai.StreamEvent{Type: ai.StreamEventUsage, Usage: &ai.Usage{
+		ch <- aikit.StreamEvent{Type: aikit.StreamEventUsage, Usage: &aikit.Usage{
 			InputTokens: u.InputTokens,
-			InputTokenDetails: ai.InputTokenDetails{
+			InputTokenDetails: aikit.InputTokenDetails{
 				NoCacheTokens:    noCache,
 				CacheReadTokens:  cachedTokens,
 				CacheWriteTokens: cacheWriteTokens,
 			},
 			OutputTokens: u.OutputTokens,
-			OutputTokenDetails: ai.OutputTokenDetails{
+			OutputTokenDetails: aikit.OutputTokenDetails{
 				TextTokens:      u.OutputTokens - reasoningTokens,
 				ReasoningTokens: reasoningTokens,
 			},
@@ -239,8 +239,8 @@ func handleResponseCompleted(
 			},
 		}}
 	}
-	ch <- ai.StreamEvent{
-		Type:             ai.StreamEventFinish,
+	ch <- aikit.StreamEvent{
+		Type:             aikit.StreamEventFinish,
 		FinishReason:     mapResponsesFinishReason(chunk.Response.Status, len(state.callsByItemID) > 0),
 		RawFinishReason:  chunk.Response.Status,
 		ProviderMetadata: map[string]any{"openai": map[string]any{"responseId": state.responseID}},
@@ -248,7 +248,7 @@ func handleResponseCompleted(
 	}
 }
 
-func handleOutputItemAdded(chunk responsesChunk, state *streamState, ch chan<- ai.StreamEvent) {
+func handleOutputItemAdded(chunk responsesChunk, state *streamState, ch chan<- aikit.StreamEvent) {
 	if chunk.Item == nil || chunk.Item.Type != "function_call" {
 		return
 	}
@@ -256,15 +256,15 @@ func handleOutputItemAdded(chunk responsesChunk, state *streamState, ch chan<- a
 	pc := &pendingCall{id: chunk.Item.CallID, name: chunk.Item.Name}
 	state.callsByItemID[itemID] = pc
 	state.callOrder = append(state.callOrder, itemID)
-	ch <- ai.StreamEvent{
-		Type:          ai.StreamEventToolCallDelta,
+	ch <- aikit.StreamEvent{
+		Type:          aikit.StreamEventToolCallDelta,
 		ToolCallIndex: len(state.callOrder) - 1,
 		ToolCallID:    chunk.Item.CallID,
 		ToolCallName:  chunk.Item.Name,
 	}
 }
 
-func handleFunctionCallArgsDelta(chunk responsesChunk, state *streamState, ch chan<- ai.StreamEvent) {
+func handleFunctionCallArgsDelta(chunk responsesChunk, state *streamState, ch chan<- aikit.StreamEvent) {
 	if chunk.Delta == "" || chunk.ItemID == "" {
 		return
 	}
@@ -273,8 +273,8 @@ func handleFunctionCallArgsDelta(chunk responsesChunk, state *streamState, ch ch
 		return
 	}
 	pc.args.WriteString(chunk.Delta)
-	ch <- ai.StreamEvent{
-		Type:              ai.StreamEventToolCallDelta,
+	ch <- aikit.StreamEvent{
+		Type:              aikit.StreamEventToolCallDelta,
 		ToolCallIndex:     indexOfItemID(state.callOrder, chunk.ItemID),
 		ToolCallID:        pc.id,
 		ToolCallName:      pc.name,
@@ -291,21 +291,21 @@ func indexOfItemID(order []string, id string) int {
 	return 0
 }
 
-func mapResponsesFinishReason(status string, hasFunctionCall bool) ai.FinishReason {
+func mapResponsesFinishReason(status string, hasFunctionCall bool) aikit.FinishReason {
 	switch status {
 	case "completed":
 		if hasFunctionCall {
-			return ai.FinishReasonToolCalls
+			return aikit.FinishReasonToolCalls
 		}
-		return ai.FinishReasonStop
+		return aikit.FinishReasonStop
 	case "max_output_tokens":
-		return ai.FinishReasonLength
+		return aikit.FinishReasonLength
 	case "content_filter":
-		return ai.FinishReasonContentFilter
+		return aikit.FinishReasonContentFilter
 	default:
 		if hasFunctionCall {
-			return ai.FinishReasonToolCalls
+			return aikit.FinishReasonToolCalls
 		}
-		return ai.FinishReasonUnknown
+		return aikit.FinishReasonUnknown
 	}
 }

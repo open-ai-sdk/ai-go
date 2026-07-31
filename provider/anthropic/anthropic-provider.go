@@ -1,4 +1,4 @@
-// Package anthropic implements a native ai.LanguageModel for the Anthropic Messages API.
+// Package anthropic implements the Anthropic Messages API.
 // Unlike routing Anthropic through the OpenAI-compatible shim, this provider supports
 // native features: prompt caching, extended thinking, and proper token counting.
 package anthropic
@@ -6,7 +6,7 @@ package anthropic
 import (
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // Config configures the Anthropic provider.
@@ -46,8 +46,8 @@ func NewProvider(cfg Config) *Provider {
 	return &Provider{config: cfg.withDefaults()}
 }
 
-// LanguageModel returns an ai.LanguageModel for the given model ID.
+// LanguageModel returns an [llm.Model] for the given model ID.
 // Supported: claude-4-sonnet, claude-4-opus, claude-3.7-sonnet, claude-3.5-sonnet, etc.
-func (p *Provider) LanguageModel(modelID string) ai.LanguageModel {
+func (p *Provider) LanguageModel(modelID string) llm.Model {
 	return NewLanguageModel(modelID, p.config)
 }

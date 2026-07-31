@@ -1,11 +1,11 @@
-package openaichat
+package openaicompat
 
 import (
 	"encoding/base64"
 	"fmt"
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
 
@@ -41,6 +41,9 @@ type JSONSchemaRef struct {
 // EncodeRequestParams carries configuration for encoding a single request.
 type EncodeRequestParams struct {
 	ModelID string
+	// SupportsStructuredOutput enables json_schema response_format. Providers
+	// without it receive the broadly-compatible json_object fallback.
+	SupportsStructuredOutput bool
 	// SanitizeTools is an optional hook to transform tool schemas before sending.
 	// Gemini uses this to strip unsupported JSON Schema keys.
 	SanitizeTools func(tools []map[string]any) []map[string]any
@@ -52,14 +55,14 @@ type EncodeRequestParams struct {
 	ExtraTools []map[string]any
 }
 
-// EncodeRequest converts an ai.LanguageModelRequest into a ChatRequest.
+// EncodeRequest converts an aikit.LanguageModelRequest into a ChatRequest.
 // Returned warnings describe content the chat-completions wire format cannot
 // carry; they are surfaced to the caller on the stream's finish event.
 func EncodeRequest(
 	params EncodeRequestParams,
 	req llm.Request,
 	streaming bool,
-) (ChatRequest, []ai.Warning, error) {
+) (ChatRequest, []aikit.Warning, error) {
 	msgs, warnings, err := encodeMessages(req.Instructions, req.Messages)
 	if err != nil {
 		return ChatRequest{}, nil, err
@@ -114,15 +117,18 @@ func EncodeRequest(
 	}
 
 	if req.Output != nil && req.Output.Type != "text" {
-		cr.ResponseFormat = encodeOutputSchema(req.Output)
+		cr.ResponseFormat = encodeOutputSchema(
+			req.Output,
+			params.SupportsStructuredOutput,
+		)
 	}
 
 	return cr, warnings, nil
 }
 
-func encodeMessages(system string, messages []ai.Message) ([]map[string]any, []ai.Warning, error) {
+func encodeMessages(system string, messages []aikit.Message) ([]map[string]any, []aikit.Warning, error) {
 	var out []map[string]any
-	var warnings []ai.Warning
+	var warnings []aikit.Warning
 
 	if system != "" {
 		out = append(out, map[string]any{"role": "system", "content": system})
@@ -139,9 +145,9 @@ func encodeMessages(system string, messages []ai.Message) ([]map[string]any, []a
 	return out, warnings, nil
 }
 
-func encodeMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
+func encodeMessage(m aikit.Message) (map[string]any, []aikit.Warning, error) {
 	switch m.Role {
-	case ai.RoleTool:
+	case aikit.RoleTool:
 		msg, err := encodeToolResultMessage(m)
 		return msg, nil, err
 	default:
@@ -149,27 +155,27 @@ func encodeMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 	}
 }
 
-func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
+func encodeContentMessage(m aikit.Message) (map[string]any, []aikit.Warning, error) {
 	// Single text part shortcut.
-	if len(m.Content) == 1 && m.Content[0].Type == ai.ContentPartTypeText {
+	if len(m.Content) == 1 && m.Content[0].Type == aikit.ContentPartTypeText {
 		return map[string]any{"role": string(m.Role), "content": m.Content[0].Text}, nil, nil
 	}
 
 	parts := make([]map[string]any, 0, len(m.Content))
 	var toolCalls []map[string]any
-	var warnings []ai.Warning
+	var warnings []aikit.Warning
 
 	for _, part := range m.Content {
 		switch part.Type {
-		case ai.ContentPartTypeText:
+		case aikit.ContentPartTypeText:
 			parts = append(parts, map[string]any{"type": "text", "text": part.Text})
-		case ai.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile:
 			encoded, w := encodeFilePart(part)
 			warnings = append(warnings, w...)
 			if encoded != nil {
 				parts = append(parts, encoded)
 			}
-		case ai.ContentPartTypeToolCall:
+		case aikit.ContentPartTypeToolCall:
 			call := map[string]any{
 				"id":   part.ToolCallID,
 				"type": "function",
@@ -186,7 +192,7 @@ func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 				}
 			}
 			toolCalls = append(toolCalls, call)
-		case ai.ContentPartTypeReasoning:
+		case aikit.ContentPartTypeReasoning:
 			// Reasoning parts are provider-specific; most OpenAI-compatible APIs do not
 			// accept them as message content. Omit silently to maintain compatibility.
 		}
@@ -195,7 +201,7 @@ func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 	msg := map[string]any{"role": string(m.Role)}
 	if len(parts) > 0 {
 		msg["content"] = parts
-	} else if m.Role == ai.RoleAssistant {
+	} else if m.Role == aikit.RoleAssistant {
 		msg["content"] = nil
 	}
 	if len(toolCalls) > 0 {
@@ -208,12 +214,12 @@ func encodeContentMessage(m ai.Message) (map[string]any, []ai.Warning, error) {
 // Images become image_url parts; anything else is inlined as a text description
 // because the chat-completions schema has no generic file part. A nil result
 // means the part was dropped and the returned warnings explain why.
-func encodeFilePart(part ai.ContentPart) (map[string]any, []ai.Warning) {
+func encodeFilePart(part aikit.ContentPart) (map[string]any, []aikit.Warning) {
 	// Chat-completions has no file-reference form: a provider file ID can be sent
 	// neither as an image_url nor as a file part. Warn rather than emit an empty
 	// URL, which the API would reject with an opaque 400.
 	if part.FileID != "" && len(part.Data) == 0 && part.FileURL == "" {
-		return nil, []ai.Warning{{
+		return nil, []aikit.Warning{{
 			Type:    "unsupported-setting",
 			Setting: "fileID",
 			Message: fmt.Sprintf(
@@ -248,9 +254,9 @@ func encodeFilePart(part ai.ContentPart) (map[string]any, []ai.Warning) {
 	return map[string]any{"type": "text", "text": fmt.Sprintf("[file url: %s]", part.FileURL)}, nil
 }
 
-func encodeToolResultMessage(m ai.Message) (map[string]any, error) {
+func encodeToolResultMessage(m aikit.Message) (map[string]any, error) {
 	for _, part := range m.Content {
-		if part.Type == ai.ContentPartTypeToolResult {
+		if part.Type == aikit.ContentPartTypeToolResult {
 			return map[string]any{
 				"role":         "tool",
 				"tool_call_id": part.ToolResultID,
@@ -261,10 +267,10 @@ func encodeToolResultMessage(m ai.Message) (map[string]any, error) {
 	return map[string]any{"role": "tool", "content": ""}, nil
 }
 
-// encodeToolChoice converts an ai.ToolChoice to the OpenAI wire format.
+// encodeToolChoice converts an aikit.ToolChoice to the OpenAI wire format.
 // nil / "auto" → "auto" (string), "none" → "none", "required" → "required",
 // "tool" → object {"type":"function","function":{"name":"..."}}.
-func encodeToolChoice(tc *ai.ToolChoice) any {
+func encodeToolChoice(tc *aikit.ToolChoice) any {
 	if tc == nil {
 		return "auto"
 	}
@@ -283,11 +289,14 @@ func encodeToolChoice(tc *ai.ToolChoice) any {
 	}
 }
 
-// encodeOutputSchema converts an ai.OutputSchema to OpenAI response_format.
+// encodeOutputSchema converts an [llm.OutputSchema] to OpenAI response_format.
 // "json_object" → {type: "json_object"} (no schema).
 // "object" / "array" → {type: "json_schema", json_schema: {...}}.
-func encodeOutputSchema(o *ai.OutputSchema) *ResponseFormat {
-	if o.Type == "json_object" {
+func encodeOutputSchema(
+	o *llm.OutputSchema,
+	supportsStructuredOutput bool,
+) *ResponseFormat {
+	if o.Type == "json_object" || !supportsStructuredOutput {
 		return &ResponseFormat{Type: "json_object"}
 	}
 	schema := o.Schema

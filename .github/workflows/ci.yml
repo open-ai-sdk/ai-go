@@ -116,3 +116,16 @@ jobs:
             echo "$deps"
             exit 1
           }
+
+      - name: Enforce provider dependency boundary
+        run: |
+          forbidden="$(go list -deps ./provider/... \
+            | grep -E '^github.com/open-ai-sdk/ai-go/(ai|agent|aisdk)(/|$)' || true)"
+          test -z "$forbidden" || {
+            echo "providers must not depend on ai, agent, or aisdk:"
+            echo "$forbidden"
+            exit 1
+          }
+
+      - name: Verify external consumer surface
+        run: go -C compat-test test ./...

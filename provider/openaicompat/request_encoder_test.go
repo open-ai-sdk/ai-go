@@ -1,4 +1,4 @@
-package openaichat
+package openaicompat
 
 import (
 	"testing"

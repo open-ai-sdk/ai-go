@@ -2,6 +2,8 @@ package kie
 
 import (
 	"os"
+
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // Provider is the entry point for constructing Kie.AI image models and
@@ -9,7 +11,9 @@ import (
 //
 // Construct with NewProvider; reuse across goroutines (HTTP client is shared).
 type Provider struct {
-	cfg Config
+	cfg       Config
+	client    *transport.Client
+	clientErr error
 }
 
 // Option mutates a Config during NewProvider construction.
@@ -41,7 +45,9 @@ func NewProvider(apiKey string, opts ...Option) *Provider {
 	if cfg.APIKey == "" {
 		cfg.APIKey = os.Getenv("KIE_API_KEY")
 	}
-	return &Provider{cfg: cfg.resolved()}
+	cfg = cfg.resolved()
+	client, clientErr := newTransportClient(cfg)
+	return &Provider{cfg: cfg, client: client, clientErr: clientErr}
 }
 
 // Image constructs an ai.ImageModel for the given Kie model ID.

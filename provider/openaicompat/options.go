@@ -1,4 +1,4 @@
-package openaichat
+package openaicompat
 
 // CapabilityFlags declares optional features a provider supports.
 type CapabilityFlags struct {

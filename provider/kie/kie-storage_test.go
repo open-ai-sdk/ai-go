@@ -48,13 +48,11 @@ func TestUploadBase64_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewProvider("api-key", WithBaseURL(srv.URL+"_NOT_USED"))
-	// Override to talk directly to the test server (bypassing buildKieURL's
-	// /api/kie/file/... rewrite); easiest: set BaseURL="" and rewrite host.
-	p.cfg.BaseURL = ""
-	p.cfg.HTTPClient.Transport = rewriteTransport{
-		from: "https://api.kie.ai", to: srv.URL, base: http.DefaultTransport,
-	}
+	p := NewProvider("api-key", WithConfig(Config{
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai", to: srv.URL, base: http.DefaultTransport,
+		}},
+	}))
 
 	url, err := p.UploadBase64(context.Background(), "dGVzdA==", UploadOptions{
 		UploadPath: "images/test", FileName: "out.png",
@@ -101,10 +99,11 @@ func TestUploadStream_Multipart(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewProvider("k")
-	p.cfg.HTTPClient.Transport = rewriteTransport{
-		from: "https://api.kie.ai", to: srv.URL, base: http.DefaultTransport,
-	}
+	p := NewProvider("k", WithConfig(Config{
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai", to: srv.URL, base: http.DefaultTransport,
+		}},
+	}))
 
 	url, err := p.UploadStream(context.Background(), []byte("hello"), "blob.bin", UploadOptions{
 		UploadPath: "images/u", FileName: "blob.bin",
@@ -130,10 +129,11 @@ func TestUploadBase64_ErrorEnvelope(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewProvider("k")
-	p.cfg.HTTPClient.Transport = rewriteTransport{
-		from: "https://api.kie.ai", to: srv.URL, base: http.DefaultTransport,
-	}
+	p := NewProvider("k", WithConfig(Config{
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai", to: srv.URL, base: http.DefaultTransport,
+		}},
+	}))
 
 	_, err := p.UploadBase64(context.Background(), "x", UploadOptions{UploadPath: "p"})
 	if err == nil {

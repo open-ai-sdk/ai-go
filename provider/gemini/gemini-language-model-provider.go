@@ -1,235 +1,99 @@
 package gemini
 
 import (
-	"context"
+	"fmt"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/llm"
-	"github.com/open-ai-sdk/ai-go/provider/internal/openaichat"
+	"github.com/open-ai-sdk/ai-go/provider/openaicompat"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-// LanguageModel implements ai.LanguageModel for the Gemini OpenAI-compatible API.
-type LanguageModel struct {
-	modelID string
-	core    *openaichat.LanguageModel
-}
-
-var _ llm.Model = (*LanguageModel)(nil)
-
-// Config holds options for constructing a Gemini LanguageModel or EmbeddingModel.
+// Config configures Gemini language, embedding, and image models.
 type Config struct {
 	APIKey               string
-	BaseURL              string        // optional; defaults to Gemini production endpoint
-	Timeout              time.Duration // optional; defaults to 120s for LLM, 60s for embedding
-	OutputDimensionality int           // optional; embedding output dimensions (768, 1536, 3072)
-	ChunkTimeout         time.Duration // optional; per-chunk SSE read timeout (0 = disabled)
+	BaseURL              string
+	Timeout              time.Duration
+	OutputDimensionality int
+	ChunkTimeout         time.Duration
+	HTTPClient           transport.Doer
 }
 
-// NewLanguageModel creates a Gemini-backed ai.LanguageModel.
-func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
+// LanguageModel implements basic Gemini chat through its OpenAI-compatible API.
+// Use [NewNativeLanguageModel] for grounding, citations, or multimodal output.
+type LanguageModel = openaicompat.Model
+
+type compatBackend struct{ baseURL string }
+
+func (b compatBackend) BaseURL() string { return b.baseURL }
+func (compatBackend) AuthHeader(key string) (string, string) {
+	return "Authorization", "Bearer " + key
+}
+func (compatBackend) ProviderName() string { return "gemini" }
+func (compatBackend) Capabilities() openaicompat.CapabilityFlags {
+	return openaicompat.CapabilityFlags{
+		SupportsStructuredOutput: true,
+		SupportsStreamUsage:      true,
 	}
-	core := openaichat.NewLanguageModel(openaichat.ModelConfig{
-		ModelID:      modelID,
-		ProviderName: "gemini",
-		BaseURL:      base,
-		APIKey:       cfg.APIKey,
-		Timeout:      cfg.Timeout,
-		Capabilities: openaichat.CapabilityFlags{
-			SupportsStructuredOutput: true,
-			SupportsStreamUsage:      true,
-		},
-		SanitizeTools: sanitizeToolSchemas,
-		ExtraToolsForRequest: func(req llm.Request) []map[string]any {
-			return extraToolsForRequest(modelID, req)
-		},
-		ExtraBodyFieldsForRequest: extraBodyFieldsForRequest,
-		TransformRequestBody:      mergeGoogleSearchTools,
-		ChunkTimeout:              cfg.ChunkTimeout,
-	})
-	return &LanguageModel{modelID: modelID, core: core}
 }
 
-// ModelID returns the Gemini model identifier.
-func (m *LanguageModel) ModelID() string { return m.core.ModelID() }
+func (compatBackend) SanitizeTools(tools []map[string]any) []map[string]any {
+	return sanitizeToolSchemas(tools)
+}
 
-// Stream sends a streaming chat request and returns a channel of normalized ai.StreamEvents.
-// Warnings for unsupported option combinations (e.g. TopK or Seed with Google Search)
-// are injected into the first StreamEventFinish event.
-func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
-	if _, err := resolveProviderOptions(req.ProviderOptions); err != nil {
-		return nil, err
-	}
-	warnings := warningsForRequest(m.modelID, req)
-
-	coreCh, err := m.core.Stream(ctx, req)
+func (compatBackend) RewriteRequest(
+	req llm.Request,
+	body map[string]any,
+) (map[string]any, error) {
+	options, err := resolveProviderOptions(req.ProviderOptions)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(warnings) == 0 {
-		return coreCh, nil
+	if options.EnableGoogleSearch ||
+		len(options.ResponseModalities) > 0 ||
+		options.ImageConfig != nil {
+		return nil, fmt.Errorf(
+			"gemini: grounding and multimodal output require NewNativeLanguageModel",
+		)
 	}
-
-	// Wrap the core channel to inject warnings into the first finish event.
-	out := make(chan ai.StreamEvent, 64)
-	go func() {
-		defer close(out)
-		// A panic while injecting warnings surfaces as an error event before
-		// close instead of crashing the process.
-		defer safego.Recover(nil, func(err error) {
-			select {
-			case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
-			default:
-			}
-		})
-		finishInjected := false
-		for ev := range coreCh {
-			if !finishInjected && ev.Type == ai.StreamEventFinish {
-				ev.Warnings = append(warnings, ev.Warnings...)
-				finishInjected = true
-			}
-			out <- ev
-		}
-	}()
-	return out, nil
+	if options.ThinkingConfig == nil {
+		return body, nil
+	}
+	thinking := buildCompatThinkingConfig(options.ThinkingConfig)
+	if len(thinking) == 0 {
+		return body, nil
+	}
+	body["extra_body"] = map[string]any{
+		"google": map[string]any{"thinking_config": thinking},
+	}
+	return body, nil
 }
 
-// extraToolsForRequest returns Gemini-specific built-in tools based on provider options.
-// Google Search grounding is passed via extra body fields (not the tools array) because
-// the OpenAI-compatible endpoint only supports {"type":"function"} tools. The native
-// google_search tool is injected via extraBodyFieldsForRequest instead.
-func extraToolsForRequest(modelID string, req llm.Request) []map[string]any {
-	// google_search is no longer sent as a tool — it goes via extra body fields.
-	return nil
+func buildCompatThinkingConfig(config *ThinkingConfig) map[string]any {
+	thinking := make(map[string]any)
+	if config.ThinkingBudget != nil {
+		thinking["thinking_budget"] = *config.ThinkingBudget
+	}
+	if config.IncludeThoughts != nil {
+		thinking["include_thoughts"] = *config.IncludeThoughts
+	}
+	if config.ThinkingLevel != "" {
+		thinking["thinking_level"] = config.ThinkingLevel
+	}
+	return thinking
 }
 
-// extraBodyFieldsForRequest returns provider-specific top-level request body fields
-// based on provider options. Handles thinkingConfig.
-// Google Search is handled separately via TransformRequestBody to merge into tools.
-// Wired via openaichat.ModelConfig.ExtraBodyFieldsForRequest in NewLanguageModel.
-func extraBodyFieldsForRequest(req llm.Request) map[string]any {
-	opts := parseProviderOptions(req.ProviderOptions)
-
-	result := make(map[string]any)
-
-	// Thinking config — the OpenAI-compatible endpoint expects Gemini-specific
-	// fields under a top-level "google" key (matching the extra_body convention).
-	if opts.ThinkingConfig != nil {
-		cfg := opts.ThinkingConfig
-		thinkingMap := map[string]any{}
-		if cfg.ThinkingBudget != nil {
-			thinkingMap["thinking_budget"] = *cfg.ThinkingBudget
-		}
-		if cfg.IncludeThoughts != nil {
-			thinkingMap["include_thoughts"] = *cfg.IncludeThoughts
-		}
-		if cfg.ThinkingLevel != "" {
-			thinkingMap["thinking_level"] = cfg.ThinkingLevel
-		}
-		if len(thinkingMap) > 0 {
-			google, ok := result["google"].(map[string]any)
-			if !ok || google == nil {
-				google = map[string]any{}
-			}
-			google["thinking_config"] = thinkingMap
-			result["google"] = google
-		}
+// NewLanguageModel creates a basic OpenAI-compatible Gemini model.
+func NewLanguageModel(modelID string, config Config) *LanguageModel {
+	baseURL := config.BaseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
 	}
-
-	// Google Search grounding — append to the tools array (not replace).
-	// The OpenAI-compatible endpoint accepts the camelCase Gemini tool format
-	// {"googleSearch":{}} alongside function tools in the tools array.
-	if opts.EnableGoogleSearch {
-		searchTool := map[string]any{"googleSearch": map[string]any{}}
-
-		if cfg := opts.GoogleSearchConfig; cfg != nil {
-			searchCfg := map[string]any{}
-			if cfg.DynamicRetrievalThreshold != nil {
-				searchCfg["dynamic_retrieval_config"] = map[string]any{
-					"mode":              "MODE_DYNAMIC",
-					"dynamic_threshold": *cfg.DynamicRetrievalThreshold,
-				}
-			}
-			if len(cfg.SearchTypes) > 0 {
-				searchCfg["search_types"] = cfg.SearchTypes
-			}
-			if cfg.TimeRangeFilter != nil {
-				searchCfg["time_range_filter"] = map[string]any{
-					"start_time": cfg.TimeRangeFilter.StartTime,
-					"end_time":   cfg.TimeRangeFilter.EndTime,
-				}
-			}
-			if len(searchCfg) > 0 {
-				searchTool["googleSearch"] = searchCfg
-			}
-		}
-
-		// Store search tool in a temporary key; mergeGoogleSearchTools will
-		// move it into the actual tools array.
-		result["_google_search_tool"] = searchTool
-	}
-
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-// mergeGoogleSearchTools is a TransformRequestBody hook that moves
-// the _google_search_tool entry into the tools array and removes the temp key.
-func mergeGoogleSearchTools(body map[string]any) map[string]any {
-	searchTool, ok := body["_google_search_tool"]
-	if !ok {
-		return body
-	}
-	delete(body, "_google_search_tool")
-
-	// Append to existing tools array or create a new one.
-	if existing, ok := body["tools"].([]any); ok {
-		body["tools"] = append(existing, searchTool)
-	} else if existing, ok := body["tools"].([]map[string]any); ok {
-		asAny := make([]any, len(existing)+1)
-		for i, t := range existing {
-			asAny[i] = t
-		}
-		asAny[len(existing)] = searchTool
-		body["tools"] = asAny
-	} else {
-		body["tools"] = []any{searchTool}
-	}
-	return body
-}
-
-// warningsForRequest returns advisory warnings for unsupported option combinations.
-// Warns when Google Search is enabled with unsupported settings (topK, seed).
-func warningsForRequest(modelID string, req ai.LanguageModelRequest) []ai.Warning {
-	opts := parseProviderOptions(req.ProviderOptions)
-	if !opts.EnableGoogleSearch {
-		return nil
-	}
-
-	var warnings []ai.Warning
-
-	if req.Settings.TopK != nil {
-		warnings = append(warnings, ai.Warning{
-			Type:    "unsupported-setting",
-			Setting: "topK",
-			Message: "topK is not supported when Google Search grounding is enabled and will be ignored",
-		})
-	}
-	if req.Settings.Seed != nil {
-		warnings = append(warnings, ai.Warning{
-			Type:    "unsupported-setting",
-			Setting: "seed",
-			Message: "seed is not supported when Google Search grounding is enabled (grounding is non-deterministic)",
-		})
-	}
-	return warnings
+	return openaicompat.NewModel(openaicompat.Config{
+		Provider: compatBackend{baseURL: baseURL}, ModelID: modelID,
+		APIKey: config.APIKey, Timeout: config.Timeout,
+		ChunkTimeout: config.ChunkTimeout, HTTPClient: config.HTTPClient,
+	})
 }

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
@@ -23,11 +23,13 @@ type nativeSSEChunk struct {
 }
 
 type nativeCandidate struct {
-	Content           *nativeCandidateContent  `json:"content"`
-	FinishReason      string                   `json:"finishReason"`
-	Index             int                      `json:"index"`
-	GroundingMetadata *nativeGroundingMetadata `json:"groundingMetadata"`
-	SafetyRatings     []any                    `json:"safetyRatings"`
+	Content            *nativeCandidateContent `json:"content"`
+	FinishReason       string                  `json:"finishReason"`
+	Index              int                     `json:"index"`
+	GroundingMetadata  json.RawMessage         `json:"groundingMetadata"`
+	CitationMetadata   map[string]any          `json:"citationMetadata"`
+	URLContextMetadata map[string]any          `json:"urlContextMetadata"`
+	SafetyRatings      []any                   `json:"safetyRatings"`
 }
 
 type nativeCandidateContent struct {
@@ -61,19 +63,19 @@ type nativeUsageMetadata struct {
 // nativeUsageToAI maps Gemini usage metadata to the v7 nested usage shape.
 // promptTokenCount already includes cached content, so the non-cached count is
 // the remainder after subtracting cachedContentTokenCount.
-func nativeUsageToAI(u *nativeUsageMetadata) *ai.Usage {
+func nativeUsageToAI(u *nativeUsageMetadata) *aikit.Usage {
 	noCache := u.PromptTokenCount - u.CachedContentTokenCount
 	if noCache < 0 {
 		noCache = 0
 	}
-	return &ai.Usage{
+	return &aikit.Usage{
 		InputTokens: u.PromptTokenCount,
-		InputTokenDetails: ai.InputTokenDetails{
+		InputTokenDetails: aikit.InputTokenDetails{
 			NoCacheTokens:   noCache,
 			CacheReadTokens: u.CachedContentTokenCount,
 		},
 		OutputTokens:       u.CandidatesTokenCount,
-		OutputTokenDetails: ai.OutputTokenDetails{ReasoningTokens: u.ThoughtsTokenCount},
+		OutputTokenDetails: aikit.OutputTokenDetails{ReasoningTokens: u.ThoughtsTokenCount},
 		TotalTokens:        u.TotalTokenCount,
 		Raw: map[string]any{
 			"promptTokenCount":        u.PromptTokenCount,
@@ -86,9 +88,10 @@ func nativeUsageToAI(u *nativeUsageMetadata) *ai.Usage {
 }
 
 type nativeGroundingMetadata struct {
-	WebSearchQueries  []string               `json:"webSearchQueries"`
-	GroundingChunks   []nativeGroundingChunk `json:"groundingChunks"`
-	GroundingSupports []any                  `json:"groundingSupports"`
+	WebSearchQueries   []string               `json:"webSearchQueries"`
+	ImageSearchQueries []string               `json:"imageSearchQueries"`
+	GroundingChunks    []nativeGroundingChunk `json:"groundingChunks"`
+	GroundingSupports  []any                  `json:"groundingSupports"`
 }
 
 type nativeGroundingChunk struct {
@@ -104,8 +107,10 @@ type nativeWebChunk struct {
 }
 
 type nativeImageChunk struct {
-	URI   string `json:"uri"`
-	Title string `json:"title"`
+	URI       string `json:"uri"`
+	SourceURI string `json:"sourceUri"`
+	ImageURI  string `json:"imageUri"`
+	Title     string `json:"title"`
 }
 
 type nativeRetrievedCtx struct {
@@ -122,17 +127,18 @@ type nativeMapsChunk struct {
 // Decoder
 // --------------------------------------------------------------------
 
-// decodeNativeSSEStream reads Gemini native SSE from body and emits ai.StreamEvents onto ch.
+// decodeNativeSSEStream reads Gemini native SSE from body and emits aikit.StreamEvents onto ch.
 // It closes ch when the stream ends (EOF or context cancellation).
 // body is closed when decoding finishes.
 func decodeNativeSSEStream(
 	ctx context.Context,
 	reader *transport.SSEReader,
-	ch chan<- ai.StreamEvent,
+	ch chan<- aikit.StreamEvent,
 ) error {
 	seen := make(map[string]bool)
 	var lastGoogleMeta map[string]any
 	toolCallIndex := 0
+	hasToolCalls := false
 
 	for {
 		select {
@@ -151,8 +157,8 @@ func decodeNativeSSEStream(
 		if data != "" {
 			var chunk nativeSSEChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				ch <- ai.StreamEvent{
-					Type: ai.StreamEventError,
+				ch <- aikit.StreamEvent{
+					Type: aikit.StreamEventError,
 					Error: fmt.Errorf(
 						"gemini-native: unmarshal chunk: %w",
 						err,
@@ -165,6 +171,7 @@ func decodeNativeSSEStream(
 					seen,
 					&lastGoogleMeta,
 					&toolCallIndex,
+					&hasToolCalls,
 				)
 			}
 		}
@@ -175,34 +182,31 @@ func decodeNativeSSEStream(
 // sources → content parts → usage → finish.
 func emitNativeChunkEvents(
 	chunk nativeSSEChunk,
-	ch chan<- ai.StreamEvent,
+	ch chan<- aikit.StreamEvent,
 	seen map[string]bool,
 	lastGoogleMeta *map[string]any,
 	toolCallIndex *int,
+	hasToolCalls *bool,
 ) {
-	hasToolCalls := false
-
 	if len(chunk.Candidates) > 0 {
 		cand := chunk.Candidates[0]
 
-		// Accumulate google metadata from grounding + safety across chunks.
-		if meta := buildNativeGoogleMetadata(cand); meta != nil {
-			*lastGoogleMeta = meta
-		}
+		mergeNativeGoogleMetadata(lastGoogleMeta, cand)
 
 		// 1. Sources from grounding metadata.
-		for _, src := range extractNativeGroundingSources(cand.GroundingMetadata, seen) {
-			ch <- ai.StreamEvent{Type: ai.StreamEventSource, Source: &src}
+		grounding := decodeNativeGroundingMetadata(cand.GroundingMetadata)
+		for _, src := range extractNativeGroundingSources(grounding, seen) {
+			ch <- aikit.StreamEvent{Type: aikit.StreamEventSource, Source: &src}
 		}
 
 		// 2. Content parts.
 		if cand.Content != nil {
 			for _, part := range cand.Content.Parts {
 				if part.FunctionCall != nil {
-					hasToolCalls = true
+					*hasToolCalls = true
 					args := string(part.FunctionCall.Args)
-					ch <- ai.StreamEvent{
-						Type:              ai.StreamEventToolCallDelta,
+					ch <- aikit.StreamEvent{
+						Type:              aikit.StreamEventToolCallDelta,
 						ToolCallIndex:     *toolCallIndex,
 						ToolCallID:        fmt.Sprintf("call_%d", *toolCallIndex),
 						ToolCallName:      part.FunctionCall.Name,
@@ -214,14 +218,14 @@ func emitNativeChunkEvents(
 				}
 
 				if part.Thought != nil && *part.Thought {
-					ch <- ai.StreamEvent{
-						Type:             ai.StreamEventReasoningDelta,
+					ch <- aikit.StreamEvent{
+						Type:             aikit.StreamEventReasoningDelta,
 						TextDelta:        part.Text,
 						ThoughtSignature: part.ThoughtSignature,
 					}
 				} else if part.Text != "" {
-					ch <- ai.StreamEvent{
-						Type:             ai.StreamEventTextDelta,
+					ch <- aikit.StreamEvent{
+						Type:             aikit.StreamEventTextDelta,
 						TextDelta:        part.Text,
 						ThoughtSignature: part.ThoughtSignature,
 					}
@@ -231,8 +235,8 @@ func emitNativeChunkEvents(
 				if part.InlineData != nil {
 					decoded, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 					if err == nil {
-						ch <- ai.StreamEvent{
-							Type:          ai.StreamEventFileDelta,
+						ch <- aikit.StreamEvent{
+							Type:          aikit.StreamEventFileDelta,
 							FileData:      decoded,
 							FileMediaType: part.InlineData.MediaType,
 						}
@@ -243,21 +247,21 @@ func emitNativeChunkEvents(
 
 		// 3. Usage (emit before finish so consumers see token counts first).
 		if chunk.UsageMetadata != nil {
-			ch <- ai.StreamEvent{
-				Type:  ai.StreamEventUsage,
+			ch <- aikit.StreamEvent{
+				Type:  aikit.StreamEventUsage,
 				Usage: nativeUsageToAI(chunk.UsageMetadata),
 			}
 		}
 
 		// 4. Finish.
 		if cand.FinishReason != "" {
-			reason, raw := mapNativeFinishReason(cand.FinishReason, hasToolCalls)
+			reason, raw := mapNativeFinishReason(cand.FinishReason, *hasToolCalls)
 			var provMeta map[string]any
 			if *lastGoogleMeta != nil {
 				provMeta = map[string]any{"google": *lastGoogleMeta}
 			}
-			ch <- ai.StreamEvent{
-				Type:             ai.StreamEventFinish,
+			ch <- aikit.StreamEvent{
+				Type:             aikit.StreamEventFinish,
 				FinishReason:     reason,
 				RawFinishReason:  raw,
 				ProviderMetadata: provMeta,
@@ -269,38 +273,38 @@ func emitNativeChunkEvents(
 
 	// No candidates — might still have usage metadata.
 	if chunk.UsageMetadata != nil {
-		ch <- ai.StreamEvent{
-			Type:  ai.StreamEventUsage,
+		ch <- aikit.StreamEvent{
+			Type:  aikit.StreamEventUsage,
 			Usage: nativeUsageToAI(chunk.UsageMetadata),
 		}
 	}
 }
 
-// mapNativeFinishReason converts a Gemini native API finish reason to an ai.FinishReason.
-func mapNativeFinishReason(raw string, hasToolCalls bool) (ai.FinishReason, string) {
+// mapNativeFinishReason converts a Gemini native API finish reason to an aikit.FinishReason.
+func mapNativeFinishReason(raw string, hasToolCalls bool) (aikit.FinishReason, string) {
 	switch raw {
 	case "STOP":
 		if hasToolCalls {
-			return ai.FinishReasonToolCalls, raw
+			return aikit.FinishReasonToolCalls, raw
 		}
-		return ai.FinishReasonStop, raw
+		return aikit.FinishReasonStop, raw
 	case "MAX_TOKENS":
-		return ai.FinishReasonLength, raw
+		return aikit.FinishReasonLength, raw
 	case "SAFETY", "RECITATION", "BLOCKLIST":
-		return ai.FinishReasonContentFilter, raw
+		return aikit.FinishReasonContentFilter, raw
 	case "MALFORMED_FUNCTION_CALL":
-		return ai.FinishReasonError, raw
+		return aikit.FinishReasonError, raw
 	default:
-		return ai.FinishReasonUnknown, raw
+		return aikit.FinishReasonUnknown, raw
 	}
 }
 
-// extractNativeGroundingSources extracts deduplicated ai.Source values from grounding metadata.
-func extractNativeGroundingSources(gm *nativeGroundingMetadata, seen map[string]bool) []ai.Source {
+// extractNativeGroundingSources extracts deduplicated aikit.Source values from grounding metadata.
+func extractNativeGroundingSources(gm *nativeGroundingMetadata, seen map[string]bool) []aikit.Source {
 	if gm == nil {
 		return nil
 	}
-	var sources []ai.Source
+	var sources []aikit.Source
 	for _, gc := range gm.GroundingChunks {
 		if gc.Web != nil {
 			if src := extractNativeWebSource(gc.Web, seen); src != nil {
@@ -329,7 +333,7 @@ func extractNativeGroundingSources(gm *nativeGroundingMetadata, seen map[string]
 	return sources
 }
 
-func extractNativeWebSource(web *nativeWebChunk, seen map[string]bool) *ai.Source {
+func extractNativeWebSource(web *nativeWebChunk, seen map[string]bool) *aikit.Source {
 	if web.URI == "" {
 		return nil
 	}
@@ -337,14 +341,14 @@ func extractNativeWebSource(web *nativeWebChunk, seen map[string]bool) *ai.Sourc
 		return nil
 	}
 	seen[web.URI] = true
-	return &ai.Source{
+	return &aikit.Source{
 		SourceType: "url",
 		URL:        web.URI,
 		Title:      web.Title,
 	}
 }
 
-func extractNativeRetrievedContextSource(rc *nativeRetrievedCtx, seen map[string]bool) *ai.Source {
+func extractNativeRetrievedContextSource(rc *nativeRetrievedCtx, seen map[string]bool) *aikit.Source {
 	if rc.URI == "" {
 		return nil
 	}
@@ -352,15 +356,21 @@ func extractNativeRetrievedContextSource(rc *nativeRetrievedCtx, seen map[string
 		return nil
 	}
 	seen[rc.URI] = true
-	return &ai.Source{
+	return &aikit.Source{
 		SourceType: "retrieved-context",
 		URL:        rc.URI,
 		Title:      rc.Title,
 	}
 }
 
-func extractNativeImageSource(img *nativeImageChunk, seen map[string]bool) *ai.Source {
-	uri := img.URI
+func extractNativeImageSource(img *nativeImageChunk, seen map[string]bool) *aikit.Source {
+	uri := img.ImageURI
+	if uri == "" {
+		uri = img.SourceURI
+	}
+	if uri == "" {
+		uri = img.URI
+	}
 	if uri == "" {
 		uri = "image-chunk"
 	}
@@ -369,14 +379,18 @@ func extractNativeImageSource(img *nativeImageChunk, seen map[string]bool) *ai.S
 		return nil
 	}
 	seen[key] = true
-	return &ai.Source{
+	return &aikit.Source{
 		SourceType: "image",
 		URL:        uri,
 		Title:      img.Title,
+		ProviderMetadata: map[string]any{
+			"sourceUri": img.SourceURI,
+			"imageUri":  img.ImageURI,
+		},
 	}
 }
 
-func extractNativeMapsSource(m *nativeMapsChunk, seen map[string]bool) *ai.Source {
+func extractNativeMapsSource(m *nativeMapsChunk, seen map[string]bool) *aikit.Source {
 	uri := m.URI
 	if uri == "" {
 		uri = "maps-chunk"
@@ -386,24 +400,64 @@ func extractNativeMapsSource(m *nativeMapsChunk, seen map[string]bool) *ai.Sourc
 		return nil
 	}
 	seen[key] = true
-	return &ai.Source{
+	return &aikit.Source{
 		SourceType: "maps",
 		URL:        uri,
 		Title:      m.Title,
 	}
 }
 
-// buildNativeGoogleMetadata assembles provider metadata from a native candidate.
-func buildNativeGoogleMetadata(cand nativeCandidate) map[string]any {
-	result := make(map[string]any)
-	if cand.GroundingMetadata != nil {
-		result["groundingMetadata"] = cand.GroundingMetadata
-	}
-	if cand.SafetyRatings != nil {
-		result["safetyRatings"] = cand.SafetyRatings
-	}
-	if len(result) == 0 {
+func decodeNativeGroundingMetadata(raw json.RawMessage) *nativeGroundingMetadata {
+	if len(raw) == 0 {
 		return nil
 	}
-	return result
+	var metadata nativeGroundingMetadata
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return nil
+	}
+	return &metadata
+}
+
+// mergeNativeGoogleMetadata preserves metadata delivered incrementally across
+// streamed candidates. Array fields are appended; scalar/object fields keep
+// the latest value.
+func mergeNativeGoogleMetadata(destination *map[string]any, candidate nativeCandidate) {
+	if *destination == nil {
+		*destination = make(map[string]any)
+	}
+	if len(candidate.GroundingMetadata) > 0 {
+		var incoming map[string]any
+		if json.Unmarshal(candidate.GroundingMetadata, &incoming) == nil {
+			current, ok := (*destination)["groundingMetadata"].(map[string]any)
+			if !ok {
+				current = nil
+			}
+			if current == nil {
+				current = make(map[string]any)
+			}
+			for key, value := range incoming {
+				if items, ok := value.([]any); ok {
+					if existing, ok := current[key].([]any); ok {
+						items = append(existing, items...)
+					}
+					current[key] = items
+					continue
+				}
+				current[key] = value
+			}
+			(*destination)["groundingMetadata"] = current
+		}
+	}
+	if candidate.CitationMetadata != nil {
+		(*destination)["citationMetadata"] = candidate.CitationMetadata
+	}
+	if candidate.URLContextMetadata != nil {
+		(*destination)["urlContextMetadata"] = candidate.URLContextMetadata
+	}
+	if candidate.SafetyRatings != nil {
+		(*destination)["safetyRatings"] = candidate.SafetyRatings
+	}
+	if len(*destination) == 0 {
+		*destination = nil
+	}
 }

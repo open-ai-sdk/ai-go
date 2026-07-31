@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
@@ -78,14 +78,14 @@ type blockState struct {
 	name  string
 }
 
-// decodeSSEStream reads Anthropic SSE events and emits normalized ai.StreamEvents.
+// decodeSSEStream reads Anthropic SSE events and emits normalized aikit.StreamEvents.
 func decodeSSEStream(
 	ctx context.Context,
 	reader *transport.SSEReader,
-	out chan<- ai.StreamEvent,
-	encodeWarnings ...ai.Warning,
+	out chan<- aikit.StreamEvent,
+	encodeWarnings ...aikit.Warning,
 ) error {
-	send := func(ev ai.StreamEvent) bool {
+	send := func(ev aikit.StreamEvent) bool {
 		select {
 		case out <- ev:
 			return true
@@ -131,8 +131,8 @@ func decodeSSEStream(
 func dispatchSSEEvent(
 	eventType, data string,
 	blocks map[int]*blockState,
-	send func(ai.StreamEvent) bool,
-	encodeWarnings []ai.Warning,
+	send func(aikit.StreamEvent) bool,
+	encodeWarnings []aikit.Warning,
 ) bool {
 	switch eventType {
 	case eventMessageStart:
@@ -151,7 +151,7 @@ func dispatchSSEEvent(
 
 func handleMessageStart(
 	data string,
-	send func(ai.StreamEvent) bool,
+	send func(aikit.StreamEvent) bool,
 ) bool {
 	var msg sseMessageStart
 	if json.Unmarshal([]byte(data), &msg) == nil {
@@ -159,12 +159,12 @@ func handleMessageStart(
 		// Anthropic reports input_tokens as the non-cached prompt tokens; cache
 		// reads and writes are counted separately. The v7 InputTokens total is
 		// their sum, and NoCacheTokens is the raw input_tokens.
-		return send(ai.StreamEvent{
-			Type: ai.StreamEventUsage,
-			Usage: &ai.Usage{
+		return send(aikit.StreamEvent{
+			Type: aikit.StreamEventUsage,
+			Usage: &aikit.Usage{
 				InputTokens:  u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens,
 				OutputTokens: u.OutputTokens,
-				InputTokenDetails: ai.InputTokenDetails{
+				InputTokenDetails: aikit.InputTokenDetails{
 					NoCacheTokens:    u.InputTokens,
 					CacheReadTokens:  u.CacheReadInputTokens,
 					CacheWriteTokens: u.CacheCreationInputTokens,
@@ -184,7 +184,7 @@ func handleMessageStart(
 func handleContentBlockStart(
 	data string,
 	blocks map[int]*blockState,
-	send func(ai.StreamEvent) bool,
+	send func(aikit.StreamEvent) bool,
 ) bool {
 	var block sseContentBlockStart
 	if json.Unmarshal([]byte(data), &block) == nil {
@@ -195,8 +195,8 @@ func handleContentBlockStart(
 			name:  block.ContentBlock.Name,
 		}
 		if block.ContentBlock.Type == "tool_use" {
-			return send(ai.StreamEvent{
-				Type:          ai.StreamEventToolCallDelta,
+			return send(aikit.StreamEvent{
+				Type:          aikit.StreamEventToolCallDelta,
 				ToolCallIndex: block.Index,
 				ToolCallID:    block.ContentBlock.ID,
 				ToolCallName:  block.ContentBlock.Name,
@@ -209,7 +209,7 @@ func handleContentBlockStart(
 func handleContentBlockDelta(
 	data string,
 	blocks map[int]*blockState,
-	send func(ai.StreamEvent) bool,
+	send func(aikit.StreamEvent) bool,
 ) bool {
 	var delta sseContentBlockDelta
 	if json.Unmarshal([]byte(data), &delta) != nil {
@@ -218,14 +218,14 @@ func handleContentBlockDelta(
 	bs := blocks[delta.Index]
 	switch delta.Delta.Type {
 	case "text_delta":
-		return send(ai.StreamEvent{
-			Type:      ai.StreamEventTextDelta,
+		return send(aikit.StreamEvent{
+			Type:      aikit.StreamEventTextDelta,
 			TextDelta: delta.Delta.Text,
 		})
 	case "input_json_delta":
 		if bs != nil {
-			return send(ai.StreamEvent{
-				Type:              ai.StreamEventToolCallDelta,
+			return send(aikit.StreamEvent{
+				Type:              aikit.StreamEventToolCallDelta,
 				ToolCallIndex:     delta.Index,
 				ToolCallID:        bs.id,
 				ToolCallName:      bs.name,
@@ -233,8 +233,8 @@ func handleContentBlockDelta(
 			})
 		}
 	case "thinking_delta":
-		return send(ai.StreamEvent{
-			Type:      ai.StreamEventReasoningDelta,
+		return send(aikit.StreamEvent{
+			Type:      aikit.StreamEventReasoningDelta,
 			TextDelta: delta.Delta.Thinking,
 		})
 	}
@@ -243,8 +243,8 @@ func handleContentBlockDelta(
 
 func handleMessageDelta(
 	data string,
-	send func(ai.StreamEvent) bool,
-	encodeWarnings []ai.Warning,
+	send func(aikit.StreamEvent) bool,
+	encodeWarnings []aikit.Warning,
 ) bool {
 	var msg sseMessageDelta
 	if json.Unmarshal([]byte(data), &msg) != nil {
@@ -252,15 +252,15 @@ func handleMessageDelta(
 	}
 	// Emit usage before finish so consumers don't miss the final token count.
 	if msg.Usage.OutputTokens > 0 {
-		if !send(ai.StreamEvent{
-			Type:  ai.StreamEventUsage,
-			Usage: &ai.Usage{OutputTokens: msg.Usage.OutputTokens},
+		if !send(aikit.StreamEvent{
+			Type:  aikit.StreamEventUsage,
+			Usage: &aikit.Usage{OutputTokens: msg.Usage.OutputTokens},
 		}) {
 			return false
 		}
 	}
-	return send(ai.StreamEvent{
-		Type:            ai.StreamEventFinish,
+	return send(aikit.StreamEvent{
+		Type:            aikit.StreamEventFinish,
 		FinishReason:    mapStopReason(msg.Delta.StopReason),
 		RawFinishReason: msg.Delta.StopReason,
 		Warnings:        encodeWarnings,
@@ -269,12 +269,12 @@ func handleMessageDelta(
 
 func handleError(
 	data string,
-	send func(ai.StreamEvent) bool,
+	send func(aikit.StreamEvent) bool,
 ) bool {
 	var errMsg sseError
 	if json.Unmarshal([]byte(data), &errMsg) == nil {
-		send(ai.StreamEvent{
-			Type: ai.StreamEventError,
+		send(aikit.StreamEvent{
+			Type: aikit.StreamEventError,
 			Error: fmt.Errorf(
 				"anthropic: %s: %s",
 				errMsg.Error.Type, errMsg.Error.Message,
@@ -285,15 +285,15 @@ func handleError(
 	return true
 }
 
-func mapStopReason(reason string) ai.FinishReason {
+func mapStopReason(reason string) aikit.FinishReason {
 	switch reason {
 	case "end_turn", "stop_sequence":
-		return ai.FinishReasonStop
+		return aikit.FinishReasonStop
 	case "tool_use":
-		return ai.FinishReasonToolCalls
+		return aikit.FinishReasonToolCalls
 	case "max_tokens":
-		return ai.FinishReasonLength
+		return aikit.FinishReasonLength
 	default:
-		return ai.FinishReasonUnknown
+		return aikit.FinishReasonUnknown
 	}
 }

@@ -8,8 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // UploadOptions controls Kie file-upload helpers. UploadPath is required by
@@ -39,11 +37,16 @@ func (p *Provider) UploadBase64(ctx context.Context, data string, opts UploadOpt
 	}
 
 	url := buildKieURL(&p.cfg, "/api/file-base64-upload")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if p.clientErr != nil {
+		return "", fmt.Errorf("kie: configure transport: %w", p.clientErr)
+	}
+	req, err := p.client.NewRequest(
+		ctx, http.MethodPost, url, bytes.NewReader(body),
+	)
 	if err != nil {
 		return "", fmt.Errorf("kie: build base64 upload request: %w", err)
 	}
-	p.applyHeaders(req, "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
 	return p.doUpload(req)
 }
@@ -80,7 +83,7 @@ func (p *Provider) UploadFromReader(
 		// A panic in the writer (e.g. from a misbehaving reader) fails the pipe
 		// and signals errCh so the concurrent upload read unblocks instead of
 		// the process crashing or the parent deadlocking on errCh.
-		defer safego.Recover(nil, func(err error) {
+		defer recoverAsError(func(err error) {
 			pw.CloseWithError(err)
 			errCh <- err
 		})
@@ -117,12 +120,16 @@ func (p *Provider) UploadFromReader(
 	}()
 
 	url := buildKieURL(&p.cfg, "/api/file-stream-upload")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, pr)
+	if p.clientErr != nil {
+		pr.Close()
+		return "", fmt.Errorf("kie: configure transport: %w", p.clientErr)
+	}
+	req, err := p.client.NewRequest(ctx, http.MethodPost, url, pr)
 	if err != nil {
 		pr.Close()
 		return "", fmt.Errorf("kie: build stream upload request: %w", err)
 	}
-	p.applyHeaders(req, contentType)
+	req.Header.Set("Content-Type", contentType)
 
 	result, uploadErr := p.doUpload(req)
 
@@ -137,7 +144,7 @@ func (p *Provider) UploadFromReader(
 // doUpload runs an upload request and unwraps the standard
 // {success, code, msg, data} envelope to a downloadUrl.
 func (p *Provider) doUpload(req *http.Request) (string, error) {
-	respBody, status, err := doHTTP(p.cfg.HTTPClient, req)
+	respBody, status, err := doHTTP(p.client, req)
 	if err != nil {
 		return "", err
 	}
@@ -153,17 +160,4 @@ func (p *Provider) doUpload(req *http.Request) (string, error) {
 		return "", &KieError{Code: parsed.Code, Msg: parsed.Msg, Status: status, RawBody: string(respBody)}
 	}
 	return parsed.Data.DownloadURL, nil
-}
-
-// applyHeaders mirrors ImageModel.applyHeaders for Provider-level requests.
-func (p *Provider) applyHeaders(req *http.Request, contentType string) {
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	if p.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
-	}
-	for k, v := range p.cfg.Headers {
-		req.Header.Set(k, v)
-	}
 }

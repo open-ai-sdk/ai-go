@@ -1,4 +1,4 @@
-package openaichat
+package transport
 
 import (
 	"errors"

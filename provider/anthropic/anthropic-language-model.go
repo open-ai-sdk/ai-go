@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// LanguageModel implements ai.LanguageModel using the Anthropic Messages API.
+// LanguageModel implements aikit.LanguageModel using the Anthropic Messages API.
 type LanguageModel struct {
 	modelID   string
 	config    Config
@@ -50,7 +50,7 @@ func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 func (m *LanguageModel) ModelID() string { return m.modelID }
 
 // Stream sends a streaming request to the Anthropic Messages API.
-func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.StreamEvent, error) {
+func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aikit.StreamEvent, error) {
 	body, encodeWarnings, err := m.encodeRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: encode request: %w", err)
@@ -83,7 +83,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan ai.
 		func(
 			ctx context.Context,
 			reader *transport.SSEReader,
-			events chan<- ai.StreamEvent,
+			events chan<- aikit.StreamEvent,
 		) error {
 			return decodeSSEStream(
 				ctx,
@@ -155,7 +155,7 @@ type thinkingConfig struct {
 
 // encodeRequest builds the Messages API body. Returned warnings describe content
 // the API cannot carry; they are surfaced on the stream's finish event.
-func (m *LanguageModel) encodeRequest(req llm.Request) ([]byte, []ai.Warning, error) {
+func (m *LanguageModel) encodeRequest(req llm.Request) ([]byte, []aikit.Warning, error) {
 	if req.Output != nil {
 		return nil, nil, fmt.Errorf("anthropic: output schema is not yet supported")
 	}
@@ -192,7 +192,7 @@ func (m *LanguageModel) encodeRequest(req llm.Request) ([]byte, []ai.Warning, er
 	return body, warnings, nil
 }
 
-func mapToolChoice(tc *ai.ToolChoice) *anthropicToolChoice {
+func mapToolChoice(tc *aikit.ToolChoice) *anthropicToolChoice {
 	if tc == nil {
 		return nil
 	}
@@ -225,9 +225,9 @@ func extractThinkingConfig(options map[string]any) (*thinkingConfig, error) {
 	return &thinkingConfig{Type: "enabled", BudgetTokens: budget}, nil
 }
 
-func encodeMessages(msgs []ai.Message) ([]anthropicMsg, []ai.Warning) {
+func encodeMessages(msgs []aikit.Message) ([]anthropicMsg, []aikit.Warning) {
 	var out []anthropicMsg
-	var warnings []ai.Warning
+	var warnings []aikit.Warning
 	for _, msg := range msgs {
 		am := anthropicMsg{Role: string(msg.Role)}
 		for _, part := range msg.Content {
@@ -244,26 +244,26 @@ func encodeMessages(msgs []ai.Message) ([]anthropicMsg, []ai.Warning) {
 	return out, warnings
 }
 
-func encodeContentPart(part ai.ContentPart) (*contentBlock, []ai.Warning) {
+func encodeContentPart(part aikit.ContentPart) (*contentBlock, []aikit.Warning) {
 	switch part.Type {
-	case ai.ContentPartTypeText:
+	case aikit.ContentPartTypeText:
 		return &contentBlock{Type: "text", Text: part.Text}, nil
-	case ai.ContentPartTypeFile:
+	case aikit.ContentPartTypeFile:
 		return encodeFilePart(part)
-	case ai.ContentPartTypeToolCall:
+	case aikit.ContentPartTypeToolCall:
 		return &contentBlock{
 			Type:  "tool_use",
 			ID:    part.ToolCallID,
 			Name:  part.ToolCallName,
 			Input: part.ToolCallArgs,
 		}, nil
-	case ai.ContentPartTypeToolResult:
+	case aikit.ContentPartTypeToolResult:
 		return &contentBlock{
 			Type:      "tool_result",
 			ToolUseID: part.ToolResultID,
 			Content:   part.ToolResultOutput,
 		}, nil
-	case ai.ContentPartTypeReasoning:
+	case aikit.ContentPartTypeReasoning:
 		return &contentBlock{
 			Type:      "thinking",
 			Thinking:  part.ReasoningText,
@@ -279,14 +279,14 @@ func encodeContentPart(part ai.ContentPart) (*contentBlock, []ai.Warning) {
 // "image" (jpeg/png/gif/webp only) and "document" (PDF). Anything else, and any
 // part the Messages API cannot reference, is dropped with a warning rather than
 // silently vanishing from the request.
-func encodeFilePart(part ai.ContentPart) (*contentBlock, []ai.Warning) {
+func encodeFilePart(part aikit.ContentPart) (*contentBlock, []aikit.Warning) {
 	if len(part.Data) == 0 {
 		ref := part.FileURL
 		setting := "fileURL"
 		if ref == "" {
 			ref, setting = part.FileID, "fileID"
 		}
-		return nil, []ai.Warning{{
+		return nil, []aikit.Warning{{
 			Type:    "unsupported-setting",
 			Setting: setting,
 			Message: fmt.Sprintf(
@@ -297,7 +297,7 @@ func encodeFilePart(part ai.ContentPart) (*contentBlock, []ai.Warning) {
 
 	blockType, ok := anthropicFileBlockType(part.MediaType)
 	if !ok {
-		return nil, []ai.Warning{{
+		return nil, []aikit.Warning{{
 			Type:    "unsupported-setting",
 			Setting: "mediaType",
 			Message: fmt.Sprintf(
@@ -331,7 +331,7 @@ func anthropicFileBlockType(mediaType string) (string, bool) {
 	}
 }
 
-func encodeTools(tools []ai.ToolDefinition) []anthropicTool {
+func encodeTools(tools []aikit.ToolDefinition) []anthropicTool {
 	if len(tools) == 0 {
 		return nil
 	}

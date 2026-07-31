@@ -3,6 +3,8 @@ package kie
 import (
 	"net/http"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // Config controls how a Kie.AI Provider talks to the upstream API.
@@ -35,6 +37,28 @@ type Config struct {
 	// HTTPClient lets callers inject a custom client (default: shared client
 	// constructed from Timeout).
 	HTTPClient *http.Client
+}
+
+func newTransportClient(config Config) (*transport.Client, error) {
+	baseURL := config.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.kie.ai"
+	}
+	headers := make(http.Header, len(config.Headers))
+	for key, value := range config.Headers {
+		headers.Set(key, value)
+	}
+	return transport.NewClient(transport.ClientConfig{
+		BaseURL: baseURL,
+		Headers: headers,
+		Auth: func(request *http.Request) {
+			if config.APIKey != "" {
+				request.Header.Set("Authorization", "Bearer "+config.APIKey)
+			}
+		},
+		HTTPClient: config.HTTPClient,
+		Provider:   "kie",
+	})
 }
 
 const (

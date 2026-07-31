@@ -10,23 +10,24 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// ImageModel implements ai.ImageModel using the native Gemini API's
+// ImageModel implements aikit.ImageModel using the native Gemini API's
 // non-streaming :generateContent endpoint. Unlike NativeLanguageModel,
 // this uses the synchronous endpoint since images are returned as
 // complete base64 blobs.
 //
 // Use NewImageModel to construct an instance.
 type ImageModel struct {
-	modelID string
-	cfg     Config
-	client  *http.Client
+	modelID   string
+	client    *transport.Client
+	clientErr error
 }
 
-// NewImageModel creates a Gemini-backed ai.ImageModel that generates images
+// NewImageModel creates a Gemini-backed aikit.ImageModel that generates images
 // using the native Gemini API.
 //
 // Supported models: gemini-2.5-flash-image, gemini-3-pro-image-preview,
@@ -36,12 +37,27 @@ func NewImageModel(modelID string, cfg Config) *ImageModel {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = nativeBaseURL
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: baseURL,
+		Headers: http.Header{"Content-Type": []string{"application/json"}},
+		Auth: func(request *http.Request) {
+			request.Header.Set("x-goog-api-key", cfg.APIKey)
+		},
+		HTTPClient: httpClient,
+		Provider:   "gemini-image",
+	})
 	return &ImageModel{
-		modelID: modelID,
-		cfg:     cfg,
-		// One-shot request/response (not a stream), so a client-wide timeout is
-		// safe here — it bounds the whole image call rather than capping a stream.
-		client: &http.Client{Timeout: timeout},
+		modelID:   modelID,
+		client:    client,
+		clientErr: clientErr,
 	}
 }
 
@@ -49,7 +65,7 @@ func NewImageModel(modelID string, cfg Config) *ImageModel {
 func (m *ImageModel) ModelID() string { return m.modelID }
 
 // Generate sends a request to the Gemini API and returns generated images.
-func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) (*ai.GenerateImageResult, error) {
+func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest) (*llm.GenerateImageResult, error) {
 	nr := m.buildRequest(req)
 
 	body, err := json.Marshal(nr)
@@ -57,18 +73,19 @@ func (m *ImageModel) Generate(ctx context.Context, req ai.GenerateImageRequest) 
 		return nil, fmt.Errorf("gemini-image: marshal request: %w", err)
 	}
 
-	baseURL := m.cfg.BaseURL
-	if baseURL == "" {
-		baseURL = nativeBaseURL
+	if m.clientErr != nil {
+		return nil, fmt.Errorf("gemini-image: configure transport: %w", m.clientErr)
 	}
-	url := fmt.Sprintf("%s/models/%s:generateContent", baseURL, m.modelID)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	target := fmt.Sprintf("models/%s:generateContent", m.modelID)
+	httpReq, err := m.client.NewRequest(
+		ctx,
+		http.MethodPost,
+		target,
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-image: build http request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", m.cfg.APIKey)
 
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
@@ -107,7 +124,7 @@ type imageResponsePart struct {
 	InlineData *nativeInlineData `json:"inlineData,omitempty"`
 }
 
-func (m *ImageModel) buildRequest(req ai.GenerateImageRequest) nativeRequest {
+func (m *ImageModel) buildRequest(req llm.GenerateImageRequest) nativeRequest {
 	nr := nativeRequest{}
 
 	var parts []nativePart
@@ -157,13 +174,13 @@ func (m *ImageModel) buildRequest(req ai.GenerateImageRequest) nativeRequest {
 	return nr
 }
 
-func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error) {
+func (m *ImageModel) parseResponse(data []byte) (*llm.GenerateImageResult, error) {
 	var resp imageGenerateResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("gemini-image: unmarshal response: %w", err)
 	}
 
-	result := &ai.GenerateImageResult{}
+	result := &llm.GenerateImageResult{}
 
 	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 		for _, part := range resp.Candidates[0].Content.Parts {
@@ -172,7 +189,7 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 				if err != nil {
 					continue
 				}
-				result.Images = append(result.Images, ai.GeneratedImage{
+				result.Images = append(result.Images, llm.GeneratedImage{
 					Data:      decoded,
 					MediaType: part.InlineData.MediaType,
 				})
@@ -181,7 +198,7 @@ func (m *ImageModel) parseResponse(data []byte) (*ai.GenerateImageResult, error)
 	}
 
 	if resp.UsageMetadata != nil {
-		result.Usage = &ai.Usage{
+		result.Usage = &aikit.Usage{
 			InputTokens:  resp.UsageMetadata.PromptTokenCount,
 			OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
 			TotalTokens:  resp.UsageMetadata.TotalTokenCount,

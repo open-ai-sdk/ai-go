@@ -33,16 +33,11 @@ func makeIndexedServer(t *testing.T, dimSize int) *httptest.Server {
 	}))
 }
 
-// newIndexedModel creates an EmbeddingModel with a rewriteTransport pointed at server.
 func newIndexedModel(t *testing.T, server *httptest.Server) *EmbeddingModel {
 	t.Helper()
-	return &EmbeddingModel{
-		modelID: "text-embedding-004",
-		apiKey:  "test-key",
-		client: &http.Client{
-			Transport: &rewriteTransport{target: server.URL},
-		},
-	}
+	return NewEmbeddingModel("text-embedding-004", Config{
+		APIKey: "test-key", BaseURL: server.URL,
+	})
 }
 
 // TestEmbedBatch_OrderPreserved verifies that the i-th result corresponds
