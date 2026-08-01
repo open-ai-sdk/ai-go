@@ -1,11 +1,5 @@
 // Pin the contract that ChunkToolOutputAvailable carries `output` as the
 // raw string returned by the tool.
-//
-// Pre-fix history: chunksToolResult JSON-parsed `tr.Output` and fell back to
-// `{"result": tr.Output}` on parse failure, producing three possible chunk
-// shapes (parsed object / wrap object / re-stringified string in some
-// persistence paths). Downstream code that expected a string silently lost
-// the payload — see godhitech/1s-cli sse_bridge `event["output"].(string)`.
 package aisdk
 
 import (

@@ -56,10 +56,8 @@ func NewStreamingUIMessageState(messageID string, lastMessage *StreamingUIMessag
 	}
 }
 
-// ProcessUIMessageStream consumes a channel of Chunks, updates state on each chunk
-// to reconstruct the assistant message, and re-emits every chunk on the returned channel.
-//
-// Server code produces streams and does not consume its own browser protocol.
+// ProcessUIMessageStream consumes chunks, updates state to reconstruct the
+// assistant message, and re-emits each chunk.
 func ProcessUIMessageStream(chunks <-chan Chunk, state *StreamingUIMessageState) <-chan Chunk {
 	out := make(chan Chunk, 64)
 	go func() {

@@ -13,9 +13,8 @@ import "context"
 // messages, and tool calls live on the stack of each Generate/Stream call),
 // so an implementation is safe for concurrent use provided its tools are.
 //
-// ToolLoopAgent is the reference implementation. Consumers may implement Agent themselves; the
-// interface is deliberately small (four methods, all in terms of types every
-// other ai-go entry point already uses) to keep that possible.
+// ToolLoopAgent is the reference implementation. Consumers may implement Agent
+// themselves; the interface is deliberately small to make that practical.
 //
 // This interface fixes the shape to *ToolSet and the existing
 // GenerateTextResult/StreamResult types; tool typing stays at tool.New[In, Out].

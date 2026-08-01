@@ -38,11 +38,9 @@ func (m *minimalAgent) Stream(ctx context.Context, opts ...ai.Option) (*ai.Strea
 	return ai.StreamText(ctx, req), nil
 }
 
-// TestToolLoopAgent_ThreeStepFakeExecutor drives ToolLoopAgent through the
-// same three-step scenario as
-// fakeToolExecutor / fakeMultiStepModel, defined in
-// tool-executor-fake_test.go), proving the agent delegates to the same tool
-// loop rather than reimplementing it.
+// TestToolLoopAgent_ThreeStepFakeExecutor verifies ToolLoopAgent delegates to
+// the tool loop by running fakeToolExecutor and fakeMultiStepModel through
+// three steps.
 func TestToolLoopAgent_ThreeStepFakeExecutor(t *testing.T) {
 	model := &fakeMultiStepModel{}
 	executor := &fakeToolExecutor{}
