@@ -12,7 +12,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'go build -o /tmp/ai-go-conformance-server ./cmd/conformance-server && exec /tmp/ai-go-conformance-server -addr 127.0.0.1:8787',
+        'go build -o /tmp/ai-go-conformance-server ../examples/chat-server && exec /tmp/ai-go-conformance-server -addr 127.0.0.1:8787',
       port: 8787,
       reuseExistingServer: false,
       timeout: 120_000,

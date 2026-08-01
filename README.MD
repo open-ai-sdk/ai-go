@@ -321,8 +321,8 @@ tools, stop condition, ...) override the agent's defaults for that call only, wh
 `OnEnd`/`OnChunk`/`OnError` set at the agent level and at the call level both fire — concurrently,
 with either side's panic swallowed — instead of one replacing the other.
 
-Stream an agent over SSE with the free functions in the top-level `ai` façade; the lower-level
-`aisdk` wire package remains model-independent:
+Stream an agent over SSE with the free functions in the top-level `ai` façade. The HTTP edge lives
+in `aisdkhttp`, while the lower-level `aisdk` wire package remains model-independent:
 
 ```go
 chunks, err := ai.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessage("Hello!")))
@@ -330,6 +330,22 @@ chunks, err := ai.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessag
 // Or serve it directly:
 http.Handle("/chat", ai.AgentHandler(agent))
 ```
+
+For runtimes that already expose raw `aikit.StepEvent` values, use the transport-neutral handler
+directly:
+
+```go
+http.Handle("/chat", aisdkhttp.Handler(func(ctx context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
+    return agentruntime.Stream(ctx, agentruntime.RunParams{
+        Model: model,
+        Request: llm.Request{Messages: messages},
+    }), nil
+}))
+```
+
+Gin support is isolated in the separately versioned `github.com/open-ai-sdk/ai-go/aisdkgin` module;
+`aisdkgin.Handler(aisdkhttp.Handler(run))` wraps the same `net/http` handler, so Gin never enters the
+core module's dependency graph and the adapter can be released independently.
 
 ### Breaking change: tool-loop step count now has no implicit default
 

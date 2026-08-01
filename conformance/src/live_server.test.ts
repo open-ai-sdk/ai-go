@@ -14,7 +14,7 @@ let serverDir: string;
 beforeAll(async () => {
   serverDir = mkdtempSync(join(tmpdir(), 'ai-go-conformance-'));
   const serverPath = join(serverDir, 'server');
-  execFileSync('go', ['build', '-o', serverPath, './cmd/conformance-server'], {
+  execFileSync('go', ['build', '-o', serverPath, '../examples/chat-server'], {
     cwd: new URL('..', import.meta.url),
   });
   server = spawn(serverPath, ['-addr', '127.0.0.1:0'], {
