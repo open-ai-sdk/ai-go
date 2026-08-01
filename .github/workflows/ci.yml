@@ -39,7 +39,7 @@ jobs:
           run-install: false
 
       - name: Install conformance dependencies
-        run: vp install --frozen-lockfile
+        run: bun install --frozen-lockfile
         working-directory: conformance
 
       - name: Install Chromium
@@ -263,6 +263,7 @@ jobs:
           go mod download
           go -C aisdkgin mod download
           go -C compat-test mod download
+          (cd conformance && bun install --frozen-lockfile)
 
       - name: Build all Go modules
         run: |
