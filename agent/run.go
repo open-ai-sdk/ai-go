@@ -196,37 +196,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		fullText := sr.text
 
 		if !acc.hasToolCalls() {
-			if tracingEnabled {
-				stepSpan.SetAttributes(stepAttrs(sr)...)
-			}
-			stepSpan.End()
-			if !r.emitObserved(StepEvent{
-				Type:             StepEventStepEnd,
-				StepNumber:       step,
-				FinishReason:     sr.finish,
-				RawFinishReason:  sr.rawFinish,
-				ProviderMetadata: sr.providerMeta,
-				Warnings:         sr.warnings,
-			}) {
-				return ctx.Err()
-			}
-			r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
-			completedSteps = append(completedSteps, StepResultInfo{
-				StepNumber:       step,
-				Text:             fullText,
-				Reasoning:        sr.reasoning,
-				Usage:            sr.usage,
-				FinishReason:     sr.finish,
-				RawFinishReason:  sr.rawFinish,
-				ProviderMetadata: sr.providerMeta,
-				Warnings:         sr.warnings,
-			})
-			if !emitStructuredOutput(r, model, req, history) {
-				return ctx.Err()
-			}
-			r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
-			r.emitObserved(StepEvent{Type: StepEventDone})
-			return nil
+			return finishTextStep(r, params, step, sr, fullText, model, req, history, completedSteps, stepSpan)
 		}
 
 		if r.executeToolStep(params, step, sr, fullText, acc, model, req, &history, &completedSteps, stepSpan) {
@@ -245,6 +215,42 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		return ctx.Err()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
+	r.emitObserved(StepEvent{Type: StepEventDone})
+	return nil
+}
+
+func finishTextStep(
+	r *run,
+	params RunParams,
+	step int,
+	sr streamResult,
+	fullText string,
+	model Model,
+	req Request,
+	history []Message,
+	completedSteps []StepResultInfo,
+	stepSpan tracing.Span,
+) error {
+	if r.tracingEnabled {
+		stepSpan.SetAttributes(stepAttrs(sr)...)
+	}
+	stepSpan.End()
+	if !r.emitObserved(StepEvent{
+		Type: StepEventStepEnd, StepNumber: step, FinishReason: sr.finish,
+		RawFinishReason: sr.rawFinish, ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
+	}) {
+		return r.ctx.Err()
+	}
+	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
+	completedSteps = append(completedSteps, StepResultInfo{
+		StepNumber: step, Text: fullText, Reasoning: sr.reasoning, Usage: sr.usage,
+		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
+		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
+	})
+	if !emitStructuredOutput(r, model, req, history) {
+		return r.ctx.Err()
+	}
+	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
 	r.emitObserved(StepEvent{Type: StepEventDone})
 	return nil
 }

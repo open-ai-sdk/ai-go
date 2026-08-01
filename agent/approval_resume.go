@@ -121,7 +121,12 @@ func scanApprovalToolResult(role string, part ContentPart, calls []*historyAppro
 		return fmt.Errorf("agent: tool result %q precedes its tool call or duplicates a result", part.ToolResultID)
 	}
 	if part.ToolResultName != call.tc.name {
-		return fmt.Errorf("agent: tool result %q names %q, want %q", part.ToolResultID, part.ToolResultName, call.tc.name)
+		return fmt.Errorf(
+			"agent: tool result %q names %q, want %q",
+			part.ToolResultID,
+			part.ToolResultName,
+			call.tc.name,
+		)
 	}
 	call.result = &historyToolResult{
 		name: part.ToolResultName, output: part.ToolResultOutput,
