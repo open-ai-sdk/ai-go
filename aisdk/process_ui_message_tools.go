@@ -20,7 +20,10 @@ func handleChunkToolInputDelta(chunk Chunk, state *StreamingUIMessageState) {
 	if partial == nil {
 		return
 	}
-	delta, _ := chunk.Fields["inputTextDelta"].(string)
+	delta, ok := chunk.Fields["inputTextDelta"].(string)
+	if !ok {
+		return
+	}
 	partial.Text += delta
 	if partial.Index < len(state.Message.Parts) && json.Valid([]byte(partial.Text)) {
 		var input any

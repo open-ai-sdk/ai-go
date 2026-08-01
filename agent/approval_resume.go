@@ -44,7 +44,7 @@ func scanApprovalHistory(
 			return errors.New("agent: an approval-response message cannot contain other content")
 		}
 		for _, part := range message.Content {
-			if err := scanApprovalPart(message.Role, part, calls, callsByApprovalID); err != nil {
+			if err := scanApprovalPart(string(message.Role), part, calls, callsByApprovalID); err != nil {
 				return err
 			}
 		}
@@ -151,6 +151,89 @@ func scanApprovalResponse(
 	return nil
 }
 
+type approvalResumePlan struct {
+	stepTools    *ToolSet
+	definitions  map[*historyApprovalCall]ToolDefinition
+	grants       []ApprovalGrant
+	grantsByCall map[*historyApprovalCall]ApprovalGrant
+}
+
+func prepareApprovalCalls(r *run, params RunParams, calls []*historyApprovalCall) (*approvalResumePlan, error) {
+	activeTools := params.Request.Tools
+	if activeTools == nil && params.Tools != nil {
+		activeTools = params.Tools.Definitions
+	}
+	plan := &approvalResumePlan{
+		stepTools:    toolSetForStep(params.Tools, activeTools),
+		definitions:  make(map[*historyApprovalCall]ToolDefinition),
+		grantsByCall: make(map[*historyApprovalCall]ApprovalGrant),
+	}
+	for _, call := range calls {
+		if err := prepareApprovalCall(r, params, call, plan); err != nil {
+			return nil, err
+		}
+	}
+	return plan, nil
+}
+
+func prepareApprovalCall(r *run, params RunParams, call *historyApprovalCall, plan *approvalResumePlan) error {
+	tc := call.tc
+	policy := params.ToolApproval[tc.name]
+	requiresApproval := false
+	if policy != nil {
+		canonical, _, err := canonicalizeApprovalInput(tc.args)
+		if err != nil {
+			return fmt.Errorf("agent: canonicalize approval input for %q: %w", tc.id, err)
+		}
+		call.canonicalArgs, tc.args = canonical, canonical
+		call.tc = tc
+		requiresApproval = policy(tc.name, tc.args)
+	}
+	if !requiresApproval {
+		if call.response != nil {
+			return fmt.Errorf("agent: tool call %q is not approval-gated by this request", tc.id)
+		}
+		return nil
+	}
+	request := ApprovalRequest{
+		ApprovalID: approvalIDForCall(call), ToolCallID: tc.id, ToolName: tc.name, Args: tc.args,
+	}
+	if call.result != nil {
+		return verifyCompletedApprovalCall(r, call, request)
+	}
+	if call.response == nil {
+		return fmt.Errorf("agent: pending tool call %q has no approval response", tc.id)
+	}
+	grant, err := verifyApprovalRequest(r.approvalKey, request, call.response.signature)
+	if err != nil {
+		return fmt.Errorf("agent: approval response %q: %w", request.ApprovalID, err)
+	}
+	call.canonicalArgs, tc.args = grant.canonicalArgs, grant.canonicalArgs
+	call.tc = tc
+	definition, err := validateToolCall(plan.stepTools, tc)
+	if err != nil {
+		return fmt.Errorf("agent: approved tool call %q is invalid: %w", tc.id, err)
+	}
+	plan.definitions[call] = definition
+	if call.response.approved {
+		plan.grants = append(plan.grants, grant)
+		plan.grantsByCall[call] = grant
+	}
+	return nil
+}
+
+func verifyCompletedApprovalCall(r *run, call *historyApprovalCall, request ApprovalRequest) error {
+	if call.response != nil {
+		return fmt.Errorf("agent: approval response %q also carries a completed tool result", request.ApprovalID)
+	}
+	if err := verifyApprovalResult(
+		r.approvalKey, request, call.result.approved, call.result.output, call.result.receipt,
+	); err != nil {
+		return fmt.Errorf("agent: approval-gated tool result %q is unauthenticated: %w", call.tc.id, err)
+	}
+	return nil
+}
+
 // resumeToolApprovals validates the entire approval envelope before invoking
 // any tool. It then replaces client-only response parts with provider-facing
 // tool results. Correlation and provenance come from signed message history;
@@ -168,84 +251,13 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 		return nil, scanErr
 	}
 
-	activeTools := params.Request.Tools
-	if activeTools == nil && params.Tools != nil {
-		activeTools = params.Tools.Definitions
-	}
-	stepTools := toolSetForStep(params.Tools, activeTools)
-	definitions := make(map[*historyApprovalCall]ToolDefinition)
-	grants := make([]ApprovalGrant, 0)
-	grantsByCall := make(map[*historyApprovalCall]ApprovalGrant)
-
-	validationErr := func() error {
-		for _, call := range calls {
-			tc := call.tc
-			policy := params.ToolApproval[tc.name]
-			requiresApproval := false
-			if policy != nil {
-				canonical, _, err := canonicalizeApprovalInput(tc.args)
-				if err != nil {
-					return fmt.Errorf("agent: canonicalize approval input for %q: %w", tc.id, err)
-				}
-				call.canonicalArgs = canonical
-				tc.args = canonical
-				call.tc = tc
-				requiresApproval = policy(tc.name, tc.args)
-			}
-			if !requiresApproval {
-				if call.response != nil {
-					return fmt.Errorf("agent: tool call %q is not approval-gated by this request", tc.id)
-				}
-				continue
-			}
-
-			approvalID := call.approvalID
-			if approvalID == "" {
-				approvalID = tc.id
-			}
-			request := ApprovalRequest{
-				ApprovalID: approvalID, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args,
-			}
-			if call.result != nil {
-				if call.response != nil {
-					return fmt.Errorf("agent: approval response %q also carries a completed tool result", approvalID)
-				}
-				if err := verifyApprovalResult(
-					r.approvalKey, request, call.result.approved, call.result.output, call.result.receipt,
-				); err != nil {
-					return fmt.Errorf("agent: approval-gated tool result %q is unauthenticated: %w", tc.id, err)
-				}
-				continue
-			}
-			if call.response == nil {
-				return fmt.Errorf("agent: pending tool call %q has no approval response", tc.id)
-			}
-
-			grant, err := verifyApprovalRequest(r.approvalKey, request, call.response.signature)
-			if err != nil {
-				return fmt.Errorf("agent: approval response %q: %w", approvalID, err)
-			}
-			call.canonicalArgs = grant.canonicalArgs
-			tc.args = grant.canonicalArgs
-			call.tc = tc
-			definition, err := validateToolCall(stepTools, tc)
-			if err != nil {
-				return fmt.Errorf("agent: approved tool call %q is invalid: %w", tc.id, err)
-			}
-			definitions[call] = definition
-			if call.response.approved {
-				grants = append(grants, grant)
-				grantsByCall[call] = grant
-			}
-		}
-		return nil
-	}()
-	if validationErr != nil {
-		return nil, validationErr
+	plan, err := prepareApprovalCalls(r, params, calls)
+	if err != nil {
+		return nil, err
 	}
 
 	var reservation ApprovalReservation
-	if len(grants) > 0 {
+	if len(plan.grants) > 0 {
 		if err := r.ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -253,7 +265,7 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 			return nil, errors.New("agent: ToolApprovalReplayGuard is required to execute an approved history response")
 		}
 		var err error
-		reservation, err = r.approvalReplayGuard.ReserveApprovals(r.ctx, grants)
+		reservation, err = r.approvalReplayGuard.ReserveApprovals(r.ctx, plan.grants)
 		if err != nil {
 			return nil, fmt.Errorf("agent: reserve approval capability: %w", err)
 		}
@@ -270,7 +282,7 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 			continue
 		}
 		tc := call.tc
-		definition := definitions[call]
+		definition := plan.definitions[call]
 		var result *ToolResult
 		var terminalErr error
 		if !call.response.approved {
@@ -290,7 +302,7 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 				return nil, r.ctx.Err()
 			}
 			result, terminalErr = executeReservedToolCall(
-				r, stepTools, tc, definition, reservation, grantsByCall[call],
+				r, plan.stepTools, tc, definition, reservation, plan.grantsByCall[call],
 			)
 		}
 
@@ -319,6 +331,14 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 		}
 	}
 
+	return rebuildApprovalHistory(history, calls, generated), nil
+}
+
+func rebuildApprovalHistory(
+	history []Message,
+	calls []*historyApprovalCall,
+	generated map[int]Message,
+) []Message {
 	resumed := make([]Message, 0, len(history)+len(generated))
 	ordinal := 0
 	for _, message := range history {
@@ -348,7 +368,7 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 			}
 		}
 	}
-	return resumed, nil
+	return resumed
 }
 
 func executeReservedToolCall(

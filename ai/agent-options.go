@@ -183,5 +183,9 @@ func snapshotCallbackValue[T any](value T) T {
 	default:
 		return value
 	}
-	return snapshot.(T)
+	typed, ok := snapshot.(T)
+	if !ok {
+		panic("ai: callback snapshot changed type")
+	}
+	return typed
 }
