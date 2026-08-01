@@ -68,25 +68,7 @@ func Run(ctx context.Context, params RunParams) <-chan StepEvent {
 }
 
 func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error {
-	tracer := params.tracer
-	if tracer == nil && !params.disableTracing {
-		tracer = tracing.NewTracer()
-	}
-	tracingEnabled := tracer != nil
-	if !tracingEnabled {
-		// The package-private disabled-instrumentation seam is used only by
-		// tests and benchmarks. Public runs take the tracingEnabled path; that
-		// tracer is OTel's global no-op until the application registers a
-		// provider.
-		tracer = tracing.NoopTracer{}
-	}
-	if params.Logger != nil {
-		// Skipped entirely when nil: transport.LoggerFromContext returns the
-		// discard logger for a context carrying no value at all, the same as
-		// for one explicitly carrying a nil logger, so wrapping ctx here would
-		// only cost an allocation without changing what any reader observes.
-		ctx = transport.WithLogger(ctx, params.Logger)
-	}
+	ctx, tracer, tracingEnabled := initializeRunTracing(ctx, params)
 	ctx, runSpan := tracer.Start(ctx, "ai.run")
 
 	var completedSteps []StepResultInfo
@@ -116,19 +98,11 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		approvalReplayGuard: params.ApprovalReplayGuard,
 		tracer:              tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
 	}
-	if err := params.Tools.Validate(); err != nil {
-		r.emitError(err)
-		return nil
-	}
-
-	history := buildInitialHistory(params.Request)
-	var err error
-	history, err = resumeToolApprovals(r, params, history)
+	history, proceed, err := prepareRunHistory(r, params)
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		r.emitError(err)
+		return err
+	}
+	if !proceed {
 		return nil
 	}
 
@@ -273,6 +247,37 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
 	r.emitObserved(StepEvent{Type: StepEventDone})
 	return nil
+}
+
+func initializeRunTracing(ctx context.Context, params RunParams) (context.Context, tracing.Tracer, bool) {
+	tracer := params.tracer
+	if tracer == nil && !params.disableTracing {
+		tracer = tracing.NewTracer()
+	}
+	enabled := tracer != nil
+	if !enabled {
+		tracer = tracing.NoopTracer{}
+	}
+	if params.Logger != nil {
+		ctx = transport.WithLogger(ctx, params.Logger)
+	}
+	return ctx, tracer, enabled
+}
+
+func prepareRunHistory(r *run, params RunParams) ([]Message, bool, error) {
+	if err := params.Tools.Validate(); err != nil {
+		r.emitError(err)
+		return nil, false, nil
+	}
+	history, err := resumeToolApprovals(r, params, buildInitialHistory(params.Request))
+	if err == nil {
+		return history, true, nil
+	}
+	if r.ctx.Err() != nil {
+		return nil, false, r.ctx.Err()
+	}
+	r.emitError(err)
+	return nil, false, nil
 }
 
 // executeToolStep runs a step's tool calls, ends the step span, emits the

@@ -30,6 +30,127 @@ type historyApprovalCall struct {
 	canonicalArgs string
 }
 
+func scanApprovalHistory(
+	history []Message,
+	calls *[]*historyApprovalCall,
+	callsByApprovalID map[string]*historyApprovalCall,
+) error {
+	for _, message := range history {
+		messageHasApproval, messageHasOther := approvalMessageKinds(message)
+		if messageHasApproval && message.Role != "user" {
+			return errors.New("agent: approval responses must be in a user message")
+		}
+		if messageHasApproval && messageHasOther {
+			return errors.New("agent: an approval-response message cannot contain other content")
+		}
+		for _, part := range message.Content {
+			if err := scanApprovalPart(message.Role, part, calls, callsByApprovalID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func approvalMessageKinds(message Message) (hasApproval, hasOther bool) {
+	for _, part := range message.Content {
+		if part.Type == "tool_approval_response" {
+			hasApproval = true
+		} else {
+			hasOther = true
+		}
+	}
+	return hasApproval, hasOther
+}
+
+func scanApprovalPart(
+	role string,
+	part ContentPart,
+	calls *[]*historyApprovalCall,
+	callsByApprovalID map[string]*historyApprovalCall,
+) error {
+	switch part.Type {
+	case "tool_call":
+		return scanApprovalToolCall(role, part, calls, callsByApprovalID)
+	case "tool_result":
+		return scanApprovalToolResult(role, part, *calls)
+	case "tool_approval_response":
+		return scanApprovalResponse(part, *calls, callsByApprovalID)
+	default:
+		return nil
+	}
+}
+
+func scanApprovalToolCall(
+	role string,
+	part ContentPart,
+	calls *[]*historyApprovalCall,
+	callsByApprovalID map[string]*historyApprovalCall,
+) error {
+	if role != "assistant" {
+		return fmt.Errorf("agent: tool call %q must be in an assistant message", part.ToolCallID)
+	}
+	if part.ToolCallID == "" {
+		return errors.New("agent: tool call ID is empty in approval history")
+	}
+	call := &historyApprovalCall{
+		tc: toolCallState{
+			id: part.ToolCallID, name: part.ToolCallName,
+			args: string(part.ToolCallArgs), thoughtSignature: part.ThoughtSignature,
+		},
+		approvalID: part.ToolApprovalID,
+		ordinal:    len(*calls),
+	}
+	*calls = append(*calls, call)
+	if call.approvalID == "" {
+		return nil
+	}
+	if _, duplicate := callsByApprovalID[call.approvalID]; duplicate {
+		return fmt.Errorf("agent: duplicate approval ID %q in history", call.approvalID)
+	}
+	callsByApprovalID[call.approvalID] = call
+	return nil
+}
+
+func scanApprovalToolResult(role string, part ContentPart, calls []*historyApprovalCall) error {
+	if role != "tool" {
+		return fmt.Errorf("agent: tool result %q must be in a tool message", part.ToolResultID)
+	}
+	call := latestUnresolvedToolCall(calls, part.ToolResultID)
+	if call == nil {
+		return fmt.Errorf("agent: tool result %q precedes its tool call or duplicates a result", part.ToolResultID)
+	}
+	if part.ToolResultName != call.tc.name {
+		return fmt.Errorf("agent: tool result %q names %q, want %q", part.ToolResultID, part.ToolResultName, call.tc.name)
+	}
+	call.result = &historyToolResult{
+		name: part.ToolResultName, output: part.ToolResultOutput,
+		receipt: part.ToolResultApprovalSignature, approved: part.ToolResultApprovalApproved,
+	}
+	return nil
+}
+
+func scanApprovalResponse(
+	part ContentPart,
+	calls []*historyApprovalCall,
+	callsByApprovalID map[string]*historyApprovalCall,
+) error {
+	call := callsByApprovalID[part.ToolApprovalID]
+	if call == nil {
+		call = latestUnansweredToolCall(calls, part.ToolApprovalID)
+	}
+	if call == nil {
+		return fmt.Errorf("agent: approval response %q precedes or has no matching tool call", part.ToolApprovalID)
+	}
+	if call.response != nil {
+		return fmt.Errorf("agent: duplicate approval response %q", part.ToolApprovalID)
+	}
+	call.response = &historyApprovalResponse{
+		approved: part.ToolApprovalApproved, reason: part.ToolApprovalReason, signature: part.ToolApprovalSignature,
+	}
+	return nil
+}
+
 // resumeToolApprovals validates the entire approval envelope before invoking
 // any tool. It then replaces client-only response parts with provider-facing
 // tool results. Correlation and provenance come from signed message history;
@@ -42,100 +163,7 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 	calls := make([]*historyApprovalCall, 0)
 	callsByApprovalID := make(map[string]*historyApprovalCall)
 
-	scanErr := func() error {
-	for _, message := range history {
-		messageHasApproval := false
-		messageHasOther := false
-		for _, part := range message.Content {
-			if part.Type == "tool_approval_response" {
-				messageHasApproval = true
-			} else {
-				messageHasOther = true
-			}
-		}
-		if messageHasApproval && message.Role != "user" {
-			return errors.New("agent: approval responses must be in a user message")
-		}
-		if messageHasApproval && messageHasOther {
-			return errors.New("agent: an approval-response message cannot contain other content")
-		}
-
-		for _, part := range message.Content {
-			switch part.Type {
-			case "tool_call":
-				if message.Role != "assistant" {
-					return fmt.Errorf("agent: tool call %q must be in an assistant message", part.ToolCallID)
-				}
-				if part.ToolCallID == "" {
-					return errors.New("agent: tool call ID is empty in approval history")
-				}
-				call := &historyApprovalCall{
-					tc: toolCallState{
-						id: part.ToolCallID, name: part.ToolCallName,
-						args: string(part.ToolCallArgs), thoughtSignature: part.ThoughtSignature,
-					},
-					approvalID: part.ToolApprovalID,
-					ordinal:    len(calls),
-				}
-				calls = append(calls, call)
-				if call.approvalID != "" {
-					if _, duplicate := callsByApprovalID[call.approvalID]; duplicate {
-						return fmt.Errorf("agent: duplicate approval ID %q in history", call.approvalID)
-					}
-					callsByApprovalID[call.approvalID] = call
-				}
-
-			case "tool_result":
-				if message.Role != "tool" {
-					return fmt.Errorf("agent: tool result %q must be in a tool message", part.ToolResultID)
-				}
-				call := latestUnresolvedToolCall(calls, part.ToolResultID)
-				if call == nil {
-					return fmt.Errorf(
-						"agent: tool result %q precedes its tool call or duplicates a result",
-						part.ToolResultID,
-					)
-				}
-				if part.ToolResultName != call.tc.name {
-					return fmt.Errorf(
-						"agent: tool result %q names %q, want %q",
-						part.ToolResultID,
-						part.ToolResultName,
-						call.tc.name,
-					)
-				}
-				call.result = &historyToolResult{
-					name: part.ToolResultName, output: part.ToolResultOutput,
-					receipt:  part.ToolResultApprovalSignature,
-					approved: part.ToolResultApprovalApproved,
-				}
-
-			case "tool_approval_response":
-				call := callsByApprovalID[part.ToolApprovalID]
-				if call == nil {
-					// Compatibility for histories created before approval IDs were
-					// distinct: correlate the latest unanswered call by tool-call ID.
-					call = latestUnansweredToolCall(calls, part.ToolApprovalID)
-				}
-				if call == nil {
-					return fmt.Errorf(
-						"agent: approval response %q precedes or has no matching tool call",
-						part.ToolApprovalID,
-					)
-				}
-				if call.response != nil {
-					return fmt.Errorf("agent: duplicate approval response %q", part.ToolApprovalID)
-				}
-				call.response = &historyApprovalResponse{
-					approved:  part.ToolApprovalApproved,
-					reason:    part.ToolApprovalReason,
-					signature: part.ToolApprovalSignature,
-				}
-			}
-		}
-	}
-		return nil
-	}()
+	scanErr := scanApprovalHistory(history, &calls, callsByApprovalID)
 	if scanErr != nil {
 		return nil, scanErr
 	}
@@ -150,66 +178,66 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 	grantsByCall := make(map[*historyApprovalCall]ApprovalGrant)
 
 	validationErr := func() error {
-	for _, call := range calls {
-		tc := call.tc
-		policy := params.ToolApproval[tc.name]
-		requiresApproval := false
-		if policy != nil {
-			canonical, _, err := canonicalizeApprovalInput(tc.args)
+		for _, call := range calls {
+			tc := call.tc
+			policy := params.ToolApproval[tc.name]
+			requiresApproval := false
+			if policy != nil {
+				canonical, _, err := canonicalizeApprovalInput(tc.args)
+				if err != nil {
+					return fmt.Errorf("agent: canonicalize approval input for %q: %w", tc.id, err)
+				}
+				call.canonicalArgs = canonical
+				tc.args = canonical
+				call.tc = tc
+				requiresApproval = policy(tc.name, tc.args)
+			}
+			if !requiresApproval {
+				if call.response != nil {
+					return fmt.Errorf("agent: tool call %q is not approval-gated by this request", tc.id)
+				}
+				continue
+			}
+
+			approvalID := call.approvalID
+			if approvalID == "" {
+				approvalID = tc.id
+			}
+			request := ApprovalRequest{
+				ApprovalID: approvalID, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args,
+			}
+			if call.result != nil {
+				if call.response != nil {
+					return fmt.Errorf("agent: approval response %q also carries a completed tool result", approvalID)
+				}
+				if err := verifyApprovalResult(
+					r.approvalKey, request, call.result.approved, call.result.output, call.result.receipt,
+				); err != nil {
+					return fmt.Errorf("agent: approval-gated tool result %q is unauthenticated: %w", tc.id, err)
+				}
+				continue
+			}
+			if call.response == nil {
+				return fmt.Errorf("agent: pending tool call %q has no approval response", tc.id)
+			}
+
+			grant, err := verifyApprovalRequest(r.approvalKey, request, call.response.signature)
 			if err != nil {
-				return fmt.Errorf("agent: canonicalize approval input for %q: %w", tc.id, err)
+				return fmt.Errorf("agent: approval response %q: %w", approvalID, err)
 			}
-			call.canonicalArgs = canonical
-			tc.args = canonical
+			call.canonicalArgs = grant.canonicalArgs
+			tc.args = grant.canonicalArgs
 			call.tc = tc
-			requiresApproval = policy(tc.name, tc.args)
-		}
-		if !requiresApproval {
-			if call.response != nil {
-				return fmt.Errorf("agent: tool call %q is not approval-gated by this request", tc.id)
+			definition, err := validateToolCall(stepTools, tc)
+			if err != nil {
+				return fmt.Errorf("agent: approved tool call %q is invalid: %w", tc.id, err)
 			}
-			continue
-		}
-
-		approvalID := call.approvalID
-		if approvalID == "" {
-			approvalID = tc.id
-		}
-		request := ApprovalRequest{
-			ApprovalID: approvalID, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args,
-		}
-		if call.result != nil {
-			if call.response != nil {
-				return fmt.Errorf("agent: approval response %q also carries a completed tool result", approvalID)
+			definitions[call] = definition
+			if call.response.approved {
+				grants = append(grants, grant)
+				grantsByCall[call] = grant
 			}
-			if err := verifyApprovalResult(
-				r.approvalKey, request, call.result.approved, call.result.output, call.result.receipt,
-			); err != nil {
-				return fmt.Errorf("agent: approval-gated tool result %q is unauthenticated: %w", tc.id, err)
-			}
-			continue
 		}
-		if call.response == nil {
-			return fmt.Errorf("agent: pending tool call %q has no approval response", tc.id)
-		}
-
-		grant, err := verifyApprovalRequest(r.approvalKey, request, call.response.signature)
-		if err != nil {
-			return fmt.Errorf("agent: approval response %q: %w", approvalID, err)
-		}
-		call.canonicalArgs = grant.canonicalArgs
-		tc.args = grant.canonicalArgs
-		call.tc = tc
-		definition, err := validateToolCall(stepTools, tc)
-		if err != nil {
-			return fmt.Errorf("agent: approved tool call %q is invalid: %w", tc.id, err)
-		}
-		definitions[call] = definition
-		if call.response.approved {
-			grants = append(grants, grant)
-			grantsByCall[call] = grant
-		}
-	}
 		return nil
 	}()
 	if validationErr != nil {
