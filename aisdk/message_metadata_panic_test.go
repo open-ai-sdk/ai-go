@@ -7,8 +7,8 @@ import (
 )
 
 // TestWrapChunksWithMetadata_CallbackPanic_StreamContinues verifies that a panic
-// in the MessageMetadata observer callback is swallowed (node mergeCallbacks
-// parity): the finish chunk is still emitted, without metadata attached, and the
+// in the MessageMetadata observer callback is swallowed: the finish chunk is
+// still emitted, without metadata attached, and the
 // output channel closes normally instead of the producer goroutine crashing.
 func TestWrapChunksWithMetadata_CallbackPanic_StreamContinues(t *testing.T) {
 	in := make(chan Chunk, 1)

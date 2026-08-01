@@ -1,7 +1,5 @@
 // Pin the contract that ChunkToolOutputAvailable carries `output` as the
-// raw string returned by the tool, matching ai-sdk-node's `output: part.output`
-// passthrough (packages/ai/src/generate-text/stream-text.ts:2434, schema
-// `output: z.unknown()` in ui-message-stream/ui-message-chunks.ts).
+// raw string returned by the tool.
 //
 // Pre-fix history: chunksToolResult JSON-parsed `tr.Output` and fell back to
 // `{"result": tr.Output}` on parse failure, producing three possible chunk

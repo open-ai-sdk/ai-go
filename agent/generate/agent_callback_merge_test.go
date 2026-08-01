@@ -41,8 +41,8 @@ func TestMergeCallback_OnlyCallSet(t *testing.T) {
 }
 
 // TestMergeCallback_BothFire proves agent-level and call-level callbacks both
-// run for the same event, matching node's mergeCallbacks (Promise.allSettled)
-// rather than a sequential "agent's callback wins" implementation.
+// run for the same event rather than a sequential "agent's callback wins"
+// implementation.
 func TestMergeCallback_BothFire(t *testing.T) {
 	var agentFired, callFired int32
 	var wg sync.WaitGroup
@@ -63,8 +63,7 @@ func TestMergeCallback_BothFire(t *testing.T) {
 
 // TestMergeCallback_PanicInOneDoesNotStopTheOther proves a panicking callback
 // is swallowed (recovered and logged, not propagated) and does not prevent
-// the other callback from running or fail the merged call itself — node's
-// mergeCallbacks discards each callback's rejection independently.
+// the other callback from running or fail the merged call itself.
 func TestMergeCallback_PanicInOneDoesNotStopTheOther(t *testing.T) {
 	var callFired int32
 	agent := func(int) { panic("boom") }

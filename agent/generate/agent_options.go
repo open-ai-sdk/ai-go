@@ -107,8 +107,7 @@ func WithAgentOnError(fn func(error)) AgentOption {
 
 // mergeRequest builds the effective GenerateTextRequest for one Generate/
 // Stream call: it starts from the agent's defaults (falling back to
-// IsStepCount(20) when the agent set no StopWhen — ai-sdk-node's
-// ToolLoopAgent default), applies opts in order so a call-level Option
+// IsStepCount(20) when the agent set no StopWhen), applies opts in order so a call-level Option
 // replaces the corresponding scalar field, then merges the agent-level and
 // call-level lifecycle callbacks so both run instead of the call-level one
 // silently discarding the agent's.
@@ -136,14 +135,11 @@ func (a *ToolLoopAgent) mergeRequest(opts []Option) GenerateTextRequest {
 
 // mergeCallback combines an agent-level and a call-level callback of the same
 // shape into one that invokes both — each on its own goroutine, recovered and
-// logged independently — and waits for both before returning. This mirrors
-// node's mergeCallbacks (util/merge-callbacks.ts), which runs callbacks under
-// Promise.allSettled: concurrent, and neither callback's panic can affect the
-// other or fail the run. When only one side is set, it is returned unchanged
+// logged independently — and waits for both before returning. Neither callback's
+// panic can affect the other or fail the run. When only one side is set, it is returned unchanged
 // (no goroutine needed; the agent runtime already recovers it as an observer).
 //
-// Note the concurrency is real parallelism, unlike node's single-threaded
-// Promise.allSettled: the two callbacks run on separate goroutines, so if both
+// The two callbacks run on separate goroutines, so if both
 // mutate shared state they must synchronize it themselves.
 func mergeCallback[T any](agent, call func(T)) func(T) {
 	if agent == nil {

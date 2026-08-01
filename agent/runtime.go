@@ -37,9 +37,8 @@ type run struct {
 }
 
 // safeObserver invokes an observer callback (one whose return value does not
-// steer the loop) with a recovery boundary that logs and continues. This mirrors
-// node's mergeCallbacks, which runs callbacks under Promise.allSettled and
-// swallows their errors — an observer panic must not fail the run.
+// steer the loop) with a recovery boundary that logs and continues. An observer
+// panic must not fail the run.
 func (r *run) safeObserver(fn func()) {
 	safeObserver(r.logger, fn)
 }

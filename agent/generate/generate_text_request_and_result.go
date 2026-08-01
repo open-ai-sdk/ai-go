@@ -24,8 +24,7 @@ type GenerateTextRequest struct {
 	// Ignored when Tools is nil.
 	ToolChoice *ToolChoice
 	// StopWhen is a custom stop condition for the tool loop. Nil defaults to
-	// IsStepCount(1) — a single step (node parity: generateText/streamText
-	// default to stopWhen=isStepCount(1)). Tool calls made in that step still
+	// IsStepCount(1) — a single step. Tool calls made in that step still
 	// execute; only a follow-up model call is gated. Use IsStepCount(n),
 	// Never(), or a custom StopCondition for a real multi-step loop.
 	StopWhen StopCondition
@@ -111,7 +110,7 @@ type StepOutput struct {
 	Sources          []Source
 	// Files holds file/image outputs from the model.
 	Files []GeneratedFile
-	// Response mirrors AI SDK Node's step.response.messages for continuation.
+	// Response contains messages for continuation.
 	Response Response
 }
 
@@ -139,7 +138,7 @@ type GenerateTextResult struct {
 	// Files holds file/image outputs from the model (aggregated across all steps).
 	Files            []GeneratedFile
 	StructuredOutput json.RawMessage
-	// Response mirrors AI SDK Node's response.messages for continuation.
+	// Response contains messages for continuation.
 	Response Response
 }
 

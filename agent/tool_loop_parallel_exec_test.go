@@ -48,7 +48,7 @@ func (e siblingFailureExecutor) Execute(_ context.Context, name, _ string) (stri
 // TestExecuteToolCallsParallel_SiblingFailure_OthersComplete proves that
 // errgroup's concurrency limiting is not paired with its fail-fast error
 // aggregation: one tool call erroring must not cancel or drop its siblings'
-// results, matching node's per-call error reporting.
+// results.
 func TestExecuteToolCallsParallel_SiblingFailure_OthersComplete(t *testing.T) {
 	names := []string{"ok-1", "fail", "ok-2"}
 	ch := Run(context.Background(), RunParams{

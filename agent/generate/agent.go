@@ -13,18 +13,12 @@ import "context"
 // messages, and tool calls live on the stack of each Generate/Stream call),
 // so an implementation is safe for concurrent use provided its tools are.
 //
-// ToolLoopAgent is the reference implementation, mirroring ai-sdk-node's
-// agent/tool-loop-agent.ts. Consumers may implement Agent themselves; the
+// ToolLoopAgent is the reference implementation. Consumers may implement Agent themselves; the
 // interface is deliberately small (four methods, all in terms of types every
 // other ai-go entry point already uses) to keep that possible.
 //
-// Node-parity gap: ai-sdk-node's Agent is generic over CALL_OPTIONS, TOOLS,
-// RUNTIME_CONTEXT, and OUTPUT via TypeScript conditional types
-// (InferAgentTools, InferAgentUIMessage select the tool-call/result shape
-// from the tool set at the type level). Go has no equivalent for that kind of
-// inference, so this interface fixes the shape to *ToolSet and the existing
-// GenerateTextResult/StreamResult types instead of inventing a parametrized
-// type Go cannot express safely — tool typing stays at tool.New[In, Out].
+// This interface fixes the shape to *ToolSet and the existing
+// GenerateTextResult/StreamResult types; tool typing stays at tool.New[In, Out].
 type Agent interface {
 	// ID identifies the agent. Empty when unset.
 	ID() string

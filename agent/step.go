@@ -103,8 +103,8 @@ func executeToolCalls(
 }
 
 // executeToolCallsParallel processes tool calls concurrently, bounded by
-// maxParallel via errgroup.SetLimit. g.Go always returns nil: node continues
-// sibling tool calls when one fails and reports the failure per-call, so an
+// maxParallel via errgroup.SetLimit. g.Go always returns nil: sibling tool calls
+// continue when one fails and report the failure per-call, so an
 // errgroup first-error-cancels policy would silently change that semantic.
 // Per-call errors travel through results[i].result.Output instead of through
 // g.Wait's return value. errgroup is used here only for concurrency limiting

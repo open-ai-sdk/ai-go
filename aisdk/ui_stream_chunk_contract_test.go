@@ -15,8 +15,7 @@ func captureWriterOutput(fn func(w *Writer)) string {
 }
 
 // TestChunkConstants_FrozenContractCoverage verifies every chunk type defined in
-// the frozen contract (history/swift-ui-ai-sdk-mvp/contract-chat-request-and-stream.md)
-// has a corresponding constant in this package.
+// the frozen contract has a corresponding constant in this package.
 //
 // If a constant is missing, the SSE adapter cannot emit the required chunk type
 // without magic strings, which would cause contract drift.

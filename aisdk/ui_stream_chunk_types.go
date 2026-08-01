@@ -26,7 +26,7 @@ const (
 	// ChunkAbort signals stream cancellation.
 	ChunkAbort = "abort"
 
-	// Tool error and approval chunk types (AI SDK Node v6 parity).
+	// Tool error and approval chunk types.
 	ChunkToolInputError       = "tool-input-error"
 	ChunkToolOutputError      = "tool-output-error"
 	ChunkToolOutputDenied     = "tool-output-denied"

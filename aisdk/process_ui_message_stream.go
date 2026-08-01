@@ -5,7 +5,6 @@ import (
 )
 
 // UIMessagePart represents a typed part accumulated from stream chunks.
-// It mirrors the Node AI SDK's UIMessagePart union as a JSON-friendly map.
 type UIMessagePart = map[string]any
 
 // StreamingUIMessage represents the assistant message being built from stream chunks.
@@ -60,8 +59,7 @@ func NewStreamingUIMessageState(messageID string, lastMessage *StreamingUIMessag
 // ProcessUIMessageStream consumes a channel of Chunks, updates state on each chunk
 // to reconstruct the assistant message, and re-emits every chunk on the returned channel.
 //
-// This is a test oracle for AI SDK Node's processUIMessageStream. Server code
-// produces streams and does not consume its own browser protocol.
+// Server code produces streams and does not consume its own browser protocol.
 func ProcessUIMessageStream(chunks <-chan Chunk, state *StreamingUIMessageState) <-chan Chunk {
 	out := make(chan Chunk, 64)
 	go func() {

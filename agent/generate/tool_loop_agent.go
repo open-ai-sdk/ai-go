@@ -10,8 +10,8 @@ import "context"
 // returned, a called tool has no executor, a tool call needs approval, or a
 // stop condition is met. Unlike GenerateText/StreamText's bare default of
 // IsStepCount(1), ToolLoopAgent defaults to IsStepCount(20): an agent is
-// expected to run a real multi-step loop out of the box (ai-sdk-node
-// tool-loop-agent.ts:132), while a one-off GenerateText call is not.
+// expected to run a real multi-step loop out of the box, while a one-off
+// GenerateText call is not.
 type ToolLoopAgent struct {
 	id       string
 	settings GenerateTextRequest

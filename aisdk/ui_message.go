@@ -78,7 +78,7 @@ type EnvelopeMessage struct {
 	Content string `json:"content,omitempty"`
 
 	// Metadata carries per-message metadata for persistence and observability.
-	// This is NOT forwarded to the model; it mirrors AI SDK Node v6's UIMessage.metadata.
+	// This is not forwarded to the model.
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 

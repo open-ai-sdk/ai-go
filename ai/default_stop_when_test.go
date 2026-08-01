@@ -46,8 +46,7 @@ func noopStepToolSet() *ai.ToolSet {
 }
 
 // TestGenerateText_DefaultStopWhen_PerformsExactlyOneStep proves GenerateText
-// with neither MaxSteps nor StopWhen set now performs exactly one step (node
-// parity — generateText defaults to stopWhen=isStepCount(1)), not the old
+// with neither MaxSteps nor StopWhen set now performs exactly one step, not the old
 // implicit ten steps the engine used to fall back to. A context timeout
 // guards against a regression turning this into an unbounded loop (the fake
 // model always calls a tool) instead of a clean test failure.

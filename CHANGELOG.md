@@ -39,9 +39,7 @@ compatible with `ai@7.0.35` and is exercised by the conformance and Playwright s
 All hand-written Go filenames now use `snake_case`. Files that stayed in the same package were
 renamed mechanically from `kebab-case.go` to `snake_case.go`; this does not change import paths or Go
 symbols. JavaScript, TypeScript, and shell filenames continue to use `kebab-case`.
-The exhaustive 88-file final sweep is recorded in
-[`reports/phase-10-file-renames.md`](reports/phase-10-file-renames.md); the package table above records
-the earlier cross-package moves.
+The package table above records the earlier cross-package moves.
 
 ### Facade and package boundaries
 

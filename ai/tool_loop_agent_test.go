@@ -39,8 +39,8 @@ func (m *minimalAgent) Stream(ctx context.Context, opts ...ai.Option) (*ai.Strea
 }
 
 // TestToolLoopAgent_ThreeStepFakeExecutor drives ToolLoopAgent through the
-// same three-step scenario as the phase-08 fake-executor contract test
-// (fakeToolExecutor / fakeMultiStepModel, defined in
+// same three-step scenario as
+// fakeToolExecutor / fakeMultiStepModel, defined in
 // tool-executor-fake_test.go), proving the agent delegates to the same tool
 // loop rather than reimplementing it.
 func TestToolLoopAgent_ThreeStepFakeExecutor(t *testing.T) {
@@ -113,7 +113,7 @@ func newNoopAgent(model ai.LanguageModel, opts ...ai.AgentOption) *ai.ToolLoopAg
 // TestToolLoopAgent_DefaultStopWhenRunsPastTenAndStopsAtTwenty verifies an
 // agent with the default stop condition runs a full 20 steps — past what
 // would have been the engine's old implicit ten-step ceiling — and stops
-// there (ToolLoopAgent's node-parity default, IsStepCount(20)), proving the
+// there (ToolLoopAgent's default, IsStepCount(20)), proving the
 // engine's loop bound is no longer an implicit cap independent of StopWhen.
 func TestToolLoopAgent_DefaultStopWhenRunsPastTenAndStopsAtTwenty(t *testing.T) {
 	model := &alwaysToolCallModel{}

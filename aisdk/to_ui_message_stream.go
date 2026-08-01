@@ -55,8 +55,6 @@ type (
 // ToUIMessageStream converts events from a StreamEventer into a channel of typed Chunks.
 // It bridges StreamResult.Stream() → UI protocol chunks with configurable options.
 // The returned channel is closed when the stream completes.
-//
-// This is the Go equivalent of AI SDK Node's result.toUIMessageStream({ sendReasoning, messageMetadata }).
 func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <-chan Chunk {
 	sr.DrainUnused()
 
@@ -187,7 +185,7 @@ func attachMessageMetadata(
 	usageSnapshot := *usage
 	usageMu.Unlock()
 	// Observer callback: a panic leaves metadata nil and the finish chunk is
-	// still emitted, matching node's swallow-and-continue for metadata.
+	// still emitted.
 	var metadata map[string]any
 	safeObserver(func() {
 		metadata = metaFn(MessageMetadataInfo{

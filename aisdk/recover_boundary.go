@@ -59,9 +59,7 @@ func recoverToEvent(out chan<- aikit.StepEvent) func(error) {
 
 // safeObserver invokes an observer callback — one whose return value does not
 // steer control flow — with a recovery boundary that swallows and continues.
-// This mirrors node's mergeCallbacks, which runs callbacks under
-// Promise.allSettled and swallows their errors: an observer panic must not tear
-// down the UI stream.
+// An observer panic must not tear down the UI stream.
 func safeObserver(fn func()) {
 	defer recoverPanic(nil)
 	fn()

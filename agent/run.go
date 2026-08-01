@@ -75,7 +75,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	var completedSteps []StepResultInfo
 	// lastSR captures the final iteration's streamResult so we can report an
 	// accurate finish reason when the loop exits with pending tool_calls at
-	// maxSteps (matching ai-sdk-node: honest return, no forced text step), and
+	// maxSteps, and
 	// so the run span reports the run's terminal state (see the deferred
 	// closure below).
 	var lastSR streamResult
@@ -107,8 +107,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		return nil
 	}
 
-	// MaxSteps <= 0 means unbounded: node has no maxSteps concept at all, so
-	// StopWhen (or the model naturally stopping — no tool calls) is the only
+	// MaxSteps <= 0 means unbounded, so StopWhen (or the model naturally
+	// stopping — no tool calls) is the only
 	// gate. A caller that sets neither now gets exactly as many steps as
 	// StopWhen allows, not an implicit cap.
 	for step := 0; params.MaxSteps <= 0 || step < params.MaxSteps; step++ {
@@ -211,7 +211,6 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// on a follow-up call) or surface the partial result.
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
-	// Matches ai-sdk-node semantics (see packages/ai generate-text.ts:1008).
 	if !emitStructuredOutput(r, lastModel, lastRequest, history) {
 		return ctx.Err()
 	}

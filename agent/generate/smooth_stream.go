@@ -233,7 +233,7 @@ func makeRegexDetector(re *regexp.Regexp) ChunkDetector {
 // regexDetect finds the first match in buffer and returns everything up to
 // and including the match as the chunk. This intentionally includes any
 // unmatched prefix before the match (e.g. "123def" with /[a-z]+/ returns
-// "123def"), matching the Node.js reference: buffer.slice(0, match.index) + match[0].
+// "123def").
 func regexDetect(re *regexp.Regexp, buffer string) (string, string, error) {
 	loc := re.FindStringIndex(buffer)
 	if loc == nil {

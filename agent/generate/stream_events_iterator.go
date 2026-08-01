@@ -11,7 +11,7 @@ import "iter"
 //
 // Breaking out of the range unregisters only this branch; it does NOT cancel the
 // run, because other views may still be consuming it. To cancel the whole run,
-// cancel the context passed to StreamText — phase-3 made that reliable.
+// cancel the context passed to StreamText.
 func (sr *StreamResult) Events() iter.Seq2[StepEvent, error] {
 	return func(yield func(StepEvent, error) bool) {
 		b, err := sr.register()

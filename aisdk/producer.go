@@ -169,7 +169,7 @@ func (cp *ChunkProducer) translateTerminalEvent(ev aikit.StepEvent) ([]Chunk, st
 			"args":       ev.ToolCallArgsDelta,
 		}
 		// isAutomatic and signature are optional in the protocol; include them
-		// only when set so the chunk matches node's omit-when-absent shape.
+		// only when set.
 		if ev.ApprovalIsAutomatic {
 			fields["isAutomatic"] = true
 		}

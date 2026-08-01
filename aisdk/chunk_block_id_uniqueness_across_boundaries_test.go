@@ -1,9 +1,7 @@
 // Pin block-id uniqueness across every text↔reasoning↔tool boundary.
 //
-// Mirrors ai-sdk-node's behavior: each conceptual content block (text /
-// reasoning / tool_use) is emitted with a unique id. ai-sdk-node uses
-// Anthropic's `content_block_index`; ai-go uses an internal counter
-// (textBlockCount) that must advance at every boundary.
+// Each conceptual content block (text / reasoning / tool_use) is emitted with
+// a unique id. An internal counter (textBlockCount) advances at every boundary.
 //
 // Without per-boundary advancement, downstream UIs that key parts by id
 // (find-or-merge by id) collapse consecutive same-type blocks into one part

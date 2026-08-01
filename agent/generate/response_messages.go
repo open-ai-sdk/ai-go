@@ -1,7 +1,6 @@
 package generate
 
-// Response mirrors the AI SDK Node `response` surface that callers use to
-// continue multi-step conversations.
+// Response contains messages callers use to continue multi-step conversations.
 type Response struct {
 	Messages []Message
 }

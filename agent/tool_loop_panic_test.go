@@ -63,7 +63,7 @@ func TestRun_ToolExecutorPanic_FailsRunWithPanicError(t *testing.T) {
 
 // TestRun_OnChunkPanic_RunCompletes verifies that a panic in an observer
 // callback (OnChunk) is recovered and swallowed: the run completes normally and
-// no error is surfaced (node mergeCallbacks parity).
+// no error is surfaced.
 func TestRun_OnChunkPanic_RunCompletes(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
 		{textEvt("hello"), finishEvt(FinishReasonStop)},

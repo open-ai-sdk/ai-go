@@ -289,7 +289,7 @@ func TestRunLoop_IsStepCount(t *testing.T) {
 func TestRunLoop_MaxStepsExhausted(t *testing.T) {
 	// When maxSteps is hit with pending tool_calls, the loop exits honestly
 	// with the last step's finish reason (ToolCalls). No forced "final text"
-	// pass is fired — matches ai-sdk-node semantics. Caller decides how to
+	// pass is fired. Caller decides how to
 	// continue (bump budget, call again with tool_choice=none, etc.).
 	exec := &mockExecutor{}
 	calls := make([][]StreamEvent, 3) // exactly 3 tool-call steps, nothing more
@@ -375,8 +375,8 @@ func TestRunLoop_NonPositiveMaxStepsIsUnbounded(t *testing.T) {
 // delta.content when the gateway loses tool schema context). Verifies that no
 // model call inside the tool loop is issued with a smaller tools slice than
 // what the caller supplied — neither during normal steps nor at maxSteps
-// exhaustion. Matches ai-sdk-node behavior where every doGenerate call sees
-// the same stepTools slice unless the caller explicitly filters via
+// exhaustion. Every call sees the same stepTools slice unless the caller
+// explicitly filters via
 // PrepareStep.ActiveTools.
 func TestRunLoop_ToolsNeverStripped(t *testing.T) {
 	exec := &mockExecutor{}
@@ -423,7 +423,7 @@ func TestRunLoop_ToolsNeverStripped(t *testing.T) {
 // TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr verifies the OnEnd
 // callback receives the actual last-step streamResult (FinishReasonToolCalls)
 // instead of a faked FinishReasonStop that the old emitFinalGeneration path
-// used to synthesize. Matches ai-sdk-node: honest signal about loop state.
+// used to synthesize.
 func TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr(t *testing.T) {
 	exec := &mockExecutor{}
 	calls := [][]StreamEvent{
