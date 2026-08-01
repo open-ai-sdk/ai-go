@@ -36,6 +36,24 @@ This API does not execute tools. Use its `Message` to construct an explicit
 follow-up request after your application has handled any tool calls. Choose
 `ai.GenerateText` instead when you want the SDK's multi-step tool loop.
 
+## Agent completions
+
+`ai.Agent` includes the high-level `ai.Completion` capability; `ToolLoopAgent`
+implements it. Its
+`Prompt` and `Chat` methods run the configured multi-step tool loop, while
+`agent.Completion(prompt)` returns an agent-bound builder for request-level
+control:
+
+```go
+result, err := agent.Completion("Look up Hanoi weather").
+  Temperature(0.2).
+  Send(ctx)
+```
+
+Unlike `ai.NewCompletion`, this path inherits the agent's default tools,
+approval policy, callbacks, and stop condition; tool calls may therefore
+execute before the final result is returned.
+
 ## Scope
 
 The current provider contract is stream-first, so direct completions aggregate

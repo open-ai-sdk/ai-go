@@ -93,6 +93,10 @@ fmt.Println(completion.Text)
 Direct completions do not execute tools and do not expose opaque provider wire
 responses. Use the `Message` in the result to build an explicit continuation.
 
+`ToolLoopAgent` provides the corresponding high-level Completion capability:
+its `Prompt`, `Chat`, and `Completion(prompt)` builder retain the agent's
+tools, approvals, callbacks, and multi-step stop policy.
+
 `GenerateText` defaults to a single step. Set `StopWhen: ai.IsStepCount(n)` for an explicit
 multi-step tool loop, or use the direct `agent` runtime when the application needs event-level
 control.

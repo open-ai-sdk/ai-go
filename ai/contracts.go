@@ -13,6 +13,7 @@ type (
 	AgentOption             = generate.AgentOption
 	ApprovalDecision        = generate.ApprovalDecision
 	CallSettings            = generate.CallSettings
+	Completion              = generate.Completion
 	ChunkDetector           = generate.ChunkDetector
 	ChunkEvent              = generate.ChunkEvent
 	ContentPart             = generate.ContentPart
@@ -96,10 +97,11 @@ type (
 // Direct completion contracts are owned by llm because they use the model
 // boundary without entering the agent runtime.
 type (
-	CompletionRequest        = llm.CompletionRequest
-	CompletionRequestBuilder = llm.CompletionRequestBuilder
-	CompletionResponse       = llm.CompletionResponse
-	CompletionFile           = llm.GeneratedFile
+	AgentCompletionRequestBuilder = generate.AgentCompletionRequestBuilder
+	CompletionRequest             = llm.CompletionRequest
+	CompletionRequestBuilder      = llm.CompletionRequestBuilder
+	CompletionResponse            = llm.CompletionResponse
+	CompletionFile                = llm.GeneratedFile
 )
 
 type ObjectResult[T any] = generate.ObjectResult[T]
