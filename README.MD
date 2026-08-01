@@ -29,7 +29,7 @@ bunx playwright install chromium
 bun run test:browser
 ```
 
-Run both conformance commands whenever changing `uistream`, response headers,
+Run both conformance commands whenever changing `aisdk`, response headers,
 SSE framing, fixture bytes, or browser-facing tool/approval behavior.
 
 ## Packages
@@ -45,7 +45,7 @@ SSE framing, fixture bytes, or browser-facing tool/approval behavior.
 | `provider/gemini` | Google Gemini provider |
 | `provider/openai` | OpenAI Responses API + Chat Completions provider |
 | `provider/openai_compatible` | Generic provider for any OpenAI-compatible endpoint |
-| `uistream` | SSE adapter and Writer for AI SDK UI message stream protocol |
+| `aisdk` | Frozen AI SDK v7 UI-message-stream chunks, SSE framing, request parsing, and approval signatures |
 
 ## Quick Start
 
@@ -132,11 +132,11 @@ result, _ := ai.StreamText(ctx, ai.GenerateTextRequest{
 })
 ```
 
-When displaying the stream in a React UI via the `uistream` package, set
+When displaying the stream in a React UI via the `aisdk` package, set
 `SendReasoning: true` to forward thinking chunks to the frontend:
 
 ```go
-chunks := uistream.ToUIMessageStream(streamResult, "msg-1", uistream.ToUIStreamOptions{
+chunks := aisdk.ToUIMessageStream(streamResult, "msg-1", aisdk.ToUIStreamOptions{
     SendReasoning: true,  // Required for thinking/reasoning display
     SendSources:   true,
 })
@@ -148,7 +148,7 @@ chunks := uistream.ToUIMessageStream(streamResult, "msg-1", uistream.ToUIStreamO
 stream := ai.StreamText(ctx, req)
 
 var buf bytes.Buffer
-adapter := uistream.NewAdapter("msg-1")
+adapter := aisdk.NewAdapter("msg-1")
 text := adapter.Stream(stream.Stream(), &buf)
 // buf contains SSE-encoded AI SDK UI message stream chunks
 ```
@@ -321,14 +321,14 @@ tools, stop condition, ...) override the agent's defaults for that call only, wh
 `OnEnd`/`OnChunk`/`OnError` set at the agent level and at the call level both fire — concurrently,
 with either side's panic swallowed — instead of one replacing the other.
 
-Stream an agent over SSE with the free functions in `uistream` (never methods on the agent, to keep
-`uistream`'s existing one-way dependency on `ai`):
+Stream an agent over SSE with the free functions in the top-level `ai` façade; the lower-level
+`aisdk` wire package remains model-independent:
 
 ```go
-chunks, err := uistream.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessage("Hello!")))
+chunks, err := ai.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessage("Hello!")))
 
 // Or serve it directly:
-http.Handle("/chat", uistream.AgentHandler(agent))
+http.Handle("/chat", ai.AgentHandler(agent))
 ```
 
 ### Breaking change: tool-loop step count now has no implicit default

@@ -207,7 +207,8 @@ func TestToModelOutputPanicPreservesToolResultBeforeFailingRun(t *testing.T) {
 
 			resultIndex, errorIndex := -1, -1
 			for index, event := range events {
-				if event.Type == StepEventToolResult && event.ToolResult != nil && event.ToolResult.Output == `{"ok":true}` {
+				if event.Type == StepEventToolResult && event.ToolResult != nil &&
+					event.ToolResult.Output == `{"ok":true}` {
 					resultIndex = index
 				}
 				if event.Type == StepEventError {

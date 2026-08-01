@@ -58,7 +58,7 @@ func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) error {
 			// Don't emit finish — outer manages lifecycle.
 		default:
 			if writeErr == nil {
-				writeErr = sw.writer.WriteChunk(c.Type, c.Fields)
+				writeErr = sw.writer.writeChunk(c)
 			}
 			// Track text for finish result.
 			if c.Type == ChunkTextDelta {
@@ -120,7 +120,7 @@ func CreateUIMessageStream(w io.Writer, opts CreateUIStreamOptions, execute func
 			}
 		}
 		finishReason = "error"
-		if werr := sw.writer.WriteError(errMsg); werr != nil {
+		if werr := sw.writer.writeTrustedError(errMsg); werr != nil {
 			clientGone = true
 		}
 	}

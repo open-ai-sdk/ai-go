@@ -21,14 +21,25 @@ func recoverPanic(onPanic func(error)) {
 }
 
 // recoverToChunk builds an onPanic that surfaces a recovered panic as a
-// best-effort error chunk on out before the producer goroutine's deferred
-// close runs. The send is non-blocking: a recovery path must never deadlock on
+// best-effort error chunk on out before the owner goroutine's deferred close
+// runs. It deliberately does not emit finish: aggregate relays must wait for
+// every source before writing their single terminal frame. The send is non-blocking: a recovery path must never deadlock on
 // a full or abandoned channel. aisdk has no logger injection yet, so the
 // panic is surfaced to the consumer rather than logged.
 func recoverToChunk(out chan<- Chunk) func(error) {
 	return func(err error) {
 		select {
-		case out <- Chunk{Type: ChunkError, Fields: map[string]any{"errorText": "stream panic: " + err.Error()}}:
+		case out <- Chunk{Type: ChunkError, Fields: map[string]any{"errorText": redactStreamError(err)}}:
+		default:
+		}
+	}
+}
+
+func recoverToTerminalChunks(out chan<- Chunk) func(error) {
+	return func(err error) {
+		recoverToChunk(out)(err)
+		select {
+		case out <- Chunk{Type: ChunkFinish, Fields: map[string]any{"finishReason": "error"}}:
 		default:
 		}
 	}

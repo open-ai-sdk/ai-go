@@ -22,7 +22,7 @@ type StreamOptions struct {
 
 // Execute runs a UI message stream with managed lifecycle.
 // It emits a start chunk, delegates writing to fn, then emits finish + [DONE].
-// If fn returns an error, an error chunk is emitted instead of finish.
+// If fn returns an error, an error chunk is emitted before an error finish.
 func Execute(w io.Writer, opts StreamOptions, fn ExecuteFunc) {
 	// Emit start chunk. If it fails the client is already gone, so skip fn.
 	startFields := map[string]any{"messageId": opts.MessageID}
@@ -47,7 +47,10 @@ func Execute(w io.Writer, opts StreamOptions, fn ExecuteFunc) {
 	var writeErr error
 	if err != nil {
 		finishReason = "error"
-		writeErr = wr.WriteError(err.Error())
+		writeErr = wr.writeTrustedError(redactStreamError(err))
+		if writeErr == nil {
+			writeErr = wr.WriteFinishWithReason(finishReason, nil)
+		}
 	} else {
 		writeErr = wr.WriteFinish()
 	}

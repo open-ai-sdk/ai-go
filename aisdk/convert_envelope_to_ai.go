@@ -1,6 +1,7 @@
 package aisdk
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -20,8 +21,8 @@ func ToAIMessages(msgs []EnvelopeMessage) []aikit.Message {
 		}
 		if len(parts) > 0 {
 			result = append(result, aikit.Message{
-			Role:    aikit.Role(m.Role),
-			Content: parts,
+				Role:    aikit.Role(m.Role),
+				Content: parts,
 			})
 		}
 		responses := approvalResponseParts(m.Parts)
@@ -90,16 +91,40 @@ func toolInvocationParts(p EnvelopePartUnion) []aikit.ContentPart {
 	case "call", "partial-call", "input-streaming", "input-available",
 		"approval-requested", "approval-responded":
 		return []aikit.ContentPart{call}
-	case "result", "output-available", "output-error", "output-denied":
+	case "result", "output-available", "output-denied":
 		return []aikit.ContentPart{
 			call,
-			{Type: aikit.ContentPartTypeToolResult, ToolResultID: p.ToolCallID,
-				ToolResultName: toolName, ToolResultOutput: p.Output},
+			{
+				Type: aikit.ContentPartTypeToolResult, ToolResultID: p.ToolCallID,
+				ToolResultName: toolName, ToolResultOutput: envelopeToolOutput(p.Output),
+			},
+		}
+	case "output-error":
+		return []aikit.ContentPart{
+			call,
+			{
+				Type: aikit.ContentPartTypeToolResult, ToolResultID: p.ToolCallID,
+				ToolResultName: toolName, ToolResultOutput: p.ErrorText,
+			},
 		}
 	default:
 		// "error" and unknown states: skip gracefully.
 		return nil
 	}
+}
+
+func envelopeToolOutput(output any) string {
+	if text, ok := output.(string); ok {
+		return text
+	}
+	if output == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func envelopeToolName(part EnvelopePartUnion) string {
@@ -117,7 +142,7 @@ func approvalResponseParts(parts []EnvelopePartUnion) []aikit.ContentPart {
 			continue
 		}
 		responses = append(responses, aikit.ContentPart{
-			Type: aikit.ContentPartTypeToolApprovalResponse,
+			Type:           aikit.ContentPartTypeToolApprovalResponse,
 			ToolApprovalID: approval.ID, ToolApprovalSignature: approval.Signature,
 			ToolApprovalApproved: *approval.Approved, ToolApprovalReason: approval.Reason,
 		})

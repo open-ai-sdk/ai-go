@@ -150,8 +150,11 @@ type EnvelopePartUnion struct {
 	ToolName string `json:"toolName,omitempty"`
 	// Input is the JSON-encoded tool call arguments.
 	Input json.RawMessage `json:"input,omitempty"`
-	// Output is the string result from the tool execution (present when State == "result").
-	Output string `json:"output,omitempty"`
+	// Output is the tool result (present for terminal output states). useChat
+	// preserves JSON objects and arrays here, while text tools use a string.
+	Output any `json:"output,omitempty"`
+	// ErrorText is the public failure message carried by output-error parts.
+	ErrorText string `json:"errorText,omitempty"`
 	// State is the tool invocation state: "partial-call", "call", "result", "error".
 	State string `json:"state,omitempty"`
 

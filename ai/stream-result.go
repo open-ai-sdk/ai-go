@@ -206,96 +206,105 @@ func (sr *StreamResult) ConsumeStream() {
 // It reads its own branch so it does not interfere with other views.
 func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 	b, err := sr.register()
-	if err == nil {
-		sr.ensureStarted()
+	if err != nil {
+		return nil, err
 	}
+	sr.ensureStarted()
 	defer b.unregister(sr)
 
-	result := &GenerateTextResult{}
-	var currentStep *StepOutput
-	var currentUsage Usage
-	var preludeToolResults []ToolResult
-
+	state := consumeState{result: &GenerateTextResult{}, tools: sr.tools}
 	for ev := range b.ch {
-		switch ev.Type {
-		case StepEventStepStart:
-			currentStep = &StepOutput{}
-			currentUsage = Usage{}
-
-		case StepEventTextDelta:
-			result.Text += ev.TextDelta
-			if currentStep != nil {
-				currentStep.Text += ev.TextDelta
-			}
-
-		case StepEventReasoningDelta:
-			result.Reasoning += ev.ReasoningDelta
-			if currentStep != nil {
-				currentStep.Reasoning += ev.ReasoningDelta
-			}
-
-		case StepEventToolCallStart:
-			handleToolCallStart(ev, currentStep)
-
-		case StepEventToolCallDelta:
-			handleToolCallDelta(ev, currentStep)
-
-		case StepEventToolCallReady:
-			handleToolCallReady(ev, currentStep)
-
-		case StepEventToolResult:
-			if currentStep == nil && ev.ToolResult != nil {
-				preludeToolResults = append(preludeToolResults, *ev.ToolResult)
-			}
-			if ev.ToolResult != nil {
-				result.ToolApprovalRequests = removeResolvedApprovalRequest(
-					result.ToolApprovalRequests, ev.ToolResult.ID,
-				)
-			}
-			handleToolResult(ev, result, currentStep)
-
-		case StepEventUsage:
-			handleUsage(ev, result, currentStep, &currentUsage)
-
-		case StepEventSource:
-			handleSource(ev, result, currentStep)
-
-		case StepEventFileDelta:
-			handleFileDelta(ev, result, currentStep)
-
-		case StepEventStepEnd:
-			handleStepEnd(ev, result, currentStep, sr.tools)
-			currentStep = nil
-
-		case StepEventStructuredOutput:
-			result.StructuredOutput = ev.StructuredOutput
-
-		case StepEventToolApprovalRequest:
-			handleToolApprovalRequest(ev, currentStep)
-			result.ToolApprovalRequests = append(result.ToolApprovalRequests, ToolApprovalRequest{
-				ApprovalID: ev.ApprovalID,
-				ToolCallID: ev.ToolCallID,
-				ToolName:   ev.ToolCallName,
-				Args:       json.RawMessage(ev.ToolCallArgsDelta),
-				Signature:  ev.ApprovalSignature,
-			})
-
-		case StepEventToolOutputDenied, StepEventToolCallInvalid:
-			// Observed for streaming/UI consumers; aggregate state is carried by
-			// the corresponding ToolResult event.
-
-		case StepEventError:
-			result.Response = Response{Messages: responseMessagesWithPrelude(
-				preludeToolResults, result.Steps, sr.tools,
-			)}
-			return result, ev.Error
+		if terminal, terminalErr := state.consume(ev); terminal {
+			state.finishResponse()
+			return state.result, terminalErr
 		}
 	}
+	state.finishResponse()
+	return state.result, nil
+}
 
-	result.Response = Response{Messages: responseMessagesWithPrelude(
-		preludeToolResults, result.Steps, sr.tools,
+type consumeState struct {
+	result             *GenerateTextResult
+	currentStep        *StepOutput
+	currentUsage       Usage
+	preludeToolResults []ToolResult
+	tools              *ToolSet
+}
+
+func (state *consumeState) finishResponse() {
+	state.result.Response = Response{Messages: responseMessagesWithPrelude(
+		state.preludeToolResults, state.result.Steps, state.tools,
 	)}
-	return result, nil
+}
+
+func (state *consumeState) consume(ev StepEvent) (bool, error) {
+	switch ev.Type {
+	case StepEventStepStart:
+		state.currentStep = &StepOutput{}
+		state.currentUsage = Usage{}
+	case StepEventTextDelta:
+		state.consumeText(ev)
+	case StepEventReasoningDelta:
+		state.consumeReasoning(ev)
+	case StepEventToolCallStart:
+		handleToolCallStart(ev, state.currentStep)
+	case StepEventToolCallDelta:
+		handleToolCallDelta(ev, state.currentStep)
+	case StepEventToolCallReady:
+		handleToolCallReady(ev, state.currentStep)
+	case StepEventToolResult:
+		state.consumeToolResult(ev)
+	case StepEventUsage:
+		handleUsage(ev, state.result, state.currentStep, &state.currentUsage)
+	case StepEventSource:
+		handleSource(ev, state.result, state.currentStep)
+	case StepEventFileDelta:
+		handleFileDelta(ev, state.result, state.currentStep)
+	case StepEventStepEnd:
+		handleStepEnd(ev, state.result, state.currentStep, state.tools)
+		state.currentStep = nil
+	case StepEventStructuredOutput:
+		state.result.StructuredOutput = ev.StructuredOutput
+	case StepEventToolApprovalRequest:
+		state.consumeApprovalRequest(ev)
+	case StepEventError:
+		return true, ev.Error
+	}
+	return false, nil
+}
+
+func (state *consumeState) consumeText(ev StepEvent) {
+	state.result.Text += ev.TextDelta
+	if state.currentStep != nil {
+		state.currentStep.Text += ev.TextDelta
+	}
+}
+
+func (state *consumeState) consumeReasoning(ev StepEvent) {
+	state.result.Reasoning += ev.ReasoningDelta
+	if state.currentStep != nil {
+		state.currentStep.Reasoning += ev.ReasoningDelta
+	}
+}
+
+func (state *consumeState) consumeToolResult(ev StepEvent) {
+	if state.currentStep == nil && ev.ToolResult != nil {
+		state.preludeToolResults = append(state.preludeToolResults, *ev.ToolResult)
+	}
+	if ev.ToolResult != nil {
+		state.result.ToolApprovalRequests = removeResolvedApprovalRequest(
+			state.result.ToolApprovalRequests, ev.ToolResult.ID,
+		)
+	}
+	handleToolResult(ev, state.result, state.currentStep)
+}
+
+func (state *consumeState) consumeApprovalRequest(ev StepEvent) {
+	handleToolApprovalRequest(ev, state.currentStep)
+	state.result.ToolApprovalRequests = append(state.result.ToolApprovalRequests, ToolApprovalRequest{
+		ApprovalID: ev.ApprovalID, ToolCallID: ev.ToolCallID, ToolName: ev.ToolCallName,
+		Args: json.RawMessage(ev.ToolCallArgsDelta), Signature: ev.ApprovalSignature,
+	})
 }
 
 func handleToolApprovalRequest(event StepEvent, step *StepOutput) {
@@ -415,17 +424,12 @@ func handleUsage(
 		return
 	}
 	result.Usage.InputTokens += event.Usage.InputTokens - current.InputTokens
-	result.Usage.InputTokenDetails.NoCacheTokens +=
-		event.Usage.InputTokenDetails.NoCacheTokens - current.InputTokenDetails.NoCacheTokens
-	result.Usage.InputTokenDetails.CacheReadTokens +=
-		event.Usage.InputTokenDetails.CacheReadTokens - current.InputTokenDetails.CacheReadTokens
-	result.Usage.InputTokenDetails.CacheWriteTokens +=
-		event.Usage.InputTokenDetails.CacheWriteTokens - current.InputTokenDetails.CacheWriteTokens
+	result.Usage.InputTokenDetails.NoCacheTokens += event.Usage.InputTokenDetails.NoCacheTokens - current.InputTokenDetails.NoCacheTokens
+	result.Usage.InputTokenDetails.CacheReadTokens += event.Usage.InputTokenDetails.CacheReadTokens - current.InputTokenDetails.CacheReadTokens
+	result.Usage.InputTokenDetails.CacheWriteTokens += event.Usage.InputTokenDetails.CacheWriteTokens - current.InputTokenDetails.CacheWriteTokens
 	result.Usage.OutputTokens += event.Usage.OutputTokens - current.OutputTokens
-	result.Usage.OutputTokenDetails.TextTokens +=
-		event.Usage.OutputTokenDetails.TextTokens - current.OutputTokenDetails.TextTokens
-	result.Usage.OutputTokenDetails.ReasoningTokens +=
-		event.Usage.OutputTokenDetails.ReasoningTokens - current.OutputTokenDetails.ReasoningTokens
+	result.Usage.OutputTokenDetails.TextTokens += event.Usage.OutputTokenDetails.TextTokens - current.OutputTokenDetails.TextTokens
+	result.Usage.OutputTokenDetails.ReasoningTokens += event.Usage.OutputTokenDetails.ReasoningTokens - current.OutputTokenDetails.ReasoningTokens
 	result.Usage.TotalTokens += event.Usage.TotalTokens - current.TotalTokens
 	if event.Usage.Raw != nil {
 		result.Usage.Raw = snapshotJSONMap(event.Usage.Raw)

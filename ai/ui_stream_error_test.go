@@ -33,4 +33,7 @@ func TestAgentHandler_PreStreamErrorReturns500(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
+	if strings.Contains(rec.Body.String(), "boom") || !strings.Contains(rec.Body.String(), "stream error") {
+		t.Fatalf("unredacted HTTP error body: %q", rec.Body.String())
+	}
 }

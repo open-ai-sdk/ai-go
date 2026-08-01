@@ -3,13 +3,11 @@ package ai
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/open-ai-sdk/ai-go/agent"
 )
 
 func sharedContentPartRoundTrip(parts []ContentPart) []ContentPart {
-	var engineParts []agent.ContentPart = parts
-	var publicParts []ContentPart = engineParts
+	engineParts := parts
+	publicParts := engineParts
 	return publicParts
 }
 

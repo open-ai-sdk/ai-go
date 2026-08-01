@@ -204,7 +204,7 @@ func TestWriter_WriteError_NoFinish(t *testing.T) {
 	if !strings.Contains(output, `"type":"error"`) {
 		t.Errorf("WriteError: expected error chunk\ngot: %s", output)
 	}
-	if !strings.Contains(output, `"errorText":"connection reset"`) {
+	if !strings.Contains(output, `"errorText":"stream error"`) {
 		t.Errorf("WriteError: expected errorText\ngot: %s", output)
 	}
 	if strings.Contains(output, `"type":"finish"`) {

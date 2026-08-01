@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -10,16 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf16"
-	"unicode/utf8"
 
-	"github.com/gowebpki/jcs"
+	"github.com/open-ai-sdk/ai-go/aisdk"
 )
 
 var errApprovalPending = errors.New("agent: tool approval pending")
@@ -185,20 +178,7 @@ func signApprovalRequest(key []byte, request ApprovalRequest) (string, error) {
 	if len(key) < minApprovalKeyBytes {
 		return "", fmt.Errorf("agent: ToolApprovalKey must contain at least %d bytes", minApprovalKeyBytes)
 	}
-	_, inputDigest, err := canonicalizeApprovalInput(request.Args)
-	if err != nil {
-		return "", fmt.Errorf("agent: canonicalize approval input: %w", err)
-	}
-	payload := "[" + strings.Join([]string{
-		jsonString("ai-sdk-tool-approval-v1"),
-		jsonString(request.ApprovalID),
-		jsonString(request.ToolCallID),
-		jsonString(request.ToolName),
-		jsonString(inputDigest),
-	}, ",") + "]"
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write([]byte(payload))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+	return aisdk.SignToolApproval(key, approvalSignatureInput(request))
 }
 
 func verifyApprovalRequest(
@@ -210,18 +190,19 @@ func verifyApprovalRequest(
 	if err != nil {
 		return ApprovalGrant{}, fmt.Errorf("agent: canonicalize approval input: %w", err)
 	}
-	expected, err := signApprovalRequest(key, request)
-	if err != nil {
-		return ApprovalGrant{}, err
-	}
-	expectedBytes, _ := base64.RawURLEncoding.DecodeString(expected)
-	actualBytes, err := base64.RawURLEncoding.DecodeString(signature)
-	if err != nil || !hmac.Equal(actualBytes, expectedBytes) {
+	if err := aisdk.VerifyToolApproval(key, signature, approvalSignatureInput(request)); err != nil {
 		return ApprovalGrant{}, ErrInvalidApprovalSignature
 	}
 	return ApprovalGrant{
 		CapabilityID: signature, ToolCallID: request.ToolCallID, canonicalArgs: canonicalArgs,
 	}, nil
+}
+
+func approvalSignatureInput(request ApprovalRequest) aisdk.ToolApprovalSignatureInput {
+	return aisdk.ToolApprovalSignatureInput{
+		ApprovalID: request.ApprovalID, ToolCallID: request.ToolCallID,
+		ToolName: request.ToolName, Input: json.RawMessage(request.Args),
+	}
 }
 
 // signApprovalResult creates an internal continuation receipt. It is distinct
@@ -268,7 +249,10 @@ func verifyApprovalResult(
 	if err != nil {
 		return err
 	}
-	expectedBytes, _ := base64.RawURLEncoding.DecodeString(expected)
+	expectedBytes, err := base64.RawURLEncoding.DecodeString(expected)
+	if err != nil {
+		return fmt.Errorf("agent: decode generated approval receipt: %w", err)
+	}
 	actualBytes, err := base64.RawURLEncoding.DecodeString(receipt)
 	if err != nil || !hmac.Equal(actualBytes, expectedBytes) {
 		return ErrInvalidApprovalSignature
@@ -276,166 +260,13 @@ func verifyApprovalResult(
 	return nil
 }
 
-func hashCanonicalJSON(raw string) (string, error) {
-	_, digest, err := canonicalizeApprovalInput(raw)
-	return digest, err
-}
-
 func canonicalizeApprovalInput(raw string) (string, string, error) {
-	if err := validateApprovalJSONUnicode(raw); err != nil {
+	canonical, err := aisdk.CanonicalizeToolApprovalInput(json.RawMessage(raw))
+	if err != nil {
 		return "", "", err
 	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return "", "", err
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			return "", "", errors.New("multiple JSON values")
-		}
-		return "", "", err
-	}
-	var canonical bytes.Buffer
-	if err := writeCanonicalJSON(&canonical, value); err != nil {
-		return "", "", err
-	}
-	digest := sha256.Sum256(canonical.Bytes())
-	return canonical.String(), base64.RawURLEncoding.EncodeToString(digest[:]), nil
-}
-
-// validateApprovalJSONUnicode rejects inputs that encoding/json would silently
-// repair to U+FFFD. Unpaired UTF-16 escapes are not interoperable JSON (I-JSON)
-// and would otherwise create a Go/JavaScript signature differential.
-func validateApprovalJSONUnicode(raw string) error {
-	if !utf8.ValidString(raw) {
-		return errors.New("approval input is not valid UTF-8")
-	}
-	inString := false
-	for i := 0; i < len(raw); i++ {
-		switch raw[i] {
-		case '"':
-			inString = !inString
-		case '\\':
-			if !inString || i+1 >= len(raw) {
-				continue
-			}
-			if raw[i+1] != 'u' {
-				i++
-				continue
-			}
-			if i+6 > len(raw) {
-				return errors.New("incomplete unicode escape in approval input")
-			}
-			unit, err := strconv.ParseUint(raw[i+2:i+6], 16, 16)
-			if err != nil {
-				return fmt.Errorf("invalid unicode escape in approval input: %w", err)
-			}
-			if 0xDC00 <= unit && unit <= 0xDFFF {
-				return errors.New("unpaired low surrogate in approval input")
-			}
-			if 0xD800 <= unit && unit <= 0xDBFF {
-				if i+12 > len(raw) || raw[i+6] != '\\' || raw[i+7] != 'u' {
-					return errors.New("unpaired high surrogate in approval input")
-				}
-				low, err := strconv.ParseUint(raw[i+8:i+12], 16, 16)
-				if err != nil || low < 0xDC00 || low > 0xDFFF {
-					return errors.New("unpaired high surrogate in approval input")
-				}
-				i += 11
-				continue
-			}
-			i += 5
-		}
-	}
-	return nil
-}
-
-func writeCanonicalJSON(out *bytes.Buffer, value any) error {
-	switch value := value.(type) {
-	case nil:
-		out.WriteString("null")
-	case bool:
-		if value {
-			out.WriteString("true")
-		} else {
-			out.WriteString("false")
-		}
-	case float64:
-		number, err := jcs.NumberToJSON(value)
-		if err != nil {
-			return err
-		}
-		out.WriteString(number)
-	case json.Number:
-		number, err := strconv.ParseFloat(string(value), 64)
-		if err != nil {
-			var numErr *strconv.NumError
-			if !errors.As(err, &numErr) || numErr.Err != strconv.ErrRange {
-				return err
-			}
-		}
-		// JSON.parse permits exponents outside the finite IEEE-754 range and
-		// produces +/-Infinity; JSON.stringify, which the v1 contract uses,
-		// serializes those non-finite values as null.
-		if math.IsInf(number, 0) || math.IsNaN(number) {
-			out.WriteString("null")
-			break
-		}
-		encoded, err := jcs.NumberToJSON(number)
-		if err != nil {
-			return err
-		}
-		out.WriteString(encoded)
-	case string:
-		out.WriteString(jsonString(value))
-	case []any:
-		out.WriteByte('[')
-		for i, item := range value {
-			if i > 0 {
-				out.WriteByte(',')
-			}
-			if err := writeCanonicalJSON(out, item); err != nil {
-				return err
-			}
-		}
-		out.WriteByte(']')
-	case map[string]any:
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Slice(keys, func(i, j int) bool {
-			return utf16Less(keys[i], keys[j])
-		})
-		out.WriteByte('{')
-		for i, key := range keys {
-			if i > 0 {
-				out.WriteByte(',')
-			}
-			out.WriteString(jsonString(key))
-			out.WriteByte(':')
-			if err := writeCanonicalJSON(out, value[key]); err != nil {
-				return err
-			}
-		}
-		out.WriteByte('}')
-	default:
-		return fmt.Errorf("unsupported JSON value %T", value)
-	}
-	return nil
-}
-
-func utf16Less(left, right string) bool {
-	l := utf16.Encode([]rune(left))
-	r := utf16.Encode([]rune(right))
-	for i := 0; i < len(l) && i < len(r); i++ {
-		if l[i] != r[i] {
-			return l[i] < r[i]
-		}
-	}
-	return len(l) < len(r)
+	digest := sha256.Sum256(canonical)
+	return string(canonical), base64.RawURLEncoding.EncodeToString(digest[:]), nil
 }
 
 func jsonString(value string) string {

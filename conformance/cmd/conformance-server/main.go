@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aisdk"
@@ -80,7 +81,11 @@ func main() {
 	})
 
 	fmt.Printf("LISTEN http://%s\n", listener.Addr())
-	if err := http.Serve(listener, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	server := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

@@ -25,6 +25,10 @@ func (wr *Writer) WriteChunk(typ string, fields map[string]any) error {
 	return WriteSSE(wr.w, Chunk{Type: typ, Fields: fields})
 }
 
+func (wr *Writer) writeChunk(chunk Chunk) error {
+	return WriteSSE(wr.w, chunk)
+}
+
 // WriteStart emits the stream start chunk with a message ID.
 func (wr *Writer) WriteStart(msgID string) error {
 	return WriteSSE(wr.w, Chunk{Type: ChunkStart, Fields: map[string]any{"messageId": msgID}})
@@ -38,6 +42,10 @@ func (wr *Writer) WriteFinish() error {
 // WriteError emits an error chunk with an error message.
 func (wr *Writer) WriteError(msg string) error {
 	return WriteSSE(wr.w, Chunk{Type: ChunkError, Fields: map[string]any{"errorText": msg}})
+}
+
+func (wr *Writer) writeTrustedError(msg string) error {
+	return writeSSE(wr.w, Chunk{Type: ChunkError, Fields: map[string]any{"errorText": msg}}, true)
 }
 
 // WriteData emits a custom data-* chunk.
@@ -170,106 +178,6 @@ func (wr *Writer) WriteFile(url, mediaType string, opts *FileChunkOpts) error {
 }
 
 // ToolChunkOpts carries optional v6 fields for tool-related chunks.
-type ToolChunkOpts struct {
-	ProviderExecuted *bool
-	ProviderMetadata map[string]any
-	ToolMetadata     map[string]any
-	Dynamic          *bool
-	Title            string
-	Preliminary      *bool // only meaningful on tool-output-available
-}
-
-// applyToolOpts merges non-nil ToolChunkOpts fields into the given fields map.
-func applyToolOpts(fields map[string]any, opts *ToolChunkOpts) map[string]any {
-	if opts == nil {
-		return fields
-	}
-	if opts.ProviderExecuted != nil {
-		fields["providerExecuted"] = *opts.ProviderExecuted
-	}
-	fields = withProviderMetadata(fields, opts.ProviderMetadata)
-	if opts.ToolMetadata != nil {
-		fields["toolMetadata"] = opts.ToolMetadata
-	}
-	if opts.Dynamic != nil {
-		fields["dynamic"] = *opts.Dynamic
-	}
-	if opts.Title != "" {
-		fields["title"] = opts.Title
-	}
-	if opts.Preliminary != nil {
-		fields["preliminary"] = *opts.Preliminary
-	}
-	return fields
-}
-
-// WriteToolInputError emits a tool-input-error chunk when tool argument parsing fails.
-// opts may be nil.
-func (wr *Writer) WriteToolInputError(
-	toolCallID, toolName string,
-	input any,
-	errorText string,
-	opts *ToolChunkOpts,
-) error {
-	fields := applyToolOpts(map[string]any{
-		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"input":      input,
-		"errorText":  errorText,
-	}, opts)
-	return WriteSSE(wr.w, Chunk{Type: ChunkToolInputError, Fields: fields})
-}
-
-// WriteToolOutputError emits a tool-output-error chunk when tool execution fails.
-// opts may be nil.
-func (wr *Writer) WriteToolOutputError(toolCallID, errorText string, opts *ToolChunkOpts) error {
-	fields := applyToolOpts(map[string]any{
-		"toolCallId": toolCallID,
-		"errorText":  errorText,
-	}, opts)
-	return WriteSSE(wr.w, Chunk{Type: ChunkToolOutputError, Fields: fields})
-}
-
-// WriteToolOutputDenied emits a tool-output-denied chunk when a tool call is rejected.
-// opts may be nil.
-func (wr *Writer) WriteToolOutputDenied(toolCallID string, opts *ToolChunkOpts) error {
-	fields := applyToolOpts(map[string]any{
-		"toolCallId": toolCallID,
-	}, opts)
-	return WriteSSE(wr.w, Chunk{Type: ChunkToolOutputDenied, Fields: fields})
-}
-
-// WriteToolApprovalRequest emits a tool-approval-request chunk for human-in-the-loop flows.
-func (wr *Writer) WriteToolApprovalRequest(approvalID, toolCallID, toolName string, args any) error {
-	return WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalRequest, Fields: map[string]any{
-		"approvalId": approvalID,
-		"toolCallId": toolCallID,
-		"toolName":   toolName,
-		"args":       args,
-	}})
-}
-
-// ApprovalResponseOpts carries optional approval-response protocol fields.
-type ApprovalResponseOpts struct {
-	Reason           string
-	ProviderExecuted *bool
-	ProviderMetadata map[string]any
-}
-
-func (wr *Writer) WriteToolApprovalResponse(approvalID string, approved bool, opts *ApprovalResponseOpts) error {
-	fields := map[string]any{"approvalId": approvalID, "approved": approved}
-	if opts != nil {
-		if opts.Reason != "" {
-			fields["reason"] = opts.Reason
-		}
-		if opts.ProviderExecuted != nil {
-			fields["providerExecuted"] = *opts.ProviderExecuted
-		}
-		fields = withProviderMetadata(fields, opts.ProviderMetadata)
-	}
-	return WriteSSE(wr.w, Chunk{Type: ChunkToolApprovalResponse, Fields: fields})
-}
-
 func (wr *Writer) WriteCustom(kind string, data any, providerMetadata map[string]any) error {
 	return WriteSSE(
 		wr.w,

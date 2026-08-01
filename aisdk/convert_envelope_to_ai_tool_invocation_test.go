@@ -34,6 +34,44 @@ func TestToAIContentParts_ToolInvocation_Call(t *testing.T) {
 	}
 }
 
+func TestToAIContentPartsPreservesStructuredToolOutput(t *testing.T) {
+	var message EnvelopeMessage
+	if err := json.Unmarshal(
+		[]byte(
+			`{"role":"assistant","parts":[{"type":"tool-weather","toolCallId":"call-1","state":"output-available","input":{},"output":{"forecast":["sun","rain"]}}]}`,
+		),
+		&message,
+	); err != nil {
+		t.Fatal(err)
+	}
+	parts := ToAIContentParts(message.Parts)
+	if len(parts) != 2 {
+		t.Fatalf("parts = %#v", parts)
+	}
+	if got, want := parts[1].ToolResultOutput, `{"forecast":["sun","rain"]}`; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestToAIContentPartsPreservesUseChatToolOutputError(t *testing.T) {
+	var message EnvelopeMessage
+	if err := json.Unmarshal(
+		[]byte(
+			`{"role":"assistant","parts":[{"type":"tool-weather","toolCallId":"call-1","state":"output-error","input":{"city":"Hue"},"errorText":"weather service unavailable"}]}`,
+		),
+		&message,
+	); err != nil {
+		t.Fatal(err)
+	}
+	parts := ToAIContentParts(message.Parts)
+	if len(parts) != 2 {
+		t.Fatalf("parts = %#v", parts)
+	}
+	if got, want := parts[1].ToolResultOutput, "weather service unavailable"; got != want {
+		t.Fatalf("output error = %q, want %q", got, want)
+	}
+}
+
 // TestToAIContentParts_ToolInvocation_PartialCall verifies state="partial-call" also emits a ToolCallPart.
 func TestToAIContentParts_ToolInvocation_PartialCall(t *testing.T) {
 	parts := []EnvelopePartUnion{

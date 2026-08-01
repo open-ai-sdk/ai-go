@@ -12,12 +12,9 @@ type PersistedMessageBuilder struct {
 	reasoningAccum strings.Builder
 	lastSignature  string
 
-	// pendingTool tracks in-progress tool calls keyed by toolCallId
 	pendingTool map[string]*toolInvocationPart
-
-	// ordered list of finalized parts
-	parts    []any
-	metadata json.RawMessage
+	parts       []any
+	metadata    json.RawMessage
 }
 
 type toolInvocationPart struct {
@@ -29,14 +26,12 @@ type toolInvocationPart struct {
 	ErrorText  string `json:"errorText,omitempty"`
 }
 
-// NewPersistedMessageBuilder creates a new builder.
 func NewPersistedMessageBuilder() *PersistedMessageBuilder {
 	return &PersistedMessageBuilder{
 		pendingTool: make(map[string]*toolInvocationPart),
 	}
 }
 
-// ObserveChunk processes a single stream chunk, accumulating state for persistence.
 func (b *PersistedMessageBuilder) ObserveChunk(c Chunk) {
 	switch c.Type {
 	case ChunkTextStart:
@@ -136,125 +131,6 @@ func (b *PersistedMessageBuilder) observeReasoningEnd(c Chunk) {
 	}
 }
 
-func (b *PersistedMessageBuilder) observeToolInput(c Chunk) {
-	tcID, ok1 := c.Fields["toolCallId"].(string)
-	toolName, ok2 := c.Fields["toolName"].(string)
-	_ = ok1
-	_ = ok2
-	input := c.Fields["input"]
-	if tcID == "" {
-		return
-	}
-	if _, exists := b.pendingTool[tcID]; !exists {
-		b.pendingTool[tcID] = &toolInvocationPart{
-			ToolCallID: tcID,
-			ToolName:   toolName,
-			State:      "input-available",
-		}
-	}
-	b.pendingTool[tcID].Input = input
-	b.pendingTool[tcID].ToolName = toolName
-}
-
-func (b *PersistedMessageBuilder) observeToolOutput(c Chunk) {
-	tcID, ok := c.Fields["toolCallId"].(string)
-	_ = ok
-	output := c.Fields["output"]
-	if tcID == "" {
-		return
-	}
-	tool, exists := b.pendingTool[tcID]
-	if !exists {
-		tool = &toolInvocationPart{ToolCallID: tcID, State: "output-available"}
-		b.pendingTool[tcID] = tool
-	}
-	tool.Output = output
-	tool.State = "output-available"
-	part := map[string]any{
-		"type":       "tool-invocation",
-		"toolCallId": tool.ToolCallID,
-		"toolName":   tool.ToolName,
-		"state":      tool.State,
-		"input":      tool.Input,
-		"output":     tool.Output,
-	}
-	applyV6ToolFields(part, c.Fields)
-	b.parts = append(b.parts, part)
-	delete(b.pendingTool, tcID)
-}
-
-func (b *PersistedMessageBuilder) observeToolInputError(c Chunk) {
-	tcID, ok1 := c.Fields["toolCallId"].(string)
-	toolName, ok2 := c.Fields["toolName"].(string)
-	errText, ok3 := c.Fields["errorText"].(string)
-	_ = ok1
-	_ = ok2
-	_ = ok3
-	if tcID == "" {
-		return
-	}
-	part := map[string]any{
-		"type":       "tool-invocation",
-		"toolCallId": tcID,
-		"toolName":   toolName,
-		"state":      "error",
-		"input":      c.Fields["input"],
-		"errorText":  errText,
-	}
-	applyV6ToolFields(part, c.Fields)
-	b.parts = append(b.parts, part)
-	delete(b.pendingTool, tcID)
-}
-
-func (b *PersistedMessageBuilder) observeToolOutputError(c Chunk) {
-	tcID, ok1 := c.Fields["toolCallId"].(string)
-	errText, ok2 := c.Fields["errorText"].(string)
-	_ = ok1
-	_ = ok2
-	if tcID == "" {
-		return
-	}
-	tool, exists := b.pendingTool[tcID]
-	if !exists {
-		tool = &toolInvocationPart{ToolCallID: tcID}
-		b.pendingTool[tcID] = tool
-	}
-	part := map[string]any{
-		"type":       "tool-invocation",
-		"toolCallId": tool.ToolCallID,
-		"toolName":   tool.ToolName,
-		"state":      "error",
-		"input":      tool.Input,
-		"errorText":  errText,
-	}
-	applyV6ToolFields(part, c.Fields)
-	b.parts = append(b.parts, part)
-	delete(b.pendingTool, tcID)
-}
-
-func (b *PersistedMessageBuilder) observeToolOutputDenied(c Chunk) {
-	tcID, ok := c.Fields["toolCallId"].(string)
-	_ = ok
-	if tcID == "" {
-		return
-	}
-	tool, exists := b.pendingTool[tcID]
-	if !exists {
-		tool = &toolInvocationPart{ToolCallID: tcID}
-		b.pendingTool[tcID] = tool
-	}
-	part := map[string]any{
-		"type":       "tool-invocation",
-		"toolCallId": tool.ToolCallID,
-		"toolName":   tool.ToolName,
-		"state":      "denied",
-		"input":      tool.Input,
-	}
-	applyV6ToolFields(part, c.Fields)
-	b.parts = append(b.parts, part)
-	delete(b.pendingTool, tcID)
-}
-
 func (b *PersistedMessageBuilder) observeSourceURL(c Chunk) {
 	id, ok1 := c.Fields["sourceId"].(string)
 	url, ok2 := c.Fields["url"].(string)
@@ -341,46 +217,4 @@ func (b *PersistedMessageBuilder) observeDataChunk(c Chunk) {
 	b.parts = append(b.parts, map[string]any{
 		"type": "data", "name": name, "data": c.Fields["data"], "isTransient": false,
 	})
-}
-
-// Content returns the denormalized text content (all text parts joined).
-func (b *PersistedMessageBuilder) Content() string {
-	var sb strings.Builder
-	for _, p := range b.parts {
-		m, ok := p.(map[string]any)
-		if !ok {
-			continue
-		}
-		if m["type"] == "text" {
-			if t, ok := m["text"].(string); ok {
-				sb.WriteString(t)
-			}
-		}
-	}
-	return sb.String()
-}
-
-// Parts returns the serialized JSON array of typed parts.
-func (b *PersistedMessageBuilder) Parts() json.RawMessage {
-	if len(b.parts) == 0 {
-		return nil
-	}
-	raw, err := json.Marshal(b.parts)
-	if err != nil {
-		return nil
-	}
-	return raw
-}
-
-// Metadata returns the message metadata as raw JSON (may be nil).
-func (b *PersistedMessageBuilder) Metadata() json.RawMessage {
-	return b.metadata
-}
-
-// MergeWithPersistence returns a MergeOption that feeds every chunk through
-// the builder's ObserveChunk method during MergeStreamResult.
-func MergeWithPersistence(b *PersistedMessageBuilder) MergeOption {
-	return func(c *mergeConfig) {
-		c.persistenceBuilder = b
-	}
 }

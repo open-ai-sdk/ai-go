@@ -465,8 +465,28 @@ func TestApproval_CancellationAfterReservationReleasesClaim(t *testing.T) {
 		Model: &mockModel{}, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard,
 		Request: Request{Messages: []Message{
-			{Role: "assistant", Content: []ContentPart{{Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`)}}},
-			{Role: "user", Content: []ContentPart{{Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature, ToolApprovalApproved: true}}},
+			{
+				Role: "assistant",
+				Content: []ContentPart{
+					{
+						Type:         "tool_call",
+						ToolCallID:   "tc-1",
+						ToolCallName: "deleteFile",
+						ToolCallArgs: json.RawMessage(`{}`),
+					},
+				},
+			},
+			{
+				Role: "user",
+				Content: []ContentPart{
+					{
+						Type:                  "tool_approval_response",
+						ToolApprovalID:        "tc-1",
+						ToolApprovalSignature: signature,
+						ToolApprovalApproved:  true,
+					},
+				},
+			},
 		}},
 	}))
 	if len(exec.called) != 0 || !guard.released {
@@ -488,7 +508,13 @@ func TestMemoryApprovalReplayGuardCompletesAndReleasesPerGrant(t *testing.T) {
 	if err := reservation.Release(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := guard.ReserveApprovals(context.Background(), []ApprovalGrant{first}); !errors.Is(err, ErrApprovalReplay) {
+	if _, err := guard.ReserveApprovals(
+		context.Background(),
+		[]ApprovalGrant{first},
+	); !errors.Is(
+		err,
+		ErrApprovalReplay,
+	) {
 		t.Fatalf("completed grant replay error = %v", err)
 	}
 	retry, err := guard.ReserveApprovals(context.Background(), []ApprovalGrant{second})
@@ -505,15 +531,36 @@ func TestApproval_ResumedPanicCompletesGrantAndPreservesResult(t *testing.T) {
 	guard := NewMemoryApprovalReplayGuard()
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
 	history := []Message{
-		{Role: "assistant", Content: []ContentPart{{Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`)}}},
-		{Role: "user", Content: []ContentPart{{Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature, ToolApprovalApproved: true}}},
+		{
+			Role: "assistant",
+			Content: []ContentPart{
+				{
+					Type:         "tool_call",
+					ToolCallID:   "tc-1",
+					ToolCallName: "deleteFile",
+					ToolCallArgs: json.RawMessage(`{}`),
+				},
+			},
+		},
+		{
+			Role: "user",
+			Content: []ContentPart{
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "tc-1",
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
+			},
+		},
 	}
 	model := &mockModel{calls: [][]StreamEvent{{textEvt("must not run"), finishEvt(FinishReasonStop)}}}
 	events := collectEvents(Run(context.Background(), RunParams{
 		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard, Request: Request{Messages: history},
 	}))
-	if exec.calls != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) || !hasEvent(events, StepEventError) {
+	if exec.calls != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) ||
+		!hasEvent(events, StepEventError) {
 		t.Fatalf("calls=%d model=%d events=%#v", exec.calls, model.idx, events)
 	}
 
@@ -533,7 +580,11 @@ func TestApproval_ResumedTransformOrCompleteFailurePreservesResultAndStopsModel(
 		transform func(string) string
 		guard     ApprovalReplayGuard
 	}{
-		{name: "transform panic", transform: func(string) string { panic("transform failed") }, guard: NewMemoryApprovalReplayGuard()},
+		{
+			name:      "transform panic",
+			transform: func(string) string { panic("transform failed") },
+			guard:     NewMemoryApprovalReplayGuard(),
+		},
 		{name: "complete failure", guard: completeFailureGuard{}},
 	}
 	for _, tt := range tests {
@@ -550,11 +601,32 @@ func TestApproval_ResumedTransformOrCompleteFailurePreservesResultAndStopsModel(
 				ToolApproval: requireApproval("deleteFile"), ApprovalKey: approvalTestKey,
 				ApprovalReplayGuard: tt.guard,
 				Request: Request{Messages: []Message{
-					{Role: "assistant", Content: []ContentPart{{Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`)}}},
-					{Role: "user", Content: []ContentPart{{Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature, ToolApprovalApproved: true}}},
+					{
+						Role: "assistant",
+						Content: []ContentPart{
+							{
+								Type:         "tool_call",
+								ToolCallID:   "tc-1",
+								ToolCallName: "deleteFile",
+								ToolCallArgs: json.RawMessage(`{}`),
+							},
+						},
+					},
+					{
+						Role: "user",
+						Content: []ContentPart{
+							{
+								Type:                  "tool_approval_response",
+								ToolApprovalID:        "tc-1",
+								ToolApprovalSignature: signature,
+								ToolApprovalApproved:  true,
+							},
+						},
+					},
 				}},
 			}))
-			if len(exec.called) != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) || !hasEvent(events, StepEventError) {
+			if len(exec.called) != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) ||
+				!hasEvent(events, StepEventError) {
 				t.Fatalf("calls=%v model=%d events=%#v", exec.called, model.idx, events)
 			}
 		})
@@ -626,15 +698,41 @@ func TestApproval_ResumeEnforcesStructuralRolesAndOrdering(t *testing.T) {
 		{
 			name: "result before call",
 			messages: []Message{
-				{Role: "tool", Content: []ContentPart{{Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile"}}},
-				{Role: "assistant", Content: []ContentPart{{Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`)}}},
+				{
+					Role:    "tool",
+					Content: []ContentPart{{Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile"}},
+				},
+				{
+					Role: "assistant",
+					Content: []ContentPart{
+						{
+							Type:         "tool_call",
+							ToolCallID:   "tc-1",
+							ToolCallName: "deleteFile",
+							ToolCallArgs: json.RawMessage(`{}`),
+						},
+					},
+				},
 			},
 		},
 		{
 			name: "result in assistant role",
 			messages: []Message{
-				{Role: "assistant", Content: []ContentPart{{Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`)}}},
-				{Role: "assistant", Content: []ContentPart{{Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile"}}},
+				{
+					Role: "assistant",
+					Content: []ContentPart{
+						{
+							Type:         "tool_call",
+							ToolCallID:   "tc-1",
+							ToolCallName: "deleteFile",
+							ToolCallArgs: json.RawMessage(`{}`),
+						},
+					},
+				},
+				{
+					Role:    "assistant",
+					Content: []ContentPart{{Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile"}},
+				},
 			},
 		},
 	}
@@ -699,8 +797,18 @@ func TestApproval_ResumeValidatesWholeEnvelopeBeforeExecution(t *testing.T) {
 				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
 			}}},
 			{Role: "user", Content: []ContentPart{
-				{Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature, ToolApprovalApproved: true},
-				{Type: "tool_approval_response", ToolApprovalID: "unknown", ToolApprovalSignature: "invalid", ToolApprovalApproved: true},
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "tc-1",
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "unknown",
+					ToolApprovalSignature: "invalid",
+					ToolApprovalApproved:  true,
+				},
 			}},
 		}},
 	}))
@@ -726,7 +834,12 @@ func TestApproval_ResumeRejectsMixedApprovalMessage(t *testing.T) {
 			}}},
 			{Role: "user", Content: []ContentPart{
 				{Type: "text", Text: "also do something else"},
-				{Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature, ToolApprovalApproved: true},
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "tc-1",
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
 			}},
 		}},
 	}))

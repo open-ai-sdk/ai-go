@@ -33,10 +33,10 @@ func (f *fakeAgent) Stream(context.Context, ...Option) (*StreamResult, error) {
 func textOnlyStreamResult() *StreamResult {
 	ch := make(chan aikit.StepEvent, 4)
 	for _, event := range []aikit.StepEvent{
-		aikit.StepEvent{Type: aikit.StepEventStepStart},
-		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"},
-		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
-		aikit.StepEvent{Type: aikit.StepEventDone},
+		{Type: aikit.StepEventStepStart},
+		{Type: aikit.StepEventTextDelta, TextDelta: "hello"},
+		{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		{Type: aikit.StepEventDone},
 	} {
 		ch <- event
 	}

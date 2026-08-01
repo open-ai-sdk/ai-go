@@ -18,8 +18,12 @@ func Map(values map[string]any) map[string]any {
 	if values == nil {
 		return nil
 	}
-	return cloneValue(reflect.ValueOf(values), make(map[visit]reflect.Value)).
+	cloned, ok := cloneValue(reflect.ValueOf(values), make(map[visit]reflect.Value)).
 		Interface().(map[string]any)
+	if !ok {
+		panic("jsonclone: cloned map changed type")
+	}
+	return cloned
 }
 
 // Value clones JSON-like map, slice, array, and interface containers while

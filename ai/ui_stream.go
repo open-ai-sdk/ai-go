@@ -15,13 +15,9 @@ import (
 // msgID, closed when the run completes. It is the free-function equivalent of
 // ai-sdk-node's createAgentUIStream.
 //
-// AgentStream, AgentHandler, and PipeAgentStream are free functions over
-// ai.Agent — never methods on the agent, and never a type named
-// aisdk.Stream (no such type exists). That placement is deliberate: today
-// aisdk depends on ai (ten files import it), and ai depends on nothing
-// under aisdk. A method on *ai.ToolLoopAgent returning a aisdk type
-// would force the reverse dependency and cycle with httputil, which already
-// imports both.
+// AgentStream, AgentHandler, and PipeAgentStream are free functions over Agent.
+// They live in the top-level façade so the lower-level aisdk wire package stays
+// independent of models, agents, providers, and HTTP transports.
 //
 // Node-parity gap, deliberately not built here (its own plan; see package
 // ai's Agent doc comment for the related tool-typing gap): the

@@ -51,7 +51,15 @@ func executeToolCalls(
 			ThoughtSignature: tc.thoughtSignature,
 		})
 
-		result, approvalResolved, approvalErr := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
+		result, approvalResolved, approvalErr := approvedToolCall(
+			r,
+			r.ctx,
+			tools,
+			tc,
+			preparedCall.def,
+			approval,
+			approver,
+		)
 		if approvalErr != nil {
 			if controlErr == nil {
 				controlErr = approvalErr

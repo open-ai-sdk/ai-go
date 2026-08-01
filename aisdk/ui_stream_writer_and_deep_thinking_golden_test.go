@@ -70,7 +70,7 @@ func TestWriter_WriteError(t *testing.T) {
 
 	out := buf.String()
 	assertContains(t, out, `"type":"error"`)
-	assertContains(t, out, `"errorText":"something went wrong"`)
+	assertContains(t, out, `"errorText":"stream error"`)
 }
 
 // TestAdapterWriter_ReturnsWriter verifies Adapter.Writer() returns a usable Writer.

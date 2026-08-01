@@ -162,7 +162,8 @@ func TestCreateUIMessageStream_OnEndCallback(t *testing.T) {
 	}
 }
 
-// TestCreateUIMessageStream_OnErrorCallback verifies custom error message.
+// TestCreateUIMessageStream_OnErrorCallback verifies the application can choose
+// a safe public message after inspecting the full error server-side.
 func TestCreateUIMessageStream_OnErrorCallback(t *testing.T) {
 	var buf bytes.Buffer
 

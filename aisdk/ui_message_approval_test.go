@@ -52,7 +52,12 @@ func TestUseChatApprovalPOST(t *testing.T) {
 
 func TestPendingApprovalDoesNotBecomeDenial(t *testing.T) {
 	var envelope ChatRequestEnvelope
-	if err := json.Unmarshal([]byte(`{"messages":[{"role":"assistant","parts":[{"type":"tool-save","toolCallId":"call-1","state":"approval-requested","input":{},"approval":{"id":"approval-1","signature":"sig"}}]}]}`), &envelope); err != nil {
+	if err := json.Unmarshal(
+		[]byte(
+			`{"messages":[{"role":"assistant","parts":[{"type":"tool-save","toolCallId":"call-1","state":"approval-requested","input":{},"approval":{"id":"approval-1","signature":"sig"}}]}]}`,
+		),
+		&envelope,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if responses := ApprovalResponses(envelope.Messages); len(responses) != 0 {

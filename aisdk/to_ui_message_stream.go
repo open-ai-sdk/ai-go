@@ -147,7 +147,7 @@ func wrapChunksWithMetadata(
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
-		defer recoverPanic(recoverToChunk(out))
+		defer recoverPanic(recoverToTerminalChunks(out))
 		var lastFinishReason string
 		for c := range chunks {
 			if !sendStart && c.Type == ChunkStart {

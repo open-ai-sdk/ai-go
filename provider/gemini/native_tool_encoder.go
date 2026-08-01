@@ -14,7 +14,11 @@ type nativeToolsResult struct {
 // Function declarations are grouped into a single tools entry with a
 // "functionDeclarations" array. Google Search grounding (when enabled) is
 // added as a separate entry in the tools array.
-func encodeNativeTools(tools []aikit.ToolDefinition, toolChoice *aikit.ToolChoice, opts ProviderOptions) nativeToolsResult {
+func encodeNativeTools(
+	tools []aikit.ToolDefinition,
+	toolChoice *aikit.ToolChoice,
+	opts ProviderOptions,
+) nativeToolsResult {
 	var result nativeToolsResult
 
 	// Build function declarations.

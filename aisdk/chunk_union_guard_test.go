@@ -50,6 +50,9 @@ func TestUIMessageChunkTypeGuard(t *testing.T) {
 		if !union.contains(typ) {
 			t.Errorf("known UI message chunk type %q was rejected", typ)
 		}
+		if !ValidChunkType(typ) {
+			t.Errorf("production union guard rejected %q", typ)
+		}
 	}
 
 	for _, typ := range []string{
@@ -63,11 +66,17 @@ func TestUIMessageChunkTypeGuard(t *testing.T) {
 		if !union.contains(typ) {
 			t.Errorf("custom data chunk type %q was rejected", typ)
 		}
+		if !ValidChunkType(typ) {
+			t.Errorf("production union guard rejected %q", typ)
+		}
 	}
 
 	for _, typ := range []string{"source", "sources", "unknown"} {
 		if union.contains(typ) {
 			t.Errorf("non-protocol chunk type %q was accepted", typ)
+		}
+		if ValidChunkType(typ) {
+			t.Errorf("production union guard accepted %q", typ)
 		}
 	}
 }

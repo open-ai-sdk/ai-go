@@ -131,11 +131,7 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 		case ChunkStart:
 			// Skip the start chunk emitted by the producer; caller owns lifecycle.
 		case ChunkError:
-			msg, ok := c.Fields["errorText"].(string)
-			if !ok {
-				msg = "stream error"
-			}
-			writeErr = wr.WriteError(msg)
+			writeErr = wr.writeChunk(c)
 		default:
 			writeErr = wr.WriteChunk(c.Type, c.Fields)
 

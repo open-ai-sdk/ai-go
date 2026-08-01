@@ -3,6 +3,8 @@ package aisdk
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
@@ -24,4 +26,16 @@ func redactStreamError(err error) string {
 		return fmt.Sprintf("provider error (status %d)", apiErr.StatusCode)
 	}
 	return "stream error"
+}
+
+func isRedactedStreamError(message string) bool {
+	if message == "stream error" {
+		return true
+	}
+	const prefix = "provider error (status "
+	if !strings.HasPrefix(message, prefix) || !strings.HasSuffix(message, ")") {
+		return false
+	}
+	status, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(message, prefix), ")"))
+	return err == nil && status >= 100 && status <= 999
 }

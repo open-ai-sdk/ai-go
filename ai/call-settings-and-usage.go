@@ -1,7 +1,9 @@
 package ai
 
-import "github.com/open-ai-sdk/ai-go/aikit"
-import "github.com/open-ai-sdk/ai-go/llm"
+import (
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
+)
 
 // Usage, token-detail, and FinishReason types are aliases of the shared aikit
 // package so the ai and engine layers name one identical set (see ai/types.go).

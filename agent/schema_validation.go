@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -65,8 +66,8 @@ func validateStructuredOutput(raw json.RawMessage, output *OutputSchema) error {
 }
 
 func structuredValidationError(err error) error {
-	validationErr, ok := err.(*jsonschema.ValidationError)
-	if !ok {
+	var validationErr *jsonschema.ValidationError
+	if !errors.As(err, &validationErr) {
 		return &StructuredOutputError{Path: "$", Reason: "does not satisfy schema: " + err.Error()}
 	}
 	leaf := validationErr

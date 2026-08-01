@@ -16,7 +16,11 @@ func cloneJSONMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil
 	}
-	return cloneJSONValue(input).(map[string]any)
+	cloned, ok := cloneJSONValue(input).(map[string]any)
+	if !ok {
+		panic("tool: cloned JSON map changed type")
+	}
+	return cloned
 }
 
 func cloneJSONValue(input any) any {

@@ -61,6 +61,9 @@ func TypedContext[C any](ctx context.Context) (C, bool) {
 
 // ToolCallIDFromContext returns the engine-injected tool-call identifier.
 func ToolCallIDFromContext(ctx context.Context) string {
-	value, _ := ctx.Value(toolCallIDKey{}).(string)
+	value, ok := ctx.Value(toolCallIDKey{}).(string)
+	if !ok {
+		return ""
+	}
 	return value
 }
