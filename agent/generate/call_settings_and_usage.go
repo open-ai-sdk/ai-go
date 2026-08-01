@@ -1,4 +1,4 @@
-package ai
+package generate
 
 import (
 	"github.com/open-ai-sdk/ai-go/aikit"

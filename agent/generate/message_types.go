@@ -1,5 +1,4 @@
-// Package ai provides the public API surface for the ai-go SDK.
-package ai
+package generate
 
 import (
 	"encoding/json"

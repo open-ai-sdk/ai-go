@@ -212,7 +212,7 @@ func reportInvariant(logger *slog.Logger, reporter func(InvariantViolation), vio
 			return
 		}
 		if logger == nil {
-			logger = slog.Default()
+			return
 		}
 		logger.Error("invalid AI SDK UI message stream chunk",
 			"code", violation.Code, "chunk_type", violation.ChunkType,

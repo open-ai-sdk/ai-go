@@ -1,4 +1,4 @@
-package aisdk
+package aikit
 
 import (
 	"bytes"
@@ -16,9 +16,9 @@ import (
 	"unicode/utf8"
 )
 
-// HashCanonical hashes JSON using JavaScript JSON.stringify semantics after
+// HashCanonicalToolApprovalInput hashes JSON using JavaScript JSON.stringify semantics after
 // recursively sorting object keys by UTF-16 code units.
-func HashCanonical(raw json.RawMessage) (string, error) {
+func HashCanonicalToolApprovalInput(raw json.RawMessage) (string, error) {
 	canonical, err := canonicalApprovalJSON(raw)
 	if err != nil {
 		return "", err

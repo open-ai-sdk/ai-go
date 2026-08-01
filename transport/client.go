@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // AuthFunc applies provider authentication to an outgoing request.
@@ -93,6 +95,48 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		return nil, aikitTransportError(c.provider, err)
 	}
 	return resp, nil
+}
+
+// DoStream executes req and transfers successful response-body ownership to
+// the returned event stream. The body is closed when decoding completes,
+// fails, panics, or the context is cancelled. Non-2xx responses are converted
+// to a typed API error before this method returns.
+func (c *Client) DoStream(
+	ctx context.Context,
+	req *http.Request,
+	wrapBody func(io.ReadCloser) io.ReadCloser,
+	decode StreamDecoder,
+) (<-chan aikit.StreamEvent, error) {
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("transport: HTTP response is nil")
+	}
+	if resp.Body == nil {
+		return nil, fmt.Errorf("transport: HTTP response has no body")
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, APIErrorFromResponse(ctx, c.provider, resp)
+	}
+	body := resp.Body
+	if wrapBody != nil {
+		body = wrapBody(body)
+		if body == nil {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("transport: response body wrapper returned nil")
+		}
+	}
+
+	out := make(chan aikit.StreamEvent, defaultStreamBuffer)
+	raw := make(chan aikit.StreamEvent, defaultStreamBuffer)
+	go func() {
+		defer body.Close()
+		runDecoderBody(ctx, body, decode, raw)
+	}()
+	go relayStream(ctx, raw, out)
+	return out, nil
 }
 
 func (c *Client) resolve(target string) (string, error) {

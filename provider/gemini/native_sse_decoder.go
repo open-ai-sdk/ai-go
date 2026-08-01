@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps the stateful Gemini SSE grammar and event assembly in one decoder.
 package gemini
 
 import (

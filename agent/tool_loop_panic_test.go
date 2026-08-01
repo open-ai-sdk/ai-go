@@ -94,7 +94,7 @@ func TestRun_PanicDuringInitialization_EmitsErrorAndClosesChannel(t *testing.T) 
 	var chunkError bool
 	ch := Run(context.Background(), RunParams{
 		Model:  &mockModel{},
-		tracer: panicStartTracer{},
+		Tracer: panicStartTracer{},
 		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
 			chunkError = chunkError || event.Type == StepEventError
 		}},

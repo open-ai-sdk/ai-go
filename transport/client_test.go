@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 func TestClient_BuildsRequestAndUsesInjectedDoer(t *testing.T) {
@@ -133,5 +135,157 @@ func TestClient_ProviderWrappedNetworkErrorRemainsRetryable(t *testing.T) {
 	}
 	if !IsRetryable(err) {
 		t.Fatalf("wrapped network error = %v, want retryable", err)
+	}
+}
+
+func TestClient_DoStreamOwnsSuccessfulResponseBody(t *testing.T) {
+	body := &closeRecorder{
+		ReadCloser: io.NopCloser(strings.NewReader("data: hello\n\n")),
+		closed:     make(chan struct{}),
+	}
+	client, err := NewClient(ClientConfig{
+		BaseURL: "https://api.example.test",
+		HTTPClient: DoerFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := client.NewRequest(context.Background(), http.MethodGet, "stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := client.DoStream(
+		context.Background(),
+		req,
+		nil,
+		func(_ context.Context, reader *SSEReader, out chan<- aikit.StreamEvent) error {
+			frame, readErr := reader.Next()
+			if readErr != nil {
+				return readErr
+			}
+			out <- aikit.StreamEvent{Type: aikit.StreamEventTextDelta, TextDelta: frame.Data}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for event := range events {
+		if event.Type == aikit.StreamEventError {
+			t.Fatal(event.Error)
+		}
+		text += event.TextDelta
+	}
+	if text != "hello" {
+		t.Fatalf("stream text = %q, want hello", text)
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("successful streaming response body was not closed")
+	}
+}
+
+func TestClient_DoStreamClosesErrorResponseBody(t *testing.T) {
+	body := &closeRecorder{
+		ReadCloser: io.NopCloser(strings.NewReader(`{"error":{"message":"bad"}}`)),
+		closed:     make(chan struct{}),
+	}
+	client, err := NewClient(ClientConfig{
+		BaseURL:  "https://api.example.test",
+		Provider: "test",
+		HTTPClient: DoerFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     make(http.Header),
+				Body:       body,
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := client.NewRequest(context.Background(), http.MethodGet, "stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.DoStream(context.Background(), req, nil, nil); err == nil {
+		t.Fatal("expected typed HTTP error")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("error response body was not closed")
+	}
+}
+
+func TestClient_DoStreamRejectsMalformedResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		resp *http.Response
+	}{
+		{name: "nil response", resp: nil},
+		{name: "nil body", resp: &http.Response{StatusCode: http.StatusOK}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client, err := NewClient(ClientConfig{
+				BaseURL: "https://api.example.test",
+				HTTPClient: DoerFunc(func(*http.Request) (*http.Response, error) {
+					return test.resp, nil
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, err := client.NewRequest(
+				context.Background(),
+				http.MethodGet,
+				"stream",
+				nil,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = client.DoStream(context.Background(), req, nil, nil); err == nil {
+				t.Fatal("expected malformed response error")
+			}
+		})
+	}
+}
+
+func TestClient_DoStreamClosesBodyWhenWrapperReturnsNil(t *testing.T) {
+	body := &closeRecorder{
+		ReadCloser: io.NopCloser(strings.NewReader("stream")),
+		closed:     make(chan struct{}),
+	}
+	client, err := NewClient(ClientConfig{
+		BaseURL: "https://api.example.test",
+		HTTPClient: DoerFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := client.NewRequest(context.Background(), http.MethodGet, "stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.DoStream(
+		context.Background(),
+		req,
+		func(io.ReadCloser) io.ReadCloser { return nil },
+		nil,
+	); err == nil {
+		t.Fatal("expected nil wrapper result error")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("original response body was not closed")
 	}
 }

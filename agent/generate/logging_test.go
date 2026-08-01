@@ -1,4 +1,4 @@
-package ai
+package generate
 
 import (
 	"log/slog"

@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+const apiPort = Number(process.env.AI_GO_CONFORMANCE_API_PORT ?? 8787);
+
 export default defineConfig({
   testDir: './browser',
   fullyParallel: false,
@@ -11,9 +13,8 @@ export default defineConfig({
   },
   webServer: [
     {
-      command:
-        'go build -o /tmp/ai-go-conformance-server ../examples/chat-server && exec /tmp/ai-go-conformance-server -addr 127.0.0.1:8787',
-      port: 8787,
+      command: `go build -o /tmp/ai-go-conformance-server ../examples/chat-server && exec /tmp/ai-go-conformance-server -addr 127.0.0.1:${apiPort}`,
+      port: apiPort,
       reuseExistingServer: false,
       timeout: 120_000,
     },

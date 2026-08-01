@@ -1,4 +1,4 @@
-package aisdk
+package aikit
 
 import (
 	"crypto/hmac"
@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-var ErrInvalidToolApprovalSignature = errors.New("aisdk: invalid tool approval signature")
+var ErrInvalidToolApprovalSignature = errors.New("aikit: invalid tool approval signature")
 
 // ToolApprovalSignatureInput identifies the server-gated tool capability.
 type ToolApprovalSignatureInput struct {
@@ -29,7 +29,7 @@ func SignToolApproval(secret []byte, input ToolApprovalSignatureInput) (string, 
 	if len(secret) == 0 {
 		return "", errors.New("aisdk: tool approval secret is empty")
 	}
-	digest, err := HashCanonical(input.Input)
+	digest, err := HashCanonicalToolApprovalInput(input.Input)
 	if err != nil {
 		return "", fmt.Errorf("aisdk: canonicalize tool approval input: %w", err)
 	}
@@ -65,7 +65,7 @@ func VerifyToolApproval(secret []byte, signature string, input ToolApprovalSigna
 	if strings.ContainsAny(input.ApprovalID+input.ToolCallID+input.ToolName, "\n") {
 		return ErrInvalidToolApprovalSignature
 	}
-	digest, err := HashCanonical(input.Input)
+	digest, err := HashCanonicalToolApprovalInput(input.Input)
 	if err != nil {
 		return err
 	}

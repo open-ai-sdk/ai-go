@@ -1,4 +1,4 @@
-package ai
+package generate
 
 import (
 	"context"
@@ -128,6 +128,7 @@ func runParams(req GenerateTextRequest) agent.RunParams {
 		ParallelToolExecution: req.ParallelToolExecution,
 		MaxParallelTools:      req.MaxParallelTools,
 		Logger:                req.Logger,
+		Tracer:                req.Tracer,
 		TraceContent:          req.TraceContent,
 	}
 }

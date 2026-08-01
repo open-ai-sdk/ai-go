@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps the stateful Responses SSE item and delta assembly in one decoder.
 package openai
 
 import (

@@ -116,7 +116,7 @@ func runObservabilityScenario(t *testing.T, tracer tracing.Tracer, logger *slog.
 		},
 		MaxSteps:     5,
 		Logger:       logger,
-		tracer:       tracer,
+		Tracer:       tracer,
 		TraceContent: traceContent,
 	})
 	for ev := range ch {

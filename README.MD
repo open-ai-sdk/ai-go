@@ -1,485 +1,219 @@
 # ai-go
 
-Go SDK for building AI-powered applications with a unified provider interface.
+`ai-go` is a standalone Go SDK for provider-neutral generation, typed tools, multi-step agents, and
+AI SDK v7 UI-message streams.
+
+The top-level `ai` package is a thin ergonomic facade. It keeps common operations and aliases in one
+place while their implementations and canonical contracts live in focused lower packages.
 
 ## Features
 
-- **Multi-provider support** — Gemini, OpenAI (Responses + Chat Completions), and any OpenAI-compatible endpoint
-- **Streaming and non-streaming** — `GenerateText` and `StreamText` with automatic tool-loop orchestration
-- **Tool use** — Define tools, execute them, and let the agent runtime handle multi-step reasoning
-- **Structured output** — JSON schema-constrained generation with automatic validation
-- **Provider extensions** — Generic `ProviderOptions` / `ProviderMetadata` / `Warnings` without polluting core types
-- **UI streaming** — SSE adapter emitting AI SDK UI message stream protocol chunks
-- **Embeddings** — Unified embedding model interface
-
-## AI SDK v7 conformance
-
-The Bun-managed `conformance/` harness pins `ai@7.0.35` and uses Vite+ 0.2.6 on the
-Vite 8.1.5 core to check every recorded Go SSE
-fixture against the real UI-message-chunk schema and `readUIMessageStream`.
-It also starts a live Go server and drives text, tool, approval, and denial
-flows through a real React `useChat` client in Chromium.
-
-```sh
-cd conformance
-bun install --frozen-lockfile
-bun run check
-bun run test
-bunx playwright install chromium
-bun run test:browser
-```
-
-Run both conformance commands whenever changing `aisdk`, response headers,
-SSE framing, fixture bytes, or browser-facing tool/approval behavior.
-
-## Packages
-
-| Package | Description |
-|---------|-------------|
-| `ai` | Public API: `GenerateText`, `StreamText`, request/result types, model interfaces |
-| `agent` | Public multi-step tool-loop runtime, stop conditions, approval gate, and lifecycle callbacks |
-| `aikit` | Dependency-free shared messages, events, usage, and error vocabulary |
-| `llm` | Language-model contracts and request builder |
-| `tool` | Typed tools and duplicate-safe runtime registry |
-| `transport` | Shared HTTP, SSE, retry, and provider-error transport |
-| `provider/gemini` | Google Gemini provider |
-| `provider/openai` | OpenAI Responses API + Chat Completions provider |
-| `provider/openai_compatible` | Generic provider for any OpenAI-compatible endpoint |
-| `aisdk` | Frozen AI SDK v7 UI-message-stream chunks, SSE framing, request parsing, and approval signatures |
-
-## Quick Start
-
-```go
-import (
-    "github.com/open-ai-sdk/ai-go/ai"
-    "github.com/open-ai-sdk/ai-go/provider/openai"
-)
-
-// OpenAI Chat Completions
-model := openai.NewChatLanguageModel("gpt-4o", openai.Config{
-    APIKey: os.Getenv("OPENAI_API_KEY"),
-})
-
-result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:        model,
-    Instructions: "You are a helpful assistant.",
-    Messages:     []ai.Message{ai.UserMessage("Hello!")},
-})
-fmt.Println(result.Text)
-```
-
-### OpenAI Responses API
-
-```go
-model := openai.NewLanguageModel("gpt-4o", openai.Config{
-    APIKey: os.Getenv("OPENAI_API_KEY"),
-})
-
-result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:    model,
-    Messages: []ai.Message{ai.UserMessage("Search the web for Go 1.25 features")},
-    ProviderOptions: map[string]any{
-        "openai": openai.ProviderOptions{
-            EnableWebSearch: true,
-            IncludeSources:  true,
-        },
-    },
-})
-```
-
-### Gemini
-
-```go
-import "github.com/open-ai-sdk/ai-go/provider/gemini"
-
-model := gemini.NewLanguageModel("gemini-2.0-flash", gemini.Config{
-    APIKey: os.Getenv("GEMINI_API_KEY"),
-})
-```
-
-### OpenAI-Compatible Provider
-
-```go
-import "github.com/open-ai-sdk/ai-go/provider/openai_compatible"
-
-model := openai_compatible.NewLanguageModel("deepseek-chat", openai_compatible.Config{
-    BaseURL: "https://api.deepseek.com/v1",
-    APIKey:  os.Getenv("DEEPSEEK_API_KEY"),
-})
-```
-
-### Reasoning / Thinking (Claude, o-series, gpt-5)
-
-Enable extended thinking for reasoning-capable models by setting `ReasoningEffort`
-in provider options. This sends `reasoning_effort` in the request body, which proxy
-servers like CLIProxyAPI translate to provider-native thinking parameters.
-
-```go
-// Chat Completions path — enable thinking:
-model := openai.NewChatLanguageModel("claude-sonnet-4-20250514", openai.Config{
-    BaseURL: "http://localhost:8080/v1",  // e.g. CLIProxyAPI
-    APIKey:  os.Getenv("API_KEY"),
-})
-
-result, _ := ai.StreamText(ctx, ai.GenerateTextRequest{
-    Model:    model,
-    Messages: []ai.Message{ai.UserMessage("Explain quantum entanglement")},
-    ProviderOptions: map[string]any{
-        "openai": openai.ChatProviderOptions{
-            ReasoningEffort: "high",  // "low", "medium", "high"
-        },
-    },
-})
-```
-
-When displaying the stream in a React UI via the `aisdk` package, set
-`SendReasoning: true` to forward thinking chunks to the frontend:
-
-```go
-chunks := aisdk.ToUIMessageStream(streamResult, "msg-1", aisdk.ToUIStreamOptions{
-    SendReasoning: true,  // Required for thinking/reasoning display
-    SendSources:   true,
-})
-```
-
-### Streaming with UI Protocol
-
-```go
-stream := ai.StreamText(ctx, req)
-
-var buf bytes.Buffer
-adapter := aisdk.NewAdapter("msg-1")
-text := adapter.Stream(stream.Stream(), &buf)
-// buf contains SSE-encoded AI SDK UI message stream chunks
-```
-
-### Typed tools
-
-Create native tools with `tool.New[In, Out]`. The input JSON Schema is derived
-from `In` when the tool is constructed, and `Out` is JSON-marshaled after the
-handler returns. Unsupported input fields fail during construction rather than
-during the first call.
-
-```go
-import "github.com/open-ai-sdk/ai-go/tool"
-
-type weatherInput struct {
-    Location string `json:"location" description:"City and state"`
-    Unit     string `json:"unit" enum:"celsius,fahrenheit"`
-}
-
-type weatherOutput struct {
-    Summary string `json:"summary"`
-}
-
-weather, err := tool.New(
-    "getWeather",
-    "Get the current weather",
-    func(ctx context.Context, input weatherInput) (weatherOutput, error) {
-        return weatherOutput{Summary: lookupWeather(input.Location, input.Unit)}, nil
-    },
-)
-if err != nil {
-    return err
-}
-
-tools, err := tool.NewSet(weather)
-if err != nil { // duplicate tool names are rejected
-    return err
-}
-```
-
-Runtime-described tools use `tool.NewDynamic`; MCP clients expose those through
-the same `tool.Set` and agent-loop invocation path.
-
-### Tool approval
-
-Gate individual tool calls behind a human decision. `ToolApproval` maps a tool
-name to a policy that decides whether the call needs approval. An optional
-`ToolApprovalResponder` resolves the request inside the current invocation. If
-it is omitted, the invocation suspends after returning the pending tool call;
-resume it by sending the returned response messages plus a
-`ToolApprovalResponsePart` in the next request. The runtime reconstructs the
-pending call from history and retains no cross-request state.
-
-```go
-result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:    model,
-    Messages: []ai.Message{ai.UserMessage("Delete stale records")},
-    Tools:    tools,
-    ToolApprovalKey: approvalKey, // 32+ server-side random bytes
-    ToolApproval: map[string]ai.ToolApprovalFunc{
-        "deleteRecords": func(name string, args json.RawMessage) ai.ApprovalDecision {
-            return ai.ApprovalRequired
-        },
-    },
-    ToolApprovalResponder: func(ctx context.Context, req ai.ToolApprovalRequest) (ai.ToolApprovalResponse, error) {
-        approved := promptOperator(req.ToolName, req.Args) // your UI/CLI decision
-        return ai.ToolApprovalResponse{ApprovalID: req.ApprovalID, Approved: approved}, nil
-    },
-})
-```
-
-For a UI or other asynchronous approval flow, omit the responder and resume
-after the operator decides. Configure the same random key, replay guard, and
-approval policy on both invocations. Derive a distinct server-side key for each
-authenticated tenant or conversation audience; never send that key to the
-client. The AI SDK v7 signature binds the approval ID, tool call ID, tool name,
-and canonical arguments so edited or fabricated history is rejected before any
-tool runs. It proves that the server gated the exact call, not that a user chose
-`Approved`; authenticate and authorize the user who submits that decision.
-Non-I-JSON input containing invalid UTF-8 or unpaired surrogate escapes fails
-closed instead of being silently repaired differently by Go and JavaScript.
-
-Keep approval responses in a dedicated user message with no other content. An
-approved signature is an at-most-once capability: the replay guard reserves it,
-marks it complete after a tool attempt, and releases unstarted claims on
-cancellation. `NewMemoryToolApprovalReplayGuard` is for tests, development, and
-bounded-lifetime jobs; production needs a bounded shared transactional store
-with claim leases/fencing. Preserve the returned, runtime-signed tool result
-messages on later continuations. Side-effecting executors should also use
-`tool.ToolCallIDFromContext` as their idempotency key for client retries and
-cancellation reconciliation.
-
-```go
-approvalKey := make([]byte, 32)
-_, _ = rand.Read(approvalKey) // persist/share this key across server instances
-approvalPolicy := map[string]ai.ToolApprovalFunc{
-    "deleteRecords": func(string, json.RawMessage) ai.ApprovalDecision {
-        return ai.ApprovalRequired
-    },
-}
-replayGuard := ai.NewMemoryToolApprovalReplayGuard() // use a durable shared guard in a cluster
-
-result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model: model, Messages: request.Messages, Tools: tools,
-    ToolApproval: approvalPolicy, ToolApprovalKey: approvalKey,
-})
-pending := result.ToolApprovalRequests[0]
-history := append(append([]ai.Message{}, request.Messages...), result.Response.Messages...)
-history = append(history, ai.Message{
-    Role: ai.RoleUser,
-    Content: []ai.ContentPart{
-        ai.ToolApprovalResponsePart(pending.ApprovalID, pending.Signature, true, "approved"),
-    },
-})
-
-result, err = ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model: model, Messages: history, Tools: tools,
-    ToolApproval: approvalPolicy, ToolApprovalKey: approvalKey,
-    ToolApprovalReplayGuard: replayGuard,
-})
-```
-
-### Tool context
-
-Supply per-tool data with `ToolsContext` (keyed by tool name) and run-wide data
-with `RuntimeContext`. Both reach the executor through the call `context.Context`;
-read them with `tool.ToolContextFrom` / `tool.TypedContext[T]` and
-`tool.RuntimeContextFrom`.
-When a tool defines a `ContextSchema`, its `ToolsContext` entry is required and the
-call fails fast if it is missing (in both `GenerateText` and `StreamText`).
-
-```go
-ai.GenerateTextRequest{
-    Model:          model,
-    Tools:          tools,
-    ToolsContext:   ai.ToolsContext{"lookup": map[string]any{"tenant": "acme"}},
-    RuntimeContext: ai.RuntimeContext{"requestID": "req-123"},
-}
-
-// Inside the tool executor:
-func (e myExec) Execute(ctx context.Context, name, args string) (string, error) {
-    toolCtx, _ := tool.ToolContextFrom(ctx) // per-tool value for `name`
-    runtime := tool.RuntimeContextFrom(ctx) // shared across all tools
-    _ = toolCtx
-    _ = runtime
-    // ...
-}
-```
-
-### Agents
-
-`ai.Agent` binds a model, tools, and step-loop defaults, then delegates each call to
-`GenerateText`/`StreamText` — it never runs a loop of its own. `ai.ToolLoopAgent` is the reference
-implementation; consumers may implement `Agent` themselves (four methods, all in terms of the
-existing public types).
-
-```go
-agent := ai.NewToolLoopAgent(model,
-    ai.WithAgentTools(tools),
-    ai.WithAgentInstructions("You are a helpful assistant."),
-    // Unlike a bare GenerateText call (see "Breaking change" below), an agent
-    // defaults to a real multi-step loop: stopWhen=IsStepCount(20).
-)
-
-result, err := agent.Generate(ctx, ai.WithMessages(ai.UserMessage("Hello!")))
-```
-
-`Generate`/`Stream` accept the same `ai.Option` values as the bare functions; scalar options (model,
-tools, stop condition, ...) override the agent's defaults for that call only, while `OnStepEnd`/
-`OnEnd`/`OnChunk`/`OnError` set at the agent level and at the call level both fire — concurrently,
-with either side's panic swallowed — instead of one replacing the other.
-
-Stream an agent over SSE with the free functions in the top-level `ai` façade. The HTTP edge lives
-in `aisdkhttp`, while the lower-level `aisdk` wire package remains model-independent:
-
-```go
-chunks, err := ai.AgentStream(ctx, agent, "msg-1", ai.WithMessages(ai.UserMessage("Hello!")))
-
-// Or serve it directly:
-http.Handle("/chat", ai.AgentHandler(agent))
-```
-
-For runtimes that already expose raw `aikit.StepEvent` values, use the transport-neutral handler
-directly:
-
-```go
-http.Handle("/chat", aisdkhttp.Handler(func(ctx context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
-    return agentruntime.Stream(ctx, agentruntime.RunParams{
-        Model: model,
-        Request: llm.Request{Messages: messages},
-    }), nil
-}))
-```
-
-Gin support is isolated in the separately versioned `github.com/open-ai-sdk/ai-go/aisdkgin` module;
-`aisdkgin.Handler(aisdkhttp.Handler(run))` wraps the same `net/http` handler, so Gin never enters the
-core module's dependency graph and the adapter can be released independently.
-
-### Breaking change: tool-loop step count now has no implicit default
-
-`GenerateText`/`StreamText` used to fall back to an implicit 10-step budget whenever neither
-`MaxSteps` nor `StopWhen` was set. That implicit cap is gone: `MaxSteps` now means "unbounded" when
-zero, and `StopWhen` is the only gate, matching `ai-sdk-node` (which has no `maxSteps` concept at
-all). `generateText`/`streamText` default to `StopWhen: IsStepCount(1)` — a single step; a tool call
-in that step still executes, but the loop no longer continues into a follow-up model call unless you
-set a wider `StopWhen` (or use `ai.NewToolLoopAgent`, which defaults to `IsStepCount(20)`).
-
-If your code relied on the old implicit multi-step behavior without setting `StopWhen`, add one
-explicitly — `ai.IsStepCount(n)` or `ai.Never()` (run until the model stops calling tools, bounded
-only by `MaxSteps` if you set one).
-
-## v7 protocol migration
-
-This release intentionally breaks compatibility with the earlier API: request `System` is now
-`Instructions`, lifecycle callbacks use `OnStepEnd`/`OnEnd`, `StreamResult` gained an `Events()`
-iterator alongside `Stream()`, and usage is reported as `InputTokens`/`OutputTokens` with nested
-cache and reasoning details. Aggregated results expose `Usage` and `FinalStep`.
-
-Images no longer have a dedicated content part. Everything non-text travels as a file part carrying
-a `MediaType` — either a full IANA media type (`image/png`) or the bare top-level segment (`image`).
-`ImageURLPart`/`ImageDataPart`/`ImageFileIDPart` keep their signatures as conveniences that emit file
-parts; `MimeType` fields are now `MediaType`, and tool-result content is `text` or `file`.
-
-UI streams support v7 `tool-approval-response`, `custom`, and `reasoning-file` chunks. MCP HTTP
-transports reject redirects by default; set `Redirect: mcp.RedirectFollow` only for trusted endpoints.
-
-Provider-specific v7 defaults (OpenAI Responses reasoning detail, Anthropic cache-creation removal,
-Google provider rename, xAI Responses default, and runtime rejection of system messages) remain deferred.
-
-## Streaming views
-
-`StreamText` returns a `*StreamResult` that fans out to as many views as a caller registers; each
-view gets its own branch of the underlying event stream, so using more than one (e.g. `TextStream()`
-for display and `Consume()` for the final result) does not race or steal events from the others.
-
-| View | Returns | Use for |
-|---|---|---|
-| `Stream()` | `<-chan StepEvent` | Raw engine events, one channel |
-| `Events()` | `iter.Seq2[StepEvent, error]` | `for ev, err := range sr.Events()` — idiomatic Go 1.23+ iteration |
-| `TextStream()` | `<-chan string` | Text deltas only, e.g. printing to a terminal |
-| `Consume()` | `(*GenerateTextResult, error)` | Block for the full aggregated result |
-
-```go
-sr := ai.StreamText(ctx, req)
-for ev, err := range sr.Events() {
-    if err != nil {
-        // err is the stream's terminal error (including a mid-stream provider failure);
-        // ranging simply stops after this — no further events follow.
-        break
-    }
-    if ev.Type == ai.StepEventTextDelta {
-        fmt.Print(ev.TextDelta)
-    }
-}
-```
-
-Breaking out of a `range` early unregisters only that view — it does not cancel the run, since other
-views (or a later `Consume()`) may still be reading. To stop the run itself, cancel the `context.Context`
-passed to `StreamText`.
-
-## Error handling
-
-Provider HTTP failures surface as `*ai.APIError` (an alias of the shared `aikit.APIError`), never as
-an opaque string. The raw response body is deliberately never embedded — it has, in other SDKs, leaked
-credentials and internal identifiers through error logs — but the fields a caller actually needs
-(status code, provider error code/message, request ID, `Retry-After`) are parsed out and kept:
-
-```go
-result, err := ai.GenerateText(ctx, req)
-if err != nil {
-    var apiErr *ai.APIError
-    if errors.As(err, &apiErr) {
-        fmt.Println(apiErr.Provider, apiErr.StatusCode, apiErr.RequestID)
-    }
-    switch {
-    case errors.Is(err, ai.ErrRateLimited):
-        // apiErr.RetryAfter holds the provider's Retry-After value, when sent.
-    case errors.Is(err, ai.ErrContextLength):
-    case errors.Is(err, ai.ErrUnauthorized):
-    }
-}
-```
-
-`tool.ErrNoSuchTool` classifies a tool call for a name the request's `tool.Set`
-does not define, the same way — use `errors.Is(err, tool.ErrNoSuchTool)` rather
-than matching an error string. Input, execution, and policy-denial failures are
-similarly classified by `tool.ErrInput`, `tool.ErrExecution`, and
-`tool.ErrDenied`. Executed calls retain that typed value in
-`ToolResult.Error`; `ToolResult.Output` remains the raw model/wire string.
-
-## Observability
-
-By default the SDK produces no logs and no trace spans: instrumentation is opt-in, never assumed.
-
-`WithLogger` injects a `*slog.Logger` that receives structured diagnostics — a panic recovered at a
-goroutine or callback boundary, and a provider error body that `*APIError` deliberately drops (see
-"Error handling" above) — at debug/error level. Leaving it unset is silent; the SDK never writes to
-`slog.Default()`, since a library taking over a consumer's log stream without being asked is exactly
-the surprise this option exists to prevent.
-
-```go
-logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:    model,
-    Messages: []ai.Message{ai.UserMessage("Hello!")},
-    Logger:   logger,
-})
-```
-
-Tracing follows the standard OpenTelemetry pattern: the SDK always instruments run/step/model-call/
-tool-call spans through the `go.opentelemetry.io/otel/trace` API, but until *your application* calls
-`otel.SetTracerProvider(...)` with a real SDK, that global provider is OTel's own no-op — spans cost a
-few interface calls and nothing is exported. No `ai-go`-specific option is needed to turn tracing on;
-wiring up an exporter is the application's concern, not this SDK's.
-
-Span attributes are metadata only by default — model ID, step number, tool name, token usage, finish
-reason — never prompt, completion, or tool-argument content, since spans are commonly exported to a
-third-party backend. Opt into content with `ai.WithTraceContent(true)` on the request:
-
-```go
-result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-    Model:        model,
-    Messages:     []ai.Message{ai.UserMessage("Hello!")},
-    TraceContent: true, // spans now include prompt/completion/tool-argument text
-})
-```
+- OpenAI Responses and Chat Completions, Anthropic, Gemini, Kie, and OpenAI-compatible providers
+- Streaming and aggregated text generation with multi-step tool execution
+- Generic typed tools with construction-time JSON Schema validation
+- Structured output, embeddings, image generation, provider metadata, warnings, and typed errors
+- Stateless human approval with AI SDK v7-compatible signatures
+- AI SDK v7 SSE production and a tested `net/http` chat boundary
+- Opt-in structured logging and a provider-neutral tracing seam
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.25 or newer
+- Bun 1.3.13 and Chromium only when running the JavaScript/browser conformance gates
+
+The module is still pre-1.0 and remains on `v0.x` while the restructured package layout settles.
+See [CHANGELOG.md](CHANGELOG.md) before upgrading.
+
+## Quick start
+
+Install the module:
+
+```sh
+go get github.com/open-ai-sdk/ai-go
+```
+
+Use the facade for the common path:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/provider/openai"
+)
+
+func main() {
+	model := openai.NewLanguageModel("gpt-5", openai.Config{
+		APIKey: os.Getenv("OPENAI_API_KEY"),
+	})
+
+	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
+		Model:        model,
+		Instructions: "Answer concisely.",
+		Messages:     []ai.Message{ai.UserMessage("Why is the sky blue?")},
+		ProviderOptions: map[string]any{
+			"openai": openai.ProviderOptions{ReasoningEffort: "low"},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(result.Text)
+}
+```
+
+Typed provider option structs are the primary Go API. If provider options originate as decoded
+JSON, the map fallback is strict: unknown fields, wrong types, or an option struct that does not
+match the selected provider/model API returns `*llm.ProviderOptionsError` rather than being ignored.
+
+`GenerateText` defaults to a single step. Set `StopWhen: ai.IsStepCount(n)` for an explicit
+multi-step tool loop, or use the direct `agent` runtime when the application needs event-level
+control.
+
+### Streaming
+
+```go
+stream := ai.StreamText(ctx, ai.GenerateTextRequest{
+	Model:    model,
+	Messages: []ai.Message{ai.UserMessage("Explain Go channels")},
+})
+
+for event, err := range stream.Events() {
+	if err != nil {
+		return err
+	}
+	if event.Type == ai.StepEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
+}
+```
+
+Cancel the context passed to `StreamText` to stop the underlying run. Leaving an iterator view does
+not cancel the run because another stream view or `Consume` call may still be active.
+
+### Typed tools
+
+```go
+weather, err := tool.New(
+	"get_weather",
+	"Get weather for a city",
+	func(ctx context.Context, input struct {
+		City string `json:"city" description:"City name"`
+	}) (struct {
+		Summary string `json:"summary"`
+	}, error) {
+		return struct {
+			Summary string `json:"summary"`
+		}{Summary: lookup(input.City)}, nil
+	},
+)
+if err != nil {
+	return err
+}
+
+tools, err := tool.NewSet(weather)
+if err != nil { // duplicate names are rejected
+	return err
+}
+```
+
+Native and MCP-discovered tools use the same `tool.Set` path. Tool input, execution, missing-tool,
+and policy-denial failures are typed and support `errors.Is`/`errors.As`.
+
+## Chat server quickstart
+
+The checked-in server is a runnable conformance fixture for text, tool, error, approval, and denial
+flows. It uses the real `aisdkhttp` boundary and is also what the browser suite boots.
+
+```sh
+go run ./examples/chat-server
+curl -i http://127.0.0.1:8787/healthz
+```
+
+For an application endpoint, compose the lower packages directly:
+
+```go
+func chatRun(model llm.Model) aisdkhttp.RunFunc {
+	return func(ctx context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
+		return agent.Stream(ctx, agent.RunParams{
+			Model: model,
+			Request: llm.Request{
+				Messages: messages,
+			},
+		}), nil
+	}
+}
+
+http.Handle("/chat", aisdkhttp.Handler(chatRun(model)))
+```
+
+`aisdkhttp` parses the v7 request, streams all five required response headers, flushes every chunk,
+and propagates disconnect cancellation. Pre-stream failures use HTTP status codes; mid-stream
+failures become redacted protocol error chunks.
+
+Gin support is isolated in the separately versioned `aisdkgin` module and wraps this same
+`net/http` handler, so Gin is not part of the core dependency graph.
+
+## AI SDK v7 compatibility
+
+The wire layer targets the AI SDK v7 UI-message-stream contract. The conformance project pins:
+
+- `ai@7.0.35`
+- `@ai-sdk/react@4.0.38`
+- React 19.2.1
+- Vite+ 0.2.6
+
+It validates the generated chunk union, replays recorded Go SSE fixtures through the real
+`readUIMessageStream`, boots `examples/chat-server`, and drives text, tool-result, approval, and
+denial flows through a real React `useChat` client in Chromium.
+
+```sh
+bun --cwd conformance install --frozen-lockfile
+bun --cwd conformance run check
+bun --cwd conformance run test
+bunx playwright install chromium
+bun --cwd conformance run test:browser
+```
+
+Run these gates whenever changing `aisdk`, `aisdkhttp`, SSE framing or headers, fixture bytes, or
+browser-facing tool and approval behavior. The Go API may make documented `v0.x` clean breaks; the
+v7 chunk types, fields, finish-reason spellings, and `data: [DONE]` framing are treated as frozen.
+
+## Package map
+
+| Package | Owns |
+|---|---|
+| `ai` | Thin facade: `GenerateText`, `StreamText`, `GenerateObject`, `Embed`, and aliases |
+| `agent/generate` | High-level generation, aggregation, request options, and stream results behind the facade |
+| `agent` | Low-level multi-step loop, approval, stop conditions, callbacks, and `aikit.StepEvent` production |
+| `aikit` | Dependency-free messages, events, usage, finish reasons, warnings, and error vocabulary |
+| `llm` | Model contracts, request builder, typed provider options, embeddings, and images |
+| `tool` | Typed/dynamic tools, schema derivation, registry, typed errors, and tool context |
+| `transport` | Provider HTTP policy, retry, SSE reading, cancellation, and API error mapping |
+| `provider/*` | Provider-specific constructors and wire codecs |
+| `aisdk` | Frozen AI SDK v7 chunks, SSE framing, UI-message conversion, invariants, and approval signatures |
+| `aisdkhttp` | AI SDK v7 `net/http` request/SSE boundary |
+| `mcp` | MCP clients and dynamic tool integration |
+
+The dependency graph points downward: `aikit` is the leaf, no package imports `ai`, providers do not
+import the UI protocol, and `aisdk` does not import agents or providers.
+
+## Observability
+
+The SDK is silent by default. A caller-provided `*slog.Logger` receives structured diagnostics;
+the library does not write to `slog.Default()` on its own. Tracing defaults to a true no-op and uses
+the small `agent.Tracer` interface (`ai.WithTracer` on facade calls).
+
+OpenTelemetry support lives in the optional `otelagent` package. The core runtime and provider
+package dependency closures do not import OTel, so applications compile the adapter only when they
+explicitly choose it. Prompt, completion, and tool-argument content is excluded from traces unless
+the caller explicitly enables content tracing.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).

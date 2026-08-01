@@ -26,7 +26,9 @@ func TestHandlerPreStreamErrorUsesHTTPStatusAndRedacts(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", recorder.Code)
 	}
-	if body := recorder.Body.String(); strings.Contains(body, sensitiveError) || !strings.Contains(body, streamErrorMessage) {
+	body := recorder.Body.String()
+	if strings.Contains(body, sensitiveError) ||
+		!strings.Contains(body, streamErrorMessage) {
 		t.Fatalf("unexpected error body %q", body)
 	}
 	if got := recorder.Header().Get(contentTypeHeader); got == "text/event-stream" {
@@ -53,7 +55,9 @@ func TestHandlerMidStreamErrorUsesRedactedChunk(t *testing.T) {
 		t.Fatalf("status = %d, want 200", recorder.Code)
 	}
 	body := recorder.Body.String()
-	if strings.Contains(body, sensitiveError) || !strings.Contains(body, `"type":"error"`) || !strings.Contains(body, `"errorText":"stream error"`) {
+	if strings.Contains(body, sensitiveError) ||
+		!strings.Contains(body, `"type":"error"`) ||
+		!strings.Contains(body, `"errorText":"stream error"`) {
 		t.Fatalf("unexpected SSE error body %q", body)
 	}
 	if !strings.HasSuffix(body, "data: [DONE]\n\n") {

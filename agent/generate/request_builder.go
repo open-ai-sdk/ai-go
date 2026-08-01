@@ -1,8 +1,9 @@
-package ai
+package generate
 
 import (
 	"log/slog"
 
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
 
@@ -213,6 +214,11 @@ func (b RequestBuilder) MaxParallelTools(maximum int) RequestBuilder {
 
 func (b RequestBuilder) Logger(logger *slog.Logger) RequestBuilder {
 	b.request.Logger = logger
+	return b
+}
+
+func (b RequestBuilder) Tracer(tracer agent.Tracer) RequestBuilder {
+	b.request.Tracer = tracer
 	return b
 }
 

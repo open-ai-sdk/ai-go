@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps approval policy, canonical signing, replay protection, and validation together.
 package agent
 
 import (
@@ -12,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/open-ai-sdk/ai-go/aisdk"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 var errApprovalPending = errors.New("agent: tool approval pending")
@@ -178,7 +179,7 @@ func signApprovalRequest(key []byte, request ApprovalRequest) (string, error) {
 	if len(key) < minApprovalKeyBytes {
 		return "", fmt.Errorf("agent: ToolApprovalKey must contain at least %d bytes", minApprovalKeyBytes)
 	}
-	return aisdk.SignToolApproval(key, approvalSignatureInput(request))
+	return aikit.SignToolApproval(key, approvalSignatureInput(request))
 }
 
 func verifyApprovalRequest(
@@ -190,7 +191,7 @@ func verifyApprovalRequest(
 	if err != nil {
 		return ApprovalGrant{}, fmt.Errorf("agent: canonicalize approval input: %w", err)
 	}
-	if err := aisdk.VerifyToolApproval(key, signature, approvalSignatureInput(request)); err != nil {
+	if err := aikit.VerifyToolApproval(key, signature, approvalSignatureInput(request)); err != nil {
 		return ApprovalGrant{}, ErrInvalidApprovalSignature
 	}
 	return ApprovalGrant{
@@ -198,8 +199,8 @@ func verifyApprovalRequest(
 	}, nil
 }
 
-func approvalSignatureInput(request ApprovalRequest) aisdk.ToolApprovalSignatureInput {
-	return aisdk.ToolApprovalSignatureInput{
+func approvalSignatureInput(request ApprovalRequest) aikit.ToolApprovalSignatureInput {
+	return aikit.ToolApprovalSignatureInput{
 		ApprovalID: request.ApprovalID, ToolCallID: request.ToolCallID,
 		ToolName: request.ToolName, Input: json.RawMessage(request.Args),
 	}
@@ -261,7 +262,7 @@ func verifyApprovalResult(
 }
 
 func canonicalizeApprovalInput(raw string) (string, string, error) {
-	canonical, err := aisdk.CanonicalizeToolApprovalInput(json.RawMessage(raw))
+	canonical, err := aikit.CanonicalizeToolApprovalInput(json.RawMessage(raw))
 	if err != nil {
 		return "", "", err
 	}

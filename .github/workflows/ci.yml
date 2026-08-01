@@ -75,8 +75,8 @@ jobs:
           version: latest
           args: --timeout=5m
 
-  test:
-    name: Test
+  boundaries:
+    name: Structural boundaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -117,6 +117,16 @@ jobs:
             exit 1
           }
 
+      - name: Enforce AI SDK wire boundary
+        run: |
+          forbidden="$(go list -deps ./aisdk/... \
+            | grep -E '^github.com/open-ai-sdk/ai-go/(agent|provider|transport)(/|$)' || true)"
+          test -z "$forbidden" || {
+            echo "aisdk must not depend on agent, provider, or transport:"
+            echo "$forbidden"
+            exit 1
+          }
+
       - name: Enforce provider dependency boundary
         run: |
           forbidden="$(go list -deps ./provider/... \
@@ -141,5 +151,122 @@ jobs:
             exit 1
           }
 
+      - name: Enforce facade direction
+        run: |
+          importers="$(go list -f '{{$pkg := .ImportPath}}{{range .Imports}}{{if eq . "github.com/open-ai-sdk/ai-go/ai"}}{{$pkg}}{{end}}{{end}}' ./... \
+            | grep -v '^$' || true)"
+          test -z "$importers" || {
+            echo "production packages must not import the ai facade:"
+            echo "$importers"
+            exit 1
+          }
+
+      - name: Enforce core dependency exclusions
+        run: |
+          forbidden="$(grep -E 'github.com/(cloudwego/eino|gin-gonic/gin)' go.mod || true)"
+          test -z "$forbidden" || {
+            echo "the core module must not depend on Eino or Gin:"
+            echo "$forbidden"
+            exit 1
+          }
+
+      - name: Enforce optional OpenTelemetry package boundary
+        run: |
+          runtime_otel="$(go list -deps ./agent/... ./ai ./provider/... \
+            | grep -E '^(go.opentelemetry.io|github.com/(go-logr|cespare))' || true)"
+          test -z "$runtime_otel" || {
+            echo "OpenTelemetry imports must remain isolated in the optional otelagent package:"
+            echo "$runtime_otel"
+            exit 1
+          }
+
+      - name: Enforce snake_case Go filenames
+        run: |
+          kebab="$(find . -path './conformance/node_modules' -prune -o -name '*-*.go' -print)"
+          test -z "$kebab" || {
+            echo "Go filenames must use snake_case:"
+            echo "$kebab"
+            exit 1
+          }
+
+      - name: Enforce facade-owned type boundary
+        run: go run .github/checks/ai_types.go ./ai
+
+      - name: Enforce package documentation
+        run: |
+          missing=0
+          while IFS= read -r directory; do
+            if [ ! -f "$directory/doc.go" ]; then
+              echo "$directory has Go source but no doc.go"
+              missing=1
+            fi
+          done < <(find . \
+            -path './conformance/node_modules' -prune -o \
+            -path './.github/checks' -prune -o \
+            -type f -name '*.go' -exec dirname '{}' \; | sort -u)
+          test "$missing" -eq 0
+
+      - name: Preserve benchmark coverage
+        run: |
+          count="$(find . \
+            -path './conformance/node_modules' -prune -o \
+            -type f -name '*.go' -exec grep -h '^func Benchmark' '{}' + \
+            | wc -l | tr -d ' ')"
+          test "$count" -eq 3 || {
+            echo "expected 3 benchmark functions, found $count"
+            exit 1
+          }
+
+      - name: Enforce justified production file length
+        run: |
+          failed=0
+          while IFS= read -r -d '' file; do
+            lines="$(wc -l < "$file")"
+            if [ "$lines" -gt 250 ] && ! grep -Eq '^// ai-go: file-length-justification: .+' "$file"; then
+              echo "$file has $lines lines and no file-length justification"
+              failed=1
+            fi
+          done < <(find . \
+            -path './conformance/node_modules' -prune -o \
+            -type f -name '*.go' ! -name '*_test.go' -print0)
+          test "$failed" -eq 0
+
       - name: Verify external consumer surface
         run: go -C compat-test test ./...
+
+  test:
+    name: Build, vet, and race tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download dependencies
+        run: |
+          go mod download
+          go -C aisdkgin mod download
+          go -C compat-test mod download
+
+      - name: Build all Go modules
+        run: |
+          go build ./...
+          go -C aisdkgin build ./...
+          go -C compat-test build ./...
+
+      - name: Vet all Go modules
+        run: |
+          go vet ./...
+          go -C aisdkgin vet ./...
+          go -C compat-test vet ./...
+
+      - name: Run race tests in all Go modules
+        run: |
+          go test -race ./... -count=1
+          go -C aisdkgin test -race ./... -count=1
+          go -C compat-test test -race ./... -count=1

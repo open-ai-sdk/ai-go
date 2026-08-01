@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps approval-history reconstruction and signature validation as one security flow.
 package agent
 
 import (

@@ -1,4 +1,4 @@
-package ai
+package generate
 
 // PruneMode controls how message content is pruned.
 type PruneMode string

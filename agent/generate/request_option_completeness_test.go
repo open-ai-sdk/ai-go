@@ -1,4 +1,4 @@
-package ai
+package generate
 
 import (
 	"reflect"
@@ -40,6 +40,7 @@ func TestGenerateTextRequest_OptionCompleteness(t *testing.T) {
 		"ParallelToolExecution":   true, // WithParallelToolExecution
 		"MaxParallelTools":        true, // WithMaxParallelTools
 		"Logger":                  true, // WithLogger
+		"Tracer":                  true, // WithTracer
 		"TraceContent":            true, // WithTraceContent
 	}
 	// Fields intentionally without a top-level option, with the reason.

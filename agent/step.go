@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps the ordered single-step model, tool, callback, and accounting pipeline together.
 package agent
 
 import (

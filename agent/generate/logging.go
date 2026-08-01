@@ -1,6 +1,10 @@
-package ai
+package generate
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"github.com/open-ai-sdk/ai-go/agent"
+)
 
 // WithLogger sets the logger used for internal diagnostics on this call: a
 // panic recovered at a goroutine or callback boundary, and a provider error
@@ -12,6 +16,11 @@ import "log/slog"
 // exactly the kind of surprise this option exists to prevent.
 func WithLogger(l *slog.Logger) Option {
 	return func(r *GenerateTextRequest) { r.Logger = l }
+}
+
+// WithTracer enables provider-neutral span instrumentation for this call.
+func WithTracer(tracer agent.Tracer) Option {
+	return func(r *GenerateTextRequest) { r.Tracer = tracer }
 }
 
 // WithTraceContent controls whether trace spans (see the module's OTel

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -27,28 +26,11 @@ func (r *closeRecorder) Close() error {
 }
 
 func TestStream_CancelClosesHungResponseAndChannel(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(
-		writer http.ResponseWriter,
-		request *http.Request,
-	) {
-		writer.Header().Set("Content-Type", "text/event-stream")
-		writer.WriteHeader(http.StatusOK)
-		writer.(http.Flusher).Flush()
-		<-request.Context().Done()
-	}))
-	defer server.Close()
-
 	ctx, cancel := context.WithCancel(context.Background())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // handed to Stream below.
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := &closeRecorder{ReadCloser: resp.Body, closed: make(chan struct{})}
-	resp.Body = body
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	body := &closeRecorder{ReadCloser: reader, closed: make(chan struct{})}
+	resp := &http.Response{StatusCode: http.StatusOK, Body: body}
 
 	decode := func(
 		_ context.Context,

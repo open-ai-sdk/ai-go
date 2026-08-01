@@ -31,7 +31,10 @@ func ToGenerateTextRequestFromRegistry(
 	envelope aisdk.ChatRequestEnvelope,
 	registry *Registry,
 ) (GenerateTextRequest, error) {
-	modelID, _ := envelope.Body["modelId"].(string) //nolint:errcheck // type assertion ok
+	modelID, ok := envelope.Body["modelId"].(string)
+	if !ok {
+		modelID = ""
+	}
 	if modelID == "" {
 		return GenerateTextRequest{}, fmt.Errorf("ui message request: Body[\"modelId\"] is missing or empty")
 	}

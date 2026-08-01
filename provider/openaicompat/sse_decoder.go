@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps Chat Completions SSE choice, tool-call, and usage state in one decoder.
 package openaicompat
 
 import (

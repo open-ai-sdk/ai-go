@@ -1,4 +1,4 @@
-package ai
+package generate
 
 // LanguageModelMiddleware wraps a LanguageModel to add cross-cutting behavior.
 // Each middleware receives the inner model and returns a new model that

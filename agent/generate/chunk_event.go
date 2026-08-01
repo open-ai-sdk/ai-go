@@ -1,4 +1,4 @@
-package ai
+package generate
 
 func chunkEvent(event StepEvent) ChunkEvent {
 	var eventType string

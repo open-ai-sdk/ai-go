@@ -33,7 +33,7 @@ func Handler(run RunFunc) http.Handler {
 			writeHTTPError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		envelope, err := decodeEnvelope(r.Body)
 		if err != nil {
@@ -58,7 +58,10 @@ func Handler(run RunFunc) http.Handler {
 		}
 		chunks := aisdk.NewChunkProducer(messageID).Produce(events).Chunks
 		writer := newSSEWriter(w, cancel)
-		_ = aisdk.WriteSSEStream(writer, chunks)
+		if err := aisdk.WriteSSEStream(writer, chunks); err != nil {
+			cancel()
+			return
+		}
 	})
 }
 

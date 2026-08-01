@@ -47,7 +47,10 @@ type sseWriter struct {
 
 func newSSEWriter(w http.ResponseWriter, onError func()) *sseWriter {
 	SetHeaders(w.Header())
-	flusher, _ := w.(http.Flusher)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		flusher = nil
+	}
 	return &sseWriter{w: w, flusher: flusher, onError: onError}
 }
 

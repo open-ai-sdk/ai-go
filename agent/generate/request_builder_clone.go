@@ -1,4 +1,4 @@
-package ai
+package generate
 
 func cloneGenerateTextRequest(request GenerateTextRequest) GenerateTextRequest {
 	request.Messages = append([]Message(nil), request.Messages...)

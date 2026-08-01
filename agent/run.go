@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps tool-loop lifecycle, cancellation, tracing, and terminal-event ownership together.
 package agent
 
 import (
@@ -256,10 +257,7 @@ func finishTextStep(
 }
 
 func initializeRunTracing(ctx context.Context, params RunParams) (context.Context, tracing.Tracer, bool) {
-	tracer := params.tracer
-	if tracer == nil && !params.disableTracing {
-		tracer = tracing.NewTracer()
-	}
+	tracer := params.Tracer
 	enabled := tracer != nil
 	if !enabled {
 		tracer = tracing.NoopTracer{}

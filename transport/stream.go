@@ -30,20 +30,34 @@ func Stream(
 ) <-chan aikit.StreamEvent {
 	out := make(chan aikit.StreamEvent, defaultStreamBuffer)
 	raw := make(chan aikit.StreamEvent, defaultStreamBuffer)
-
-	go runDecoder(ctx, resp, decode, raw)
+	if resp == nil {
+		close(raw)
+		out <- aikit.StreamEvent{
+			Type:  aikit.StreamEventError,
+			Error: fmt.Errorf("transport: stream response is nil"),
+		}
+		close(out)
+		return out
+	}
+	body := resp.Body
+	go func() {
+		if body != nil {
+			defer body.Close()
+		}
+		runDecoderBody(ctx, body, decode, raw)
+	}()
 	go relayStream(ctx, raw, out)
 	return out
 }
 
-func runDecoder(
+func runDecoderBody(
 	ctx context.Context,
-	resp *http.Response,
+	body io.ReadCloser,
 	decode StreamDecoder,
 	raw chan<- aikit.StreamEvent,
 ) {
 	defer close(raw)
-	if resp == nil || resp.Body == nil {
+	if body == nil {
 		raw <- aikit.StreamEvent{
 			Type:  aikit.StreamEventError,
 			Error: fmt.Errorf("transport: stream response has no body"),
@@ -51,8 +65,7 @@ func runDecoder(
 		return
 	}
 
-	defer resp.Body.Close()
-	defer CloseOnCancel(ctx, resp.Body)()
+	defer CloseOnCancel(ctx, body)()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			emitRaw(raw, aikit.StreamEvent{
@@ -62,7 +75,7 @@ func runDecoder(
 		}
 	}()
 
-	err := decode(ctx, NewSSEReader(resp.Body), raw)
+	err := decode(ctx, NewSSEReader(body), raw)
 	if err == nil {
 		return
 	}

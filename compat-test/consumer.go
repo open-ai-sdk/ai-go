@@ -21,9 +21,13 @@ type fakeModel struct{}
 
 func (fakeModel) ModelID() string { return "fake" }
 
-func (fakeModel) Stream(_ context.Context, _ ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+func (fakeModel) Stream(_ context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
 	ch := make(chan ai.StreamEvent, 2)
-	ch <- ai.StreamEvent{Type: ai.StreamEventTextDelta, TextDelta: "hello"}
+	text := "hello"
+	if req.Output != nil {
+		text = `{"value":"ok"}`
+	}
+	ch <- ai.StreamEvent{Type: ai.StreamEventTextDelta, TextDelta: text}
 	ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonStop}
 	close(ch)
 	return ch, nil
@@ -31,6 +35,69 @@ func (fakeModel) Stream(_ context.Context, _ ai.LanguageModelRequest) (<-chan ai
 
 // Compile-time proof an external consumer can implement the model interface.
 var _ ai.LanguageModel = fakeModel{}
+
+// GenerateText exercises the ergonomic blocking façade with public request
+// and result contracts only.
+func GenerateText(ctx context.Context) (string, error) {
+	result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+		Model:    fakeModel{},
+		Messages: []aikit.Message{{Role: aikit.RoleUser}},
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// StreamText exercises the live façade and its aggregate result view.
+func StreamText(ctx context.Context) (string, error) {
+	result, err := ai.StreamText(ctx, ai.GenerateTextRequest{
+		Model:    fakeModel{},
+		Messages: []aikit.Message{{Role: aikit.RoleUser}},
+	}).Consume()
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+type generatedObject struct {
+	Value string `json:"value"`
+}
+
+// GenerateObject exercises the generic structured-output façade.
+func GenerateObject(ctx context.Context) (string, error) {
+	result, err := ai.GenerateObject[generatedObject](ctx, ai.GenerateObjectRequest{
+		Model:    fakeModel{},
+		Messages: []aikit.Message{{Role: aikit.RoleUser}},
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Object.Value, nil
+}
+
+type fakeEmbeddingModel struct{}
+
+func (fakeEmbeddingModel) ModelID() string { return "fake-embedding" }
+func (fakeEmbeddingModel) Embed(context.Context, string) ([]float32, error) {
+	return []float32{1, 2, 3}, nil
+}
+func (fakeEmbeddingModel) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
+	result := make([][]float32, len(texts))
+	for index := range result {
+		result[index] = []float32{float32(index)}
+	}
+	return result, nil
+}
+
+var _ llm.EmbeddingModel = fakeEmbeddingModel{}
+
+// Embed exercises the embedding façade with llm-owned request/result types.
+func Embed(ctx context.Context) ([]float32, error) {
+	result, err := ai.Embed(ctx, llm.EmbedRequest{Model: fakeEmbeddingModel{}, Text: "hello"})
+	return result.Embedding, err
+}
 
 // RunAgent proves an external module can configure and execute the public
 // runtime directly without importing the ai facade or any internal package.

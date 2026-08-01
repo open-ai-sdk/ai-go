@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -95,20 +96,21 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 		return nil, fmt.Errorf("openai: encode request: %w", err)
 	}
 
-	resp, err := m.doRequest(ctx, apiReq)
+	httpReq, err := m.buildRequest(ctx, apiReq)
 	if err != nil {
 		return nil, err
 	}
 
-	body := resp.Body
+	var wrapBody func(io.ReadCloser) io.ReadCloser
 	if m.chunkTimeout > 0 {
-		body = transport.NewTimeoutReader(resp.Body, m.chunkTimeout)
+		wrapBody = func(body io.ReadCloser) io.ReadCloser {
+			return transport.NewTimeoutReader(body, m.chunkTimeout)
+		}
 	}
-
-	resp.Body = body
-	return transport.Stream(
+	return m.client.DoStream(
 		ctx,
-		resp,
+		httpReq,
+		wrapBody,
 		func(
 			ctx context.Context,
 			reader *transport.SSEReader,
@@ -121,13 +123,12 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 				warnings...,
 			)
 		},
-	), nil
+	)
 }
 
-// doRequest marshals body, sends POST /responses, and returns the HTTP response.
-// Non-2xx responses become a typed *APIError; the body is parsed for code/message
-// then discarded, never embedded.
-func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) (*http.Response, error) {
+// buildRequest marshals body and builds POST /responses. The shared transport
+// executes it and owns the response lifecycle.
+func (m *LanguageModel) buildRequest(ctx context.Context, apiReq responsesRequest) (*http.Request, error) {
 	body, err := json.Marshal(apiReq)
 	if err != nil {
 		return nil, fmt.Errorf("openai: marshal request: %w", err)
@@ -145,14 +146,5 @@ func (m *LanguageModel) doRequest(ctx context.Context, apiReq responsesRequest) 
 	if err != nil {
 		return nil, fmt.Errorf("openai: build http request: %w", err)
 	}
-	resp, err := m.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("openai: http request: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Typed error carrying status/code/message/request-ID/Retry-After; the
-		// raw body is parsed then discarded, never embedded.
-		return nil, transport.APIErrorFromResponse(ctx, "openai", resp)
-	}
-	return resp, nil
+	return httpReq, nil
 }

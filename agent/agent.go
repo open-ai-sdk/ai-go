@@ -44,6 +44,11 @@ type (
 
 	NoSuchToolError = tool.NoSuchToolError
 	ToolInputError  = tool.InputError
+	// Attr, Span, and Tracer form the optional provider-neutral tracing seam.
+	// The core defaults to a no-op tracer and imports no telemetry SDK.
+	Attr   = tracing.Attr
+	Span   = tracing.Span
+	Tracer = tracing.Tracer
 )
 
 const (
@@ -136,10 +141,7 @@ type RunParams struct {
 	MaxParallelTools      int
 	Logger                *slog.Logger
 	TraceContent          bool
-
-	// tracer and disableTracing are package-private seams for observability
-	// tests and benchmarks. Public runs use the process-global OTel tracer
-	// without exposing an internal interface in this public struct.
-	tracer         tracing.Tracer
-	disableTracing bool
+	// Tracer enables span instrumentation for this run. Nil is a true no-op
+	// default; use an optional adapter or implement the small interface.
+	Tracer Tracer
 }

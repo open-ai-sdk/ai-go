@@ -28,11 +28,12 @@ func TestAPIErrorFromResponse_UsesRetryAfterHeader(t *testing.T) {
 	header := make(http.Header)
 	header.Set("Retry-After", "30")
 	header.Set("X-Request-Id", "req_abc")
-	resp := response( //nolint:bodyclose // APIErrorFromResponse owns and closes it.
+	resp := response(
 		http.StatusTooManyRequests,
 		header,
 		`{"error":{"message":"Rate limit reached","code":"rate_limit_exceeded"}}`,
 	)
+	defer resp.Body.Close()
 
 	err := APIErrorFromResponse(context.Background(), "openai", resp)
 
@@ -86,11 +87,12 @@ func TestAPIErrorFromResponse_RedactsErrorAndLogsRawBody(t *testing.T) {
 		context.Background(),
 		slog.New(handler),
 	)
-	resp := response( //nolint:bodyclose // APIErrorFromResponse owns and closes it.
+	resp := response(
 		http.StatusBadRequest,
 		nil,
 		`{"error":{"message":"bad","code":"invalid"},"debug":"`+secret+`"}`,
 	)
+	defer resp.Body.Close()
 
 	err := APIErrorFromResponse(ctx, "openai", resp)
 

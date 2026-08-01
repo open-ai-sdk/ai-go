@@ -3,19 +3,51 @@ package aisdk
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
+
+type invariantLogRecorder struct {
+	mu    sync.Mutex
+	count int
+}
+
+func (*invariantLogRecorder) Enabled(context.Context, slog.Level) bool { return true }
+func (r *invariantLogRecorder) Handle(context.Context, slog.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.count++
+	return nil
+}
+func (r *invariantLogRecorder) WithAttrs([]slog.Attr) slog.Handler { return r }
+func (r *invariantLogRecorder) WithGroup(string) slog.Handler      { return r }
+
+func TestInvariantWithoutLoggerDoesNotUseSlogDefault(t *testing.T) {
+	recorder := &invariantLogRecorder{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(recorder))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	reportInvariant(nil, nil, InvariantViolation{Code: InvariantUnknownChunk})
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if recorder.count != 0 {
+		t.Fatalf("slog.Default received %d records without an injected logger", recorder.count)
+	}
+}
 
 func TestInvariantCheckerRejectsLenientClientCases(t *testing.T) {
 	tests := []struct {

@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite-plus';
 
+const apiPort = Number(process.env.AI_GO_CONFORMANCE_API_PORT ?? 8787);
+
 export default defineConfig({
   root: 'browser/app',
   fmt: {
@@ -14,7 +16,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/chat': 'http://127.0.0.1:8787',
+      '/chat': `http://127.0.0.1:${apiPort}`,
     },
   },
   test: {

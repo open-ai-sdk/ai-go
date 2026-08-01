@@ -1,9 +1,10 @@
-package ai
+package generate
 
 import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
@@ -87,6 +88,8 @@ type GenerateTextRequest struct {
 	// default — produces no output at all; the SDK never writes to
 	// slog.Default().
 	Logger *slog.Logger
+	// Tracer enables provider-neutral span instrumentation. Nil is a true no-op.
+	Tracer agent.Tracer
 	// TraceContent, when set via WithTraceContent(true), attaches prompt,
 	// completion, and tool-argument content to trace spans. Default false:
 	// spans carry only metadata (model ID, step number, tool name, usage,

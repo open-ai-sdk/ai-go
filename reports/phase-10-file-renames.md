@@ -1,0 +1,96 @@
+# Phase 10 Go filename renames
+
+This is the exhaustive phase-10 snake_case sweep (88 files). Package-level
+moves completed by earlier phases are documented in CHANGELOG.md.
+
+| Previous path | Final path |
+|---|---|
+| `ai/agent-callback-merge_test.go` | `agent/generate/agent_callback_merge_test.go` |
+| `ai/agent-options.go` | `agent/generate/agent_options.go` |
+| `ai/bare-path-middleware_test.go` | `agent/generate/bare_path_middleware_test.go` |
+| `ai/call-settings-and-usage.go` | `agent/generate/call_settings_and_usage.go` |
+| `ai/error-taxonomy_test.go` | `agent/generate/error_taxonomy_test.go` |
+| `ai/generate-object.go` | `agent/generate/generate_object.go` |
+| `ai/generate-object-guard_test.go` | `agent/generate/generate_object_guard_test.go` |
+| `ai/generate-text-and-stream-text.go` | `agent/generate/generate_text_and_stream_text.go` |
+| `ai/generate-text-request-and-result.go` | `agent/generate/generate_text_request_and_result.go` |
+| `ai/generate-text-smoothing_test.go` | `agent/generate/generate_text_smoothing_test.go` |
+| `ai/image-model.go` | `agent/generate/image_model.go` |
+| `ai/message-content-part-serialization_test.go` | `agent/generate/message_content_part_serialization_test.go` |
+| `ai/message-types.go` | `agent/generate/message_types.go` |
+| `ai/model-interfaces.go` | `agent/generate/model_interfaces.go` |
+| `ai/prune-messages.go` | `agent/generate/prune_messages.go` |
+| `ai/repair-tool-call.go` | `agent/generate/repair_tool_call.go` |
+| `ai/request-builder.go` | `agent/generate/request_builder.go` |
+| `ai/request-builder-clone.go` | `agent/generate/request_builder_clone.go` |
+| `ai/request-builder_test.go` | `agent/generate/request_builder_test.go` |
+| `ai/request-option-completeness_test.go` | `agent/generate/request_option_completeness_test.go` |
+| `ai/response-messages.go` | `agent/generate/response_messages.go` |
+| `ai/runtime-facade.go` | `agent/generate/runtime_facade.go` |
+| `ai/smooth-stream.go` | `agent/generate/smooth_stream.go` |
+| `ai/smooth-stream-panic_test.go` | `agent/generate/smooth_stream_panic_test.go` |
+| `ai/smooth-stream_test.go` | `agent/generate/smooth_stream_test.go` |
+| `ai/stop-condition-and-output-schema_test.go` | `agent/generate/stop_condition_and_output_schema_test.go` |
+| `ai/stop-condition-primitives.go` | `agent/generate/stop_condition_primitives.go` |
+| `ai/stream-events-iterator.go` | `agent/generate/stream_events_iterator.go` |
+| `ai/stream-result.go` | `agent/generate/stream_result.go` |
+| `ai/stream-result-views_test.go` | `agent/generate/stream_result_views_test.go` |
+| `ai/tool-approval.go` | `agent/generate/tool_approval.go` |
+| `ai/tool-context.go` | `agent/generate/tool_context.go` |
+| `ai/tool-context_test.go` | `agent/generate/tool_context_test.go` |
+| `ai/tool-definition-and-toolset.go` | `agent/generate/tool_definition_and_toolset.go` |
+| `ai/tool-loop-agent.go` | `agent/generate/tool_loop_agent.go` |
+| `ai/cross-provider-contract_test.go` | `ai/cross_provider_contract_test.go` |
+| `ai/default-stop-when_test.go` | `ai/default_stop_when_test.go` |
+| `ai/example-error-handling_test.go` | `ai/example_error_handling_test.go` |
+| `ai/example-observability_test.go` | `ai/example_observability_test.go` |
+| `ai/example-streaming-views_test.go` | `ai/example_streaming_views_test.go` |
+| `ai/fallback-cancel_test.go` | `ai/fallback_cancel_test.go` |
+| `ai/generate-image.go` | `ai/generate_image.go` |
+| `ai/generate-object_test.go` | `ai/generate_object_test.go` |
+| `ai/provider-contract-provider-options-warnings-metadata-sources-regression_test.go` | `ai/provider_contract_provider_options_warnings_metadata_sources_regression_test.go` |
+| `ai/prune-messages_test.go` | `ai/prune_messages_test.go` |
+| `ai/response-messages_test.go` | `ai/response_messages_test.go` |
+| `ai/result-accumulation_test.go` | `ai/result_accumulation_test.go` |
+| `ai/tool-context-distinct_test.go` | `ai/tool_context_distinct_test.go` |
+| `ai/tool-executor-fake_test.go` | `ai/tool_executor_fake_test.go` |
+| `ai/tool-loop-agent_test.go` | `ai/tool_loop_agent_test.go` |
+| `ai/tool-model-contract_test.go` | `ai/tool_model_contract_test.go` |
+| `ai/tool-set-lookup_test.go` | `ai/tool_set_lookup_test.go` |
+| `provider/anthropic/anthropic-content-part-encoding_test.go` | `provider/anthropic/anthropic_content_part_encoding_test.go` |
+| `provider/anthropic/anthropic-language-model.go` | `provider/anthropic/anthropic_language_model.go` |
+| `provider/anthropic/anthropic-provider.go` | `provider/anthropic/anthropic_provider.go` |
+| `provider/anthropic/anthropic-sse-decoder.go` | `provider/anthropic/anthropic_sse_decoder.go` |
+| `provider/gemini/gemini-embed_test.go` | `provider/gemini/gemini_embed_test.go` |
+| `provider/gemini/gemini-embedding-model.go` | `provider/gemini/gemini_embedding_model.go` |
+| `provider/gemini/gemini-image-model.go` | `provider/gemini/gemini_image_model.go` |
+| `provider/gemini/gemini-language-model-provider.go` | `provider/gemini/gemini_language_model_provider.go` |
+| `provider/gemini/gemini-provider-options.go` | `provider/gemini/gemini_provider_options.go` |
+| `provider/gemini/gemini-schema-sanitizer.go` | `provider/gemini/gemini_schema_sanitizer.go` |
+| `provider/kie/kie-config.go` | `provider/kie/kie_config.go` |
+| `provider/kie/kie-error.go` | `provider/kie/kie_error.go` |
+| `provider/kie/kie-error_test.go` | `provider/kie/kie_error_test.go` |
+| `provider/kie/kie-image-model.go` | `provider/kie/kie_image_model.go` |
+| `provider/kie/kie-image-model_test.go` | `provider/kie/kie_image_model_test.go` |
+| `provider/kie/kie-image-options.go` | `provider/kie/kie_image_options.go` |
+| `provider/kie/kie-image-settings.go` | `provider/kie/kie_image_settings.go` |
+| `provider/kie/kie-poller.go` | `provider/kie/kie_poller.go` |
+| `provider/kie/kie-poller_test.go` | `provider/kie/kie_poller_test.go` |
+| `provider/kie/kie-provider.go` | `provider/kie/kie_provider.go` |
+| `provider/kie/kie-storage.go` | `provider/kie/kie_storage.go` |
+| `provider/kie/kie-storage_test.go` | `provider/kie/kie_storage_test.go` |
+| `provider/kie/kie-types.go` | `provider/kie/kie_types.go` |
+| `provider/kie/kie-url.go` | `provider/kie/kie_url.go` |
+| `provider/kie/kie-url_test.go` | `provider/kie/kie_url_test.go` |
+| `provider/openai/openai-chat-language-model.go` | `provider/openai/openai_chat_language_model.go` |
+| `provider/openai/openai-chat-language-model_test.go` | `provider/openai/openai_chat_language_model_test.go` |
+| `provider/openai/openai-chat-provider-options.go` | `provider/openai/openai_chat_provider_options.go` |
+| `provider/openai/openai-file-upload-helper.go` | `provider/openai/openai_file_upload_helper.go` |
+| `provider/openai/openai-file-upload-success-and-error-paths_test.go` | `provider/openai/openai_file_upload_success_and_error_paths_test.go` |
+| `provider/openai/openai-language-model-provider.go` | `provider/openai/openai_language_model_provider.go` |
+| `provider/openai/openai-provider-options-for-language-model-requests.go` | `provider/openai/openai_provider_options_for_language_model_requests.go` |
+| `provider/openai/openai-responses-decoder-cancel_test.go` | `provider/openai/openai_responses_decoder_cancel_test.go` |
+| `provider/openai/openai-responses-request-encoder.go` | `provider/openai/openai_responses_request_encoder.go` |
+| `provider/openai/openai-responses-sse-decoder-and-request-encoder_test.go` | `provider/openai/openai_responses_sse_decoder_and_request_encoder_test.go` |
+| `provider/openai/openai-responses-sse-stream-decoder.go` | `provider/openai/openai_responses_sse_stream_decoder.go` |
+

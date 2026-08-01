@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps Anthropic model request preparation and response normalization at one API boundary.
 package anthropic
 
 import (
@@ -28,7 +29,8 @@ var _ llm.Model = (*LanguageModel)(nil)
 func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
 	cfg = cfg.withDefaults()
 	client, clientErr := transport.NewClient(transport.ClientConfig{
-		BaseURL: cfg.BaseURL,
+		BaseURL:  cfg.BaseURL,
+		Provider: "anthropic",
 		Headers: http.Header{
 			"Content-Type":      []string{"application/json"},
 			"Anthropic-Version": []string{cfg.APIVersion},
@@ -67,19 +69,10 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: build http request: %w", err)
 	}
-	resp, err := m.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: http request: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		// Typed error carrying status/code/message/request-ID/Retry-After; the
-		// raw body is parsed then discarded, never embedded.
-		return nil, transport.APIErrorFromResponse(ctx, "anthropic", resp)
-	}
-
-	return transport.Stream(
+	return m.client.DoStream(
 		ctx,
-		resp,
+		httpReq,
+		nil,
 		func(
 			ctx context.Context,
 			reader *transport.SSEReader,
@@ -92,7 +85,7 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 				encodeWarnings...,
 			)
 		},
-	), nil
+	)
 }
 
 // anthropicRequest is the Messages API request body.
