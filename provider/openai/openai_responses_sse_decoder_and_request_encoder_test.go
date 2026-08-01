@@ -240,6 +240,28 @@ func TestEncodeRequest_InstructionsAndUserMessage(t *testing.T) {
 	}
 }
 
+func TestEncodeRequest_SystemMessageInHistory(t *testing.T) {
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{
+			ai.SystemMessage("You are helpful"),
+			ai.UserMessage("hello"),
+		},
+	}
+	r, _, err := encodeRequest("gpt-4o", req, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(r.Input) != 2 {
+		t.Fatalf("expected 2 input items (system + user), got %d", len(r.Input))
+	}
+	if r.Input[0].Role != "system" || len(r.Input[0].Content) != 1 || r.Input[0].Content[0].Text != "You are helpful" {
+		t.Errorf("unexpected system input: %#v", r.Input[0])
+	}
+	if r.Input[1].Role != "user" {
+		t.Errorf("expected second item role=user, got %q", r.Input[1].Role)
+	}
+}
+
 func TestEncodeRequest_PreviousResponseID(t *testing.T) {
 	req := ai.LanguageModelRequest{
 		Messages: []ai.Message{ai.UserMessage("continue")},

@@ -73,3 +73,42 @@ func TestToolLoopAgentCompletionPromptAndChat(t *testing.T) {
 func TestToolLoopAgentImplementsCompletion(t *testing.T) {
 	var _ Completion = NewToolLoopAgent(&agentCompletionModel{calls: 1})
 }
+
+func TestToolLoopAgentCompletionBuilderAppliesRequestShapingOptions(t *testing.T) {
+	model := &agentCompletionModel{calls: 1}
+	overrideModel := &agentCompletionModel{calls: 1}
+	stop := IsStepCount(2)
+	request := NewToolLoopAgent(model).Completion("weather").
+		Model(overrideModel).
+		TopP(0.8).
+		TopK(40).
+		Seed(7).
+		StopSequences("END").
+		MaxSteps(3).
+		StopWhen(stop).
+		ActiveTools("lookup").
+		ToolsContext(ToolsContext{"lookup": map[string]any{"city": "Hanoi"}}).
+		RuntimeContext(RuntimeContext{"requestID": "req-1"}).
+		Options(WithMaxTokens(128)).
+		Build()
+
+	if request.Model != overrideModel || request.Settings.TopP == nil || *request.Settings.TopP != 0.8 || request.Settings.TopK == nil || *request.Settings.TopK != 40 || request.Settings.Seed == nil || *request.Settings.Seed != 7 || request.Settings.MaxTokens != 128 || len(request.Settings.StopSequences) != 1 || request.Settings.StopSequences[0] != "END" || request.MaxSteps != 3 || request.StopWhen == nil || len(request.ActiveTools) != 1 || request.ActiveTools[0] != "lookup" {
+		t.Fatalf("unexpected request settings: %#v", request)
+	}
+	if request.ToolsContext["lookup"].(map[string]any)["city"] != "Hanoi" || request.RuntimeContext["requestID"] != "req-1" {
+		t.Fatalf("unexpected request context: %#v %#v", request.ToolsContext, request.RuntimeContext)
+	}
+}
+
+func TestToolLoopAgentCompletionOptionsCanReplaceMessages(t *testing.T) {
+	model := &agentCompletionModel{calls: 1}
+	_, err := NewToolLoopAgent(model).Completion("original").
+		Options(WithMessages(UserMessage("replacement"))).
+		Send(context.Background())
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(model.requests) != 1 || len(model.requests[0].Messages) != 1 || model.requests[0].Messages[0].Content[0].Text != "replacement" {
+		t.Fatalf("unexpected request: %#v", model.requests)
+	}
+}

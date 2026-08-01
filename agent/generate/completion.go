@@ -53,6 +53,18 @@ func (b AgentCompletionRequestBuilder) Instructions(value string) AgentCompletio
 	return b.with(WithInstructions(value))
 }
 
+// Options applies existing per-call options to this completion. It is the
+// Go-native escape hatch for controls not represented by a convenience method
+// and keeps the builder forward-compatible as new options are added.
+func (b AgentCompletionRequestBuilder) Options(values ...Option) AgentCompletionRequestBuilder {
+	b.options = append(append([]Option(nil), b.options...), values...)
+	return b
+}
+
+func (b AgentCompletionRequestBuilder) Model(value LanguageModel) AgentCompletionRequestBuilder {
+	return b.with(WithModel(value))
+}
+
 // Messages replaces the conversation history. Use Message to append a turn.
 func (b AgentCompletionRequestBuilder) Messages(values ...Message) AgentCompletionRequestBuilder {
 	b.messages = append([]Message(nil), values...)
@@ -85,8 +97,44 @@ func (b AgentCompletionRequestBuilder) MaxTokens(value int) AgentCompletionReque
 	return b.with(WithMaxTokens(value))
 }
 
+func (b AgentCompletionRequestBuilder) TopP(value float32) AgentCompletionRequestBuilder {
+	return b.with(WithTopP(value))
+}
+
+func (b AgentCompletionRequestBuilder) TopK(value int) AgentCompletionRequestBuilder {
+	return b.with(WithTopK(value))
+}
+
+func (b AgentCompletionRequestBuilder) Seed(value int) AgentCompletionRequestBuilder {
+	return b.with(WithSeed(value))
+}
+
+func (b AgentCompletionRequestBuilder) StopSequences(values ...string) AgentCompletionRequestBuilder {
+	return b.with(WithStopSequences(values...))
+}
+
+func (b AgentCompletionRequestBuilder) MaxSteps(value int) AgentCompletionRequestBuilder {
+	return b.with(WithMaxSteps(value))
+}
+
+func (b AgentCompletionRequestBuilder) StopWhen(value StopCondition) AgentCompletionRequestBuilder {
+	return b.with(WithStopWhen(value))
+}
+
+func (b AgentCompletionRequestBuilder) ActiveTools(values ...string) AgentCompletionRequestBuilder {
+	return b.with(WithActiveTools(values...))
+}
+
 func (b AgentCompletionRequestBuilder) ProviderOptions(value map[string]any) AgentCompletionRequestBuilder {
 	return b.with(WithProviderOptions(value))
+}
+
+func (b AgentCompletionRequestBuilder) ToolsContext(value ToolsContext) AgentCompletionRequestBuilder {
+	return b.with(WithToolsContext(value))
+}
+
+func (b AgentCompletionRequestBuilder) RuntimeContext(value RuntimeContext) AgentCompletionRequestBuilder {
+	return b.with(WithRuntimeContext(value))
 }
 
 func (b AgentCompletionRequestBuilder) With(value llm.ProviderOption) AgentCompletionRequestBuilder {
@@ -119,6 +167,6 @@ func (b AgentCompletionRequestBuilder) with(option Option) AgentCompletionReques
 }
 
 func (b AgentCompletionRequestBuilder) callOptions() []Option {
-	options := append([]Option(nil), b.options...)
-	return append(options, WithMessages(b.messages...))
+	options := []Option{WithMessages(b.messages...)}
+	return append(options, b.options...)
 }

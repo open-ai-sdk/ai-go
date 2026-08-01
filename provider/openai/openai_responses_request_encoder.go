@@ -189,6 +189,8 @@ func encodeInput(req llm.Request) ([]inputItem, []aikit.Warning, error) {
 
 func encodeMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 	switch m.Role {
+	case aikit.RoleSystem:
+		return encodeSystemMessage(m)
 	case aikit.RoleUser:
 		return encodeUserMessage(m)
 	case aikit.RoleAssistant:
@@ -198,6 +200,31 @@ func encodeMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 	default:
 		return nil, nil, fmt.Errorf("openai: unsupported message role %q", m.Role)
 	}
+}
+
+// encodeSystemMessage handles instructions already materialized into the
+// conversation by the agent runtime. The Responses API accepts system input
+// items with text content; other message-part kinds have no system equivalent.
+func encodeSystemMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
+	var parts []inputPart
+	var warnings []aikit.Warning
+
+	for _, p := range m.Content {
+		if p.Type == aikit.ContentPartTypeText {
+			parts = append(parts, inputPart{Type: "input_text", Text: p.Text})
+			continue
+		}
+		warnings = append(warnings, aikit.Warning{
+			Type:    "unsupported-setting",
+			Setting: string(p.Type),
+			Message: fmt.Sprintf("openai: unsupported system content part type %q, skipping", p.Type),
+		})
+	}
+
+	if len(parts) == 0 {
+		return nil, warnings, nil
+	}
+	return []inputItem{{Role: "system", Content: parts}}, warnings, nil
 }
 
 func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
