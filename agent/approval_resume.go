@@ -243,7 +243,7 @@ func verifyCompletedApprovalCall(r *run, call *historyApprovalCall, request Appr
 // any tool. It then replaces client-only response parts with provider-facing
 // tool results. Correlation and provenance come from signed message history;
 // the runtime retains no per-request state between invocations.
-func resumeToolApprovals(r *run, params RunParams, history []Message) (output []Message, retErr error) {
+func resumeToolApprovals(r *run, params RunParams, history []Message) ([]Message, error) {
 	if len(params.ToolApproval) == 0 {
 		return history, nil
 	}
@@ -275,8 +275,8 @@ func resumeToolApprovals(r *run, params RunParams, history []Message) (output []
 			return nil, fmt.Errorf("agent: reserve approval capability: %w", err)
 		}
 		defer func() {
-			if releaseErr := reservation.Release(context.Background()); releaseErr != nil {
-				retErr = errors.Join(retErr, fmt.Errorf("agent: release approval reservation: %w", releaseErr))
+			if releaseErr := reservation.Release(context.Background()); releaseErr != nil && r.logger != nil {
+				r.logger.Error("release approval reservation", "error", releaseErr)
 			}
 		}()
 	}
