@@ -278,6 +278,7 @@ func (state *consumeState) consumeText(ev StepEvent) {
 	state.result.Text += ev.TextDelta
 	if state.currentStep != nil {
 		state.currentStep.Text += ev.TextDelta
+		appendStepText(state.currentStep, ev.TextDelta, ev.ThoughtSignature)
 	}
 }
 
@@ -285,7 +286,30 @@ func (state *consumeState) consumeReasoning(ev StepEvent) {
 	state.result.Reasoning += ev.ReasoningDelta
 	if state.currentStep != nil {
 		state.currentStep.Reasoning += ev.ReasoningDelta
+		appendStepReasoning(state.currentStep, ev.ReasoningDelta, ev.ThoughtSignature)
 	}
+}
+
+func appendStepText(step *StepOutput, text, signature string) {
+	if text == "" {
+		return
+	}
+	if n := len(step.Content); n > 0 && step.Content[n-1].Type == ContentPartTypeText && step.Content[n-1].ThoughtSignature == signature {
+		step.Content[n-1].Text += text
+		return
+	}
+	step.Content = append(step.Content, ContentPart{Type: ContentPartTypeText, Text: text, ThoughtSignature: signature})
+}
+
+func appendStepReasoning(step *StepOutput, reasoning, signature string) {
+	if reasoning == "" {
+		return
+	}
+	if n := len(step.Content); n > 0 && step.Content[n-1].Type == ContentPartTypeReasoning && step.Content[n-1].ThoughtSignature == signature {
+		step.Content[n-1].ReasoningText += reasoning
+		return
+	}
+	step.Content = append(step.Content, ContentPart{Type: ContentPartTypeReasoning, ReasoningText: reasoning, ThoughtSignature: signature})
 }
 
 func (state *consumeState) consumeToolResult(ev StepEvent) {
@@ -316,6 +340,14 @@ func handleToolApprovalRequest(event StepEvent, step *StepOutput) {
 		if step.ToolCalls[i].ID == event.ToolCallID {
 			step.ToolCalls[i].ApprovalID = event.ApprovalID
 			step.ToolCalls[i].ApprovalSignature = event.ApprovalSignature
+			for j := range step.Content {
+				part := &step.Content[j]
+				if part.Type == ContentPartTypeToolCall && part.ToolCallID == event.ToolCallID {
+					part.ToolApprovalID = event.ApprovalID
+					part.ToolApprovalSignature = event.ApprovalSignature
+					break
+				}
+			}
 			return
 		}
 	}
@@ -362,6 +394,11 @@ func handleToolCallStart(event StepEvent, step *StepOutput) {
 		Args:             json.RawMessage(event.ToolCallArgsDelta),
 		ThoughtSignature: event.ThoughtSignature,
 	})
+	step.Content = append(step.Content, ContentPart{
+		Type: ContentPartTypeToolCall, ToolCallID: event.ToolCallID,
+		ToolCallName: event.ToolCallName, ToolCallArgs: json.RawMessage(event.ToolCallArgsDelta),
+		ThoughtSignature: event.ThoughtSignature,
+	})
 }
 
 func handleToolCallDelta(event StepEvent, step *StepOutput) {
@@ -371,7 +408,13 @@ func handleToolCallDelta(event StepEvent, step *StepOutput) {
 	for i := range step.ToolCalls {
 		if step.ToolCalls[i].ID == event.ToolCallID {
 			step.ToolCalls[i].Args = append(step.ToolCalls[i].Args, event.ToolCallArgsDelta...)
-			return
+			break
+		}
+	}
+	for i := range step.Content {
+		if step.Content[i].Type == ContentPartTypeToolCall && step.Content[i].ToolCallID == event.ToolCallID {
+			step.Content[i].ToolCallArgs = append(step.Content[i].ToolCallArgs, event.ToolCallArgsDelta...)
+			break
 		}
 	}
 }
@@ -388,6 +431,20 @@ func handleToolCallReady(event StepEvent, step *StepOutput) {
 			}
 			if event.ThoughtSignature != "" {
 				step.ToolCalls[i].ThoughtSignature = event.ThoughtSignature
+			}
+			for j := range step.Content {
+				part := &step.Content[j]
+				if part.Type != ContentPartTypeToolCall || part.ToolCallID != event.ToolCallID {
+					continue
+				}
+				part.ToolCallName = event.ToolCallName
+				if event.ToolCallArgsDelta != "" {
+					part.ToolCallArgs = json.RawMessage(event.ToolCallArgsDelta)
+				}
+				if event.ThoughtSignature != "" {
+					part.ThoughtSignature = event.ThoughtSignature
+				}
+				break
 			}
 			return
 		}
@@ -407,6 +464,17 @@ func handleToolResult(event StepEvent, result *GenerateTextResult, step *StepOut
 				if event.ToolResult.ApprovalID != "" {
 					step.ToolCalls[i].ApprovalID = event.ToolResult.ApprovalID
 					step.ToolCalls[i].ApprovalSignature = event.ToolResult.ApprovalRequestSignature
+				}
+				break
+			}
+		}
+		for i := range step.Content {
+			part := &step.Content[i]
+			if part.Type == ContentPartTypeToolCall && part.ToolCallID == event.ToolResult.ID {
+				part.ToolCallArgs = json.RawMessage(event.ToolResult.Args)
+				if event.ToolResult.ApprovalID != "" {
+					part.ToolApprovalID = event.ToolResult.ApprovalID
+					part.ToolApprovalSignature = event.ToolResult.ApprovalRequestSignature
 				}
 				break
 			}
@@ -459,6 +527,10 @@ func handleFileDelta(event StepEvent, result *GenerateTextResult, step *StepOutp
 	result.Files = append(result.Files, file)
 	if step != nil {
 		step.Files = append(step.Files, file)
+		step.Content = append(step.Content, ContentPart{
+			Type: ContentPartTypeFile, Data: append([]byte(nil), event.FileData...),
+			MediaType: event.FileMediaType,
+		})
 	}
 }
 

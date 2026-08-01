@@ -220,7 +220,13 @@ func collectCompletion(stream <-chan aikit.StreamEvent) (*CompletionResponse, er
 			}
 		case aikit.StreamEventFileDelta:
 			if len(event.FileData) != 0 {
-				response.Files = append(response.Files, GeneratedFile{Data: append([]byte(nil), event.FileData...), MediaType: event.FileMediaType})
+				data := append([]byte(nil), event.FileData...)
+				response.Files = append(response.Files, GeneratedFile{Data: data, MediaType: event.FileMediaType})
+				response.Message.Content = append(response.Message.Content, aikit.ContentPart{
+					Type:      aikit.ContentPartTypeFile,
+					Data:      append([]byte(nil), data...),
+					MediaType: event.FileMediaType,
+				})
 			}
 		case aikit.StreamEventFinish:
 			response.FinishReason = event.FinishReason

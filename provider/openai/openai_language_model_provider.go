@@ -18,17 +18,14 @@ const defaultBaseURL = "https://api.openai.com/v1"
 
 // LanguageModel implements aikit.LanguageModel for the OpenAI Responses API.
 type LanguageModel struct {
-	modelID      string
-	chunkTimeout time.Duration
-	client       *transport.Client
-	clientErr    error
-	uploadClient *transport.Client
-	uploadErr    error
+	modelID   string
+	client    *Client
+	clientErr error
 }
 
 var _ llm.Model = (*LanguageModel)(nil)
 
-// Config holds options for constructing an OpenAI LanguageModel.
+// Config holds options for constructing an OpenAI Client or model.
 type Config struct {
 	APIKey       string
 	BaseURL      string        // optional; defaults to https://api.openai.com/v1
@@ -39,49 +36,11 @@ type Config struct {
 
 // NewLanguageModel creates an OpenAI-backed aikit.LanguageModel using the Responses API.
 func NewLanguageModel(modelID string, cfg Config) *LanguageModel {
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
+	client, err := newClient(cfg, false)
+	if err != nil {
+		return &LanguageModel{modelID: modelID, clientErr: err}
 	}
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = 120 * time.Second
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = transport.NewStreamingClient(timeout)
-	}
-	client, clientErr := transport.NewClient(transport.ClientConfig{
-		BaseURL: base,
-		Headers: http.Header{
-			"Content-Type": []string{"application/json"},
-		},
-		Auth: func(req *http.Request) {
-			req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-		},
-		HTTPClient: httpClient,
-		Provider:   "openai",
-	})
-	uploadHTTPClient := cfg.HTTPClient
-	if uploadHTTPClient == nil {
-		uploadHTTPClient = &http.Client{Timeout: timeout}
-	}
-	uploadClient, uploadErr := transport.NewClient(transport.ClientConfig{
-		BaseURL: base,
-		Auth: func(req *http.Request) {
-			req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-		},
-		HTTPClient: uploadHTTPClient,
-		Provider:   "openai-file-upload",
-	})
-	return &LanguageModel{
-		modelID:      modelID,
-		chunkTimeout: cfg.ChunkTimeout,
-		client:       client,
-		clientErr:    clientErr,
-		uploadClient: uploadClient,
-		uploadErr:    uploadErr,
-	}
+	return client.CompletionModel(modelID)
 }
 
 // ModelID returns the OpenAI model identifier.
@@ -102,12 +61,12 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 	}
 
 	var wrapBody func(io.ReadCloser) io.ReadCloser
-	if m.chunkTimeout > 0 {
+	if m.client.chunkTimeout > 0 {
 		wrapBody = func(body io.ReadCloser) io.ReadCloser {
-			return transport.NewTimeoutReader(body, m.chunkTimeout)
+			return transport.NewTimeoutReader(body, m.client.chunkTimeout)
 		}
 	}
-	return m.client.DoStream(
+	return m.client.responses.DoStream(
 		ctx,
 		httpReq,
 		wrapBody,
@@ -137,7 +96,7 @@ func (m *LanguageModel) buildRequest(ctx context.Context, apiReq responsesReques
 	if m.clientErr != nil {
 		return nil, fmt.Errorf("openai: configure transport: %w", m.clientErr)
 	}
-	httpReq, err := m.client.NewRequest(
+	httpReq, err := m.client.responses.NewRequest(
 		ctx,
 		http.MethodPost,
 		"responses",

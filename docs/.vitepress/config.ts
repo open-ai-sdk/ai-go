@@ -24,6 +24,7 @@ export default defineConfig({
         { text: 'Core concepts', items: [
           { text: 'Generate text', link: '/core/generate-text' },
           { text: 'Direct completions', link: '/core/completions' },
+          { text: 'Providers and clients', link: '/core/providers-and-clients' },
           { text: 'Stream responses', link: '/core/streaming' },
           { text: 'Structured output', link: '/core/structured-output' },
           { text: 'Typed tools', link: '/core/tools' },

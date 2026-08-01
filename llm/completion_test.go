@@ -77,9 +77,9 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 		t.Fatalf("response summary = %#v", response)
 	}
 	parts := response.Message.Content
-	if len(parts) != 4 || parts[0].Text != "before " || parts[1].ReasoningText != "think" ||
+	if len(parts) != 5 || parts[0].Text != "before " || parts[1].ReasoningText != "think" ||
 		parts[1].ThoughtSignature != "sig-1" || parts[2].ToolCallID != "call-1" || parts[2].ToolCallName != "lookup" || string(parts[2].ToolCallArgs) != `{"city":"Hanoi"}` ||
-		parts[3].Text != "after" {
+		parts[3].Text != "after" || parts[4].Type != aikit.ContentPartTypeFile || string(parts[4].Data) != "file" || parts[4].MediaType != "text/plain" {
 		t.Fatalf("ordered message = %#v", response.Message)
 	}
 	response.Usage.Raw["provider"] = "changed"

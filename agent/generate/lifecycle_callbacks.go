@@ -8,12 +8,33 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 	}
 
 	callbacks := &agent.LifecycleCallbacks{OnError: req.OnError}
-	if req.OnStepEnd != nil {
+	var current StepOutput
+	var capturedSteps []StepOutput
+	captureResults := req.OnStepEnd != nil || req.OnEnd != nil
+	if captureResults {
 		callbacks.OnStepEnd = func(event agent.StepEndEvent) {
+			current.Text = event.Text
+			current.Reasoning = event.Reasoning
+			current.ToolCalls = event.ToolCalls
+			current.ToolResults = event.ToolResults
+			current.FinishReason = event.FinishReason
+			current.ProviderMetadata = event.ProviderMetadata
+			current.Warnings = event.Warnings
+			if event.Usage != nil {
+				current.Usage = *event.Usage
+			}
+			current.Response = Response{Messages: ResponseMessagesForStep(current, req.Tools)}
+			completed := snapshotStepOutput(current)
+			capturedSteps = append(capturedSteps, completed)
+			if req.OnStepEnd == nil {
+				return
+			}
 			publicEvent := StepEndEvent{
 				StepNumber:       event.StepNumber,
 				Text:             event.Text,
 				Reasoning:        event.Reasoning,
+				Content:          cloneContentParts(completed.Content),
+				Files:            cloneGeneratedFiles(completed.Files),
 				ToolCalls:        event.ToolCalls,
 				ToolResults:      event.ToolResults,
 				FinishReason:     event.FinishReason,
@@ -21,12 +42,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 				ProviderMetadata: event.ProviderMetadata,
 				Warnings:         event.Warnings,
 			}
-			publicEvent.Response = Response{Messages: ResponseMessagesForStep(StepOutput{
-				Text:        publicEvent.Text,
-				Reasoning:   publicEvent.Reasoning,
-				ToolCalls:   publicEvent.ToolCalls,
-				ToolResults: publicEvent.ToolResults,
-			}, req.Tools)}
+			publicEvent.Response = snapshotResponse(completed.Response)
 			req.OnStepEnd(publicEvent)
 		}
 	}
@@ -47,6 +63,10 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 				if step.Usage != nil {
 					steps[i].Usage = *step.Usage
 				}
+				if i < len(capturedSteps) {
+					steps[i].Content = cloneContentParts(capturedSteps[i].Content)
+					steps[i].Files = cloneGeneratedFiles(capturedSteps[i].Files)
+				}
 				steps[i].Response = Response{Messages: ResponseMessagesForStep(steps[i], req.Tools)}
 			}
 			req.OnEnd(EndEvent{
@@ -60,10 +80,46 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 			})
 		}
 	}
-	if req.OnChunk != nil {
+	if captureResults || req.OnChunk != nil {
 		callbacks.OnChunk = func(event StepEvent) {
-			req.OnChunk(chunkEvent(event))
+			if captureResults {
+				captureLifecycleContent(&current, event)
+			}
+			if req.OnChunk != nil {
+				req.OnChunk(chunkEvent(event))
+			}
 		}
 	}
 	return callbacks
+}
+
+func captureLifecycleContent(current *StepOutput, event StepEvent) {
+	switch event.Type {
+	case StepEventStepStart:
+		*current = StepOutput{}
+	case StepEventTextDelta:
+		current.Text += event.TextDelta
+		appendStepText(current, event.TextDelta, event.ThoughtSignature)
+	case StepEventReasoningDelta:
+		current.Reasoning += event.ReasoningDelta
+		appendStepReasoning(current, event.ReasoningDelta, event.ThoughtSignature)
+	case StepEventToolCallStart:
+		handleToolCallStart(event, current)
+	case StepEventToolCallDelta:
+		handleToolCallDelta(event, current)
+	case StepEventToolCallReady:
+		handleToolCallReady(event, current)
+	case StepEventToolApprovalRequest:
+		handleToolApprovalRequest(event, current)
+	case StepEventFileDelta:
+		if len(event.FileData) == 0 {
+			return
+		}
+		file := GeneratedFile{Data: append([]byte(nil), event.FileData...), MediaType: event.FileMediaType}
+		current.Files = append(current.Files, file)
+		current.Content = append(current.Content, ContentPart{
+			Type: ContentPartTypeFile, Data: append([]byte(nil), event.FileData...),
+			MediaType: event.FileMediaType,
+		})
+	}
 }

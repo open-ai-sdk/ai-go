@@ -98,8 +98,11 @@ type GenerateTextRequest struct {
 
 // StepOutput holds the result of a single tool-loop step.
 type StepOutput struct {
-	Text             string
-	Reasoning        string
+	Text      string
+	Reasoning string
+	// Content preserves assistant output parts in provider stream order,
+	// including mixed text and generated files/images.
+	Content          []ContentPart
 	ToolCalls        []ToolCallOutput
 	ToolResults      []ToolResult
 	Usage            Usage
@@ -154,6 +157,8 @@ type StepEndEvent struct {
 	StepNumber       int
 	Text             string
 	Reasoning        string
+	Content          []ContentPart
+	Files            []GeneratedFile
 	ToolCalls        []ToolCallOutput
 	ToolResults      []ToolResult
 	FinishReason     FinishReason

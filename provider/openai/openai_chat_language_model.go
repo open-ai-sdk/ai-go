@@ -62,18 +62,21 @@ func (chatBackend) RewriteRequest(
 //   - Built-in web search or file inputs
 //   - Responses-native multi-modal output
 func NewChatLanguageModel(modelID string, cfg Config) *ChatLanguageModel {
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
+	client, err := newClient(cfg, false)
+	if err != nil {
+		// Preserve the legacy constructor's deferred-error behavior by using the
+		// existing compatible model constructor for invalid configuration.
+		base := cfg.BaseURL
+		if base == "" {
+			base = defaultBaseURL
+		}
+		return openaicompat.NewModel(openaicompat.Config{
+			Provider: chatBackend{baseURL: base}, ModelID: modelID,
+			APIKey: cfg.APIKey, Timeout: cfg.Timeout,
+			ChunkTimeout: cfg.ChunkTimeout, HTTPClient: cfg.HTTPClient,
+		})
 	}
-	return openaicompat.NewModel(openaicompat.Config{
-		Provider:     chatBackend{baseURL: base},
-		ModelID:      modelID,
-		APIKey:       cfg.APIKey,
-		Timeout:      cfg.Timeout,
-		ChunkTimeout: cfg.ChunkTimeout,
-		HTTPClient:   cfg.HTTPClient,
-	})
+	return client.ChatModel(modelID)
 }
 
 // parseChatProviderOptions extracts ChatProviderOptions from a generic provider
