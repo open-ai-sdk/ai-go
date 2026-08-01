@@ -1,26 +1,29 @@
 package ai
 
-import "github.com/open-ai-sdk/ai-go/aitypes"
+import (
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/tool"
+)
 
 // APIError is a provider HTTP failure surfaced as a typed value; the raw
-// response body is never embedded. See aitypes.APIError.
-type APIError = aitypes.APIError
+// response body is never embedded. See aikit.APIError.
+type APIError = aikit.APIError
 
 // Sentinel errors for errors.Is classification. *APIError.Is maps status codes
 // to these, so consumers write errors.Is(err, ai.ErrRateLimited).
 var (
-	ErrRateLimited   = aitypes.ErrRateLimited
-	ErrContextLength = aitypes.ErrContextLength
-	ErrUnauthorized  = aitypes.ErrUnauthorized
-	ErrNoSuchTool    = aitypes.ErrNoSuchTool
+	ErrRateLimited   = aikit.ErrRateLimited
+	ErrContextLength = aikit.ErrContextLength
+	ErrUnauthorized  = aikit.ErrUnauthorized
+	ErrNoSuchTool    = tool.ErrNoSuchTool
 )
 
 // NewAPIError builds a typed provider error. Providers usually call
-// httputil.APIErrorFromResponse instead, which also parses headers and body.
+// transport.APIErrorFromResponse instead, which also parses headers and body.
 func NewAPIError(provider string, statusCode int, wrapped error) *APIError {
-	return aitypes.NewAPIError(provider, statusCode, wrapped)
+	return aikit.NewAPIError(provider, statusCode, wrapped)
 }
 
 // RetryableStatusCode reports whether an HTTP status code is transient and worth
 // retrying. Exported for provider implementations.
-func RetryableStatusCode(code int) bool { return aitypes.RetryableStatusCode(code) }
+func RetryableStatusCode(code int) bool { return aikit.RetryableStatusCode(code) }

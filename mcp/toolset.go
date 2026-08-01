@@ -6,69 +6,57 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
-// MCPToolExecutor implements ai.ToolExecutor by routing tool calls to the
-// correct MCP server client based on a canonical-name routing table.
-type MCPToolExecutor struct {
-	clients map[string]*Client // serverName -> client
-	routing map[string]toolRoute
-}
-
-// toolRoute maps a canonical tool name back to the originating server and
-// the tool's original (unqualified) name.
-type toolRoute struct {
-	serverName string
-	toolName   string
-}
-
-// Execute looks up the canonical tool name in the routing table and forwards
-// the call to the appropriate MCP server client.
-func (e *MCPToolExecutor) Execute(ctx context.Context, canonicalName, argsJSON string) (string, error) {
-	route, ok := e.routing[canonicalName]
-	if !ok {
-		return "", fmt.Errorf("mcp.MCPToolExecutor: unknown tool %q", canonicalName)
-	}
-
-	client, ok := e.clients[route.serverName]
-	if !ok {
-		return "", fmt.Errorf("mcp.MCPToolExecutor: no client for server %q", route.serverName)
-	}
-
+func invokeRemoteTool(
+	ctx context.Context,
+	client *Client,
+	serverName, remoteName, canonicalName string,
+	input json.RawMessage,
+) (json.RawMessage, error) {
 	var args map[string]any
-	if argsJSON != "" && argsJSON != "{}" {
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("mcp.MCPToolExecutor: parse args for %q: %w", canonicalName, err)
+	if len(input) > 0 && string(input) != "{}" {
+		if err := json.Unmarshal(input, &args); err != nil {
+			return nil, &tool.InputError{
+				ToolName: canonicalName,
+				Input:    append(json.RawMessage(nil), input...),
+				Cause:    err,
+			}
 		}
 	}
 
-	result, err := client.CallTool(ctx, route.toolName, args)
+	result, err := client.CallTool(ctx, remoteName, args)
 	if err != nil {
-		return "", fmt.Errorf("mcp.MCPToolExecutor: call %q on server %q: %w", route.toolName, route.serverName, err)
+		return nil, &tool.ExecutionError{
+			ToolName: canonicalName,
+			Cause: fmt.Errorf(
+				"mcp: call %q on server %q: %w",
+				remoteName,
+				serverName,
+				err,
+			),
+		}
 	}
-
 	if result.IsError {
-		return "", fmt.Errorf(
-			"mcp.MCPToolExecutor: tool %q returned error: %s",
-			canonicalName,
-			contentToString(result.Content),
-		)
+		return nil, &tool.ExecutionError{
+			ToolName: canonicalName,
+			Cause: fmt.Errorf(
+				"mcp: remote tool returned error: %s",
+				contentToString(result.Content),
+			),
+		}
 	}
-
-	return contentToString(result.Content), nil
+	return json.RawMessage(contentToString(result.Content)), nil
 }
 
-// ToolSetFromClients creates an ai.ToolSet from multiple named MCP server
+// ToolSetFromClients creates a tool.Set from multiple named MCP server
 // clients. Each tool is given a server-qualified canonical name using the
 // format sanitize(serverName) + "_" + sanitize(toolName). The returned
-// executor routes calls back to the correct server.
-func ToolSetFromClients(clients map[string]*Client) (*ai.ToolSet, error) {
-	executor := &MCPToolExecutor{
-		clients: clients,
-		routing: make(map[string]toolRoute),
-	}
-	var defs []ai.ToolDefinition
+// tools route calls back to the correct server.
+func ToolSetFromClients(clients map[string]*Client) (*tool.Set, error) {
+	seen := make(map[string]struct{})
+	var tools []tool.Invokable
 
 	for serverName, client := range clients {
 		res, err := client.ListTools(context.Background())
@@ -76,34 +64,41 @@ func ToolSetFromClients(clients map[string]*Client) (*ai.ToolSet, error) {
 			return nil, fmt.Errorf("mcp.ToolSetFromClients: list tools from %q: %w", serverName, err)
 		}
 
-		for _, tool := range res.Tools {
-			canonical := QualifiedName(serverName, tool.Name)
+		for _, remoteTool := range res.Tools {
+			canonical := QualifiedName(serverName, remoteTool.Name)
 
-			if _, exists := executor.routing[canonical]; exists {
+			if _, exists := seen[canonical]; exists {
 				return nil, fmt.Errorf("mcp.ToolSetFromClients: duplicate tool name %q", canonical)
 			}
+			seen[canonical] = struct{}{}
 
-			executor.routing[canonical] = toolRoute{
-				serverName: serverName,
-				toolName:   tool.Name,
+			remote, err := tool.NewDynamic(
+				canonical,
+				remoteTool.Description,
+				remoteTool.InputSchema,
+				func(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
+					return invokeRemoteTool(
+						ctx,
+						client,
+						serverName,
+						remoteTool.Name,
+						canonical,
+						input,
+					)
+				},
+			)
+			if err != nil {
+				return nil, fmt.Errorf("mcp.ToolSetFromClients: create tool %q: %w", canonical, err)
 			}
-
-			defs = append(defs, ai.ToolDefinition{
-				Name:        canonical,
-				Description: tool.Description,
-				InputSchema: tool.InputSchema,
-			})
+			tools = append(tools, remote)
 		}
 	}
 
-	return &ai.ToolSet{
-		Definitions: defs,
-		Executor:    executor,
-	}, nil
+	return tool.NewSet(tools...)
 }
 
-// ToolSetFromClient creates an ai.ToolSet from a single named MCP client.
-func ToolSetFromClient(serverName string, client *Client) (*ai.ToolSet, error) {
+// ToolSetFromClient creates a tool.Set from a single named MCP client.
+func ToolSetFromClient(serverName string, client *Client) (*tool.Set, error) {
 	return ToolSetFromClients(map[string]*Client{serverName: client})
 }
 

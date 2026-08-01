@@ -188,56 +188,6 @@ func TestEncodeNativeTools_GoogleSearchEnabledNoConfig(t *testing.T) {
 	}
 }
 
-func TestEncodeNativeTools_GoogleSearchWithFullConfig(t *testing.T) {
-	threshold := 0.65
-	opts := ProviderOptions{
-		EnableGoogleSearch: true,
-		GoogleSearchConfig: &GoogleSearchConfig{
-			DynamicRetrievalThreshold: &threshold,
-			SearchTypes:               []string{"web", "image"},
-			TimeRangeFilter: &TimeRangeFilter{
-				StartTime: "2024-01-01T00:00:00Z",
-				EndTime:   "2024-12-31T23:59:59Z",
-			},
-		},
-	}
-
-	result := encodeNativeTools(nil, nil, opts)
-
-	if len(result.Tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(result.Tools))
-	}
-
-	m := jsonRoundTrip(t, result)
-	toolsArr := m["tools"].([]any)
-	searchTool := toolsArr[0].(map[string]any)
-	searchCfg := searchTool["googleSearch"].(map[string]any)
-
-	// Dynamic retrieval config.
-	dynCfg := searchCfg["dynamic_retrieval_config"].(map[string]any)
-	if dynCfg["mode"] != "MODE_DYNAMIC" {
-		t.Errorf("expected mode=MODE_DYNAMIC, got %v", dynCfg["mode"])
-	}
-	if dynCfg["dynamic_threshold"] != threshold {
-		t.Errorf("expected dynamic_threshold=%v, got %v", threshold, dynCfg["dynamic_threshold"])
-	}
-
-	// Search types.
-	searchTypes := searchCfg["search_types"].([]any)
-	if len(searchTypes) != 2 || searchTypes[0] != "web" || searchTypes[1] != "image" {
-		t.Errorf("expected search_types=[web image], got %v", searchTypes)
-	}
-
-	// Time range filter.
-	trf := searchCfg["time_range_filter"].(map[string]any)
-	if trf["start_time"] != "2024-01-01T00:00:00Z" {
-		t.Errorf("expected start_time=2024-01-01T00:00:00Z, got %v", trf["start_time"])
-	}
-	if trf["end_time"] != "2024-12-31T23:59:59Z" {
-		t.Errorf("expected end_time=2024-12-31T23:59:59Z, got %v", trf["end_time"])
-	}
-}
-
 func TestEncodeNativeTools_FunctionToolsPlusGoogleSearch(t *testing.T) {
 	tools := []ai.ToolDefinition{
 		{Name: "search_docs", Description: "Search documents", InputSchema: map[string]any{"type": "object"}},
@@ -345,12 +295,8 @@ func TestEncodeNativeTools_FullCombination(t *testing.T) {
 		{Name: "calc", Description: "Calculator", InputSchema: map[string]any{"type": "object"}},
 	}
 	tc := ai.ToolChoiceRequired
-	threshold := 0.5
 	opts := ProviderOptions{
 		EnableGoogleSearch: true,
-		GoogleSearchConfig: &GoogleSearchConfig{
-			DynamicRetrievalThreshold: &threshold,
-		},
 	}
 
 	result := encodeNativeTools(tools, &tc, opts)

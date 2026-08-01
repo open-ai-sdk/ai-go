@@ -1,10 +1,11 @@
+// ai-go: file-length-justification: keeps MCP streamable-HTTP session, reconnect, and protocol-version state in one transport.
 package mcp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // RedirectPolicy controls whether the transport follows HTTP redirects.
@@ -111,11 +114,11 @@ func (t *HTTPTransport) Start(ctx context.Context) error {
 		return fmt.Errorf("mcp: http transport already started")
 	}
 
-	_, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancel(ctx)
 	t.cancel = cancel
 	t.started = true
 
-	go t.openInboundSSE(ctx)
+	go t.openInboundSSE(streamCtx)
 
 	return nil
 }
@@ -271,58 +274,36 @@ func (t *HTTPTransport) handleJSONResponse(body io.Reader) error {
 func (t *HTTPTransport) readSSEStream(body io.ReadCloser) {
 	defer body.Close()
 
-	scanner := bufio.NewScanner(body)
-	var eventType string
-	var dataLines []string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if line == "" {
-			// Empty line = end of event.
-			if len(dataLines) > 0 {
-				data := strings.Join(dataLines, "\n")
-				if eventType == "" || eventType == "message" {
-					var msg JSONRPCMessage
-					if err := json.Unmarshal([]byte(data), &msg); err != nil {
-						if t.onError != nil {
-							t.onError(fmt.Errorf("mcp: parse sse message: %w", err))
-						}
-					} else if t.onMessage != nil {
-						t.onMessage(msg)
-					}
-				}
+	reader := transport.NewSSEReader(body)
+	for {
+		frame, err := reader.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) && t.onError != nil {
+				t.onError(fmt.Errorf("mcp: read sse stream: %w", err))
 			}
-			eventType = ""
-			dataLines = nil
-			continue
+			return
 		}
 
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		} else if strings.HasPrefix(line, "data:") {
-			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		} else if strings.HasPrefix(line, "id:") {
-			id := strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+		if id := strings.TrimSpace(frame.ID); id != "" {
 			t.mu.Lock()
 			t.lastEventID = id
 			t.mu.Unlock()
 		}
-		// Ignore "retry:" and comment lines.
-	}
 
-	// Process any trailing event without a final blank line.
-	if len(dataLines) > 0 {
-		data := strings.Join(dataLines, "\n")
-		if eventType == "" || eventType == "message" {
-			var msg JSONRPCMessage
-			if err := json.Unmarshal([]byte(data), &msg); err != nil {
-				if t.onError != nil {
-					t.onError(fmt.Errorf("mcp: parse sse message: %w", err))
-				}
-			} else if t.onMessage != nil {
-				t.onMessage(msg)
+		eventType := strings.TrimSpace(frame.Event)
+		data := strings.TrimSpace(frame.Data)
+		if data == "" || (eventType != "" && eventType != "message") {
+			continue
+		}
+		var msg JSONRPCMessage
+		if err := json.Unmarshal([]byte(data), &msg); err != nil {
+			if t.onError != nil {
+				t.onError(fmt.Errorf("mcp: parse sse message: %w", err))
 			}
+			continue
+		}
+		if t.onMessage != nil {
+			t.onMessage(msg)
 		}
 	}
 }
@@ -356,7 +337,36 @@ func (t *HTTPTransport) doOpenInboundSSE(ctx context.Context) (reconnect bool) {
 		req.Header.Set("Last-Event-ID", lastID)
 	}
 
-	resp, err := t.client.Do(req) //nolint:bodyclose // closed by deferred resp.Body.Close below
+	reconnect = true
+	err = transport.HandleResponse(t.client, req, func(resp *http.Response) error {
+		if sid := resp.Header.Get("mcp-session-id"); sid != "" {
+			t.mu.Lock()
+			t.sessionID = sid
+			t.mu.Unlock()
+		}
+
+		// 405 means server doesn't support inbound SSE — that's fine.
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			reconnect = false
+			return nil
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if t.onError != nil {
+				t.onError(fmt.Errorf("mcp: sse get status %d", resp.StatusCode))
+			}
+			reconnect = false
+			return nil
+		}
+
+		t.mu.Lock()
+		t.inboundCloseFunc = func() { _ = resp.Body.Close() }
+		t.reconnectAttempts = 0
+		t.mu.Unlock()
+
+		t.readSSEStream(resp.Body)
+		return nil
+	})
 	if err != nil {
 		if ctx.Err() != nil {
 			return false // context cancelled
@@ -366,36 +376,7 @@ func (t *HTTPTransport) doOpenInboundSSE(ctx context.Context) (reconnect bool) {
 		}
 		return true
 	}
-	defer resp.Body.Close()
-
-	// Capture session ID.
-	if sid := resp.Header.Get("mcp-session-id"); sid != "" {
-		t.mu.Lock()
-		t.sessionID = sid
-		t.mu.Unlock()
-	}
-
-	// 405 means server doesn't support inbound SSE — that's fine.
-	if resp.StatusCode == http.StatusMethodNotAllowed {
-		return false
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if t.onError != nil {
-			t.onError(fmt.Errorf("mcp: sse get status %d", resp.StatusCode))
-		}
-		return false
-	}
-
-	t.mu.Lock()
-	t.inboundCloseFunc = func() { resp.Body.Close() }
-	t.reconnectAttempts = 0
-	t.mu.Unlock()
-
-	t.readSSEStream(resp.Body)
-
-	// Stream ended — attempt reconnection.
-	return true
+	return reconnect
 }
 
 // scheduleReconnect retries the inbound SSE connection with exponential backoff.

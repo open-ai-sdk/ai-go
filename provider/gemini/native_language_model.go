@@ -8,14 +8,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/httputil"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-// NativeLanguageModel implements ai.LanguageModel using the native Gemini API
+// NativeLanguageModel implements aikit.LanguageModel using the native Gemini API
 // (:streamGenerateContent endpoint). Unlike the OpenAI-compatible LanguageModel,
 // this provider fully supports Google Search grounding, native thinking config,
 // and other Gemini-only features that are unavailable via the OpenAI compatibility
@@ -23,12 +23,16 @@ const nativeBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 //
 // Use NewNativeLanguageModel to construct an instance.
 type NativeLanguageModel struct {
-	modelID string
-	cfg     Config
-	client  *http.Client
+	modelID      string
+	cfg          Config
+	chunkTimeout time.Duration
+	client       *transport.Client
+	clientErr    error
 }
 
-// NewNativeLanguageModel creates a Gemini-backed ai.LanguageModel that uses the
+var _ llm.Model = (*NativeLanguageModel)(nil)
+
+// NewNativeLanguageModel creates a Gemini-backed aikit.LanguageModel that uses the
 // native Gemini API directly (not the OpenAI-compatible endpoint).
 //
 // Use this when you need features like Google Search grounding or native thinking
@@ -39,12 +43,31 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = nativeBaseURL
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = transport.NewStreamingClient(timeout)
+	}
+	client, clientErr := transport.NewClient(transport.ClientConfig{
+		BaseURL: baseURL,
+		Headers: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Auth: func(req *http.Request) {
+			req.Header.Set("x-goog-api-key", cfg.APIKey)
+		},
+		HTTPClient: httpClient,
+		Provider:   "gemini-native",
+	})
 	return &NativeLanguageModel{
-		modelID: modelID,
-		cfg:     cfg,
-		// Streaming path: no client-wide timeout (it would cap the whole SSE
-		// exchange); cfg.Timeout becomes a response-header deadline instead.
-		client: httputil.NewStreamingClient(timeout),
+		modelID:      modelID,
+		cfg:          cfg,
+		chunkTimeout: cfg.ChunkTimeout,
+		client:       client,
+		clientErr:    clientErr,
 	}
 }
 
@@ -52,8 +75,11 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 func (m *NativeLanguageModel) ModelID() string { return m.modelID }
 
 // Stream sends a streaming request to the native Gemini API and returns a
-// channel of normalized ai.StreamEvents.
-func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
+// channel of normalized aikit.StreamEvents.
+func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aikit.StreamEvent, error) {
+	if _, err := resolveProviderOptions(req.ProviderOptions); err != nil {
+		return nil, err
+	}
 	// Build native request body.
 	nr := encodeNativeRequest(req)
 
@@ -63,27 +89,30 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	nr.Tools = toolResult.Tools
 	nr.ToolConfig = toolResult.ToolConfig
 
-	// Generate warnings for unsupported option combinations.
-	warnings := warningsForRequest(m.modelID, req)
-
 	body, err := json.Marshal(nr)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: marshal request: %w", err)
 	}
 
-	baseURL := m.cfg.BaseURL
-	if baseURL == "" {
-		baseURL = nativeBaseURL
+	if m.clientErr != nil {
+		return nil, fmt.Errorf(
+			"gemini-native: configure transport: %w",
+			m.clientErr,
+		)
 	}
-	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse", baseURL, m.modelID)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	target := fmt.Sprintf(
+		"models/%s:streamGenerateContent?alt=sse",
+		m.modelID,
+	)
+	httpReq, err := m.client.NewRequest(
+		ctx,
+		http.MethodPost,
+		target,
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: build http request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", m.cfg.APIKey)
-
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-native: http request: %w", err)
@@ -91,47 +120,11 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req ai.LanguageModelRe
 	if resp.StatusCode != http.StatusOK {
 		// Typed error carrying status/code/message/request-ID/Retry-After; the
 		// raw body is parsed then discarded, never embedded.
-		return nil, httputil.APIErrorFromResponse(ctx, "gemini-native", resp)
+		return nil, transport.APIErrorFromResponse(ctx, "gemini-native", resp)
 	}
 
-	raw := make(chan ai.StreamEvent, 64)
-	go func() {
-		defer resp.Body.Close()
-		decodeNativeSSEStream(ctx, resp.Body, raw)
-	}()
-
-	if len(warnings) == 0 {
-		return httputil.GuardStream(ctx, raw), nil
+	if m.chunkTimeout > 0 {
+		resp.Body = transport.NewTimeoutReader(resp.Body, m.chunkTimeout)
 	}
-
-	// Wrap the channel to inject warnings into the first finish event. Sends are
-	// ctx-guarded and the upstream is drained on cancel, matching the Stream
-	// context contract.
-	out := make(chan ai.StreamEvent, 64)
-	go func() {
-		defer close(out)
-		// A panic while injecting warnings surfaces as an error event
-		// (ctx-guarded) before close instead of crashing the process.
-		defer safego.Recover(nil, func(err error) {
-			select {
-			case out <- ai.StreamEvent{Type: ai.StreamEventError, Error: err}:
-			case <-ctx.Done():
-			}
-		})
-		finishInjected := false
-		for ev := range raw {
-			if !finishInjected && ev.Type == ai.StreamEventFinish {
-				ev.Warnings = append(warnings, ev.Warnings...)
-				finishInjected = true
-			}
-			select {
-			case out <- ev:
-			case <-ctx.Done():
-				for range raw {
-				}
-				return
-			}
-		}
-	}()
-	return out, nil
+	return transport.Stream(ctx, resp, decodeNativeSSEStream), nil
 }

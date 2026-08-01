@@ -1,0 +1,559 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// mockModel simulates a Model returning pre-canned event sequences.
+type mockModel struct {
+	calls [][]StreamEvent
+	idx   int
+}
+
+func (m *mockModel) ModelID() string { return "mock" }
+
+func (m *mockModel) Stream(_ context.Context, _ Request) (<-chan StreamEvent, error) {
+	ch := make(chan StreamEvent, 32)
+	events := m.calls[m.idx]
+	m.idx++
+	go func() {
+		defer close(ch)
+		for _, e := range events {
+			ch <- e
+		}
+	}()
+	return ch, nil
+}
+
+// mockExecutor records calls and returns fixed results.
+type mockExecutor struct {
+	results map[string]string
+	called  []string
+	args    []string
+}
+
+func (e *mockExecutor) Execute(_ context.Context, name, args string) (string, error) {
+	e.called = append(e.called, name)
+	e.args = append(e.args, args)
+	if r, ok := e.results[name]; ok {
+		return r, nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func textEvt(s string) StreamEvent {
+	return StreamEvent{Type: StreamEventTextDelta, TextDelta: s}
+}
+
+func toolCallEvt(idx int, id, name, args string) StreamEvent {
+	return StreamEvent{
+		Type:              StreamEventToolCallDelta,
+		ToolCallIndex:     idx,
+		ToolCallID:        id,
+		ToolCallName:      name,
+		ToolCallArgsDelta: args,
+	}
+}
+
+func finishEvt(r FinishReason) StreamEvent {
+	return StreamEvent{Type: StreamEventFinish, FinishReason: r}
+}
+
+func TestRunLoop_TextOnly(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{textEvt("Hello "), textEvt("world"), finishEvt(FinishReasonStop)},
+	}}
+
+	ch := Run(context.Background(), RunParams{Model: model, MaxSteps: 5})
+
+	var texts []string
+	var gotDone bool
+	for ev := range ch {
+		switch ev.Type {
+		case StepEventTextDelta:
+			texts = append(texts, ev.TextDelta)
+		case StepEventDone:
+			gotDone = true
+		case StepEventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if strings.Join(texts, "") != "Hello world" {
+		t.Errorf("unexpected text: %q", strings.Join(texts, ""))
+	}
+	if !gotDone {
+		t.Error("expected StepEventDone")
+	}
+}
+
+func TestRunLoop_SingleToolCall(t *testing.T) {
+	exec := &mockExecutor{results: map[string]string{"get_time": `{"time":"12:00"}`}}
+
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc1", "get_time", `{"tz":"UTC"}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("It is 12:00 UTC"), finishEvt(FinishReasonStop)},
+	}}
+
+	ch := Run(context.Background(), RunParams{
+		Model:    model,
+		Tools:    &ToolSet{Executor: exec},
+		MaxSteps: 5,
+	})
+
+	var stepStarts, toolResults, doneCount int
+	for ev := range ch {
+		switch ev.Type {
+		case StepEventStepStart:
+			stepStarts++
+		case StepEventToolResult:
+			toolResults++
+		case StepEventDone:
+			doneCount++
+		case StepEventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if stepStarts != 2 {
+		t.Errorf("expected 2 step starts, got %d", stepStarts)
+	}
+	if toolResults != 1 {
+		t.Errorf("expected 1 tool result, got %d", toolResults)
+	}
+	if doneCount != 1 {
+		t.Errorf("expected 1 done event, got %d", doneCount)
+	}
+	if len(exec.called) != 1 || exec.called[0] != "get_time" {
+		t.Errorf("expected get_time to be called, got %v", exec.called)
+	}
+}
+
+func TestRunLoop_RepairToolCall_UnknownToolName(t *testing.T) {
+	exec := &mockExecutor{results: map[string]string{"search": `{"ok":true}`}}
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc1", "Search", `{"q":"golang"}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("done"), finishEvt(FinishReasonStop)},
+	}}
+
+	var invalidCount int
+	var repairedResult *ToolResult
+	ch := Run(context.Background(), RunParams{
+		Model: model,
+		Request: Request{
+			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "search"}}}},
+		},
+		Tools: &ToolSet{
+			Definitions: []ToolDefinition{{Name: "search"}},
+			Executor:    exec,
+		},
+		RepairToolCall: func(_ context.Context, input ToolCallRepairContext) (*ToolCallInfo, error) {
+			if input.ToolCall.Name != "Search" {
+				return nil, errors.New("expected original tool call name to be Search")
+			}
+			var noSuchToolErr *NoSuchToolError
+			if !errors.As(input.Error, &noSuchToolErr) {
+				return nil, errors.New("expected NoSuchToolError during repair")
+			}
+			return &ToolCallInfo{
+				ID:   input.ToolCall.ID,
+				Name: "search",
+			}, nil
+		},
+		MaxSteps: 5,
+	})
+
+	for ev := range ch {
+		switch ev.Type {
+		case StepEventToolCallInvalid:
+			invalidCount++
+		case StepEventToolResult:
+			repairedResult = ev.ToolResult
+		case StepEventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if invalidCount != 0 {
+		t.Fatalf("expected repaired tool call to avoid invalid events, got %d", invalidCount)
+	}
+	if repairedResult == nil {
+		t.Fatal("expected repaired tool result")
+	}
+	if repairedResult.Name != "search" {
+		t.Fatalf("expected repaired tool result to use search, got %q", repairedResult.Name)
+	}
+	if len(exec.called) != 1 || exec.called[0] != "search" {
+		t.Fatalf("expected repaired tool name to execute, got %v", exec.called)
+	}
+	if len(exec.args) != 1 || exec.args[0] != `{"q":"golang"}` {
+		t.Fatalf("expected repaired execution to preserve args, got %v", exec.args)
+	}
+}
+
+func TestRunLoop_RepairToolCall_HistoryUsesRepairedToolCall(t *testing.T) {
+	exec := &mockExecutor{results: map[string]string{"search": `{"ok":true}`}}
+	model := &recordingModel{mockModel: mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc1", "Search", `{"q":"golang"}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("done"), finishEvt(FinishReasonStop)},
+	}}}
+
+	ch := Run(context.Background(), RunParams{
+		Model: model,
+		Request: Request{
+			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "search"}}}},
+		},
+		Tools: &ToolSet{
+			Definitions: []ToolDefinition{{Name: "search"}},
+			Executor:    exec,
+		},
+		RepairToolCall: func(_ context.Context, input ToolCallRepairContext) (*ToolCallInfo, error) {
+			return &ToolCallInfo{Name: "search"}, nil
+		},
+		MaxSteps: 5,
+	})
+
+	for ev := range ch {
+		if ev.Type == StepEventError {
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if len(model.requests) != 2 {
+		t.Fatalf("expected 2 model requests, got %d", len(model.requests))
+	}
+	if len(model.requests[1].Messages) < 3 {
+		t.Fatalf("expected second request to include tool history, got %d messages", len(model.requests[1].Messages))
+	}
+
+	assistant := model.requests[1].Messages[len(model.requests[1].Messages)-2]
+	if assistant.Role != "assistant" {
+		t.Fatalf("expected assistant history message, got %q", assistant.Role)
+	}
+	if len(assistant.Content) != 1 || assistant.Content[0].Type != "tool_call" {
+		t.Fatalf("expected assistant tool-call history, got %+v", assistant.Content)
+	}
+	if assistant.Content[0].ToolCallName != "search" {
+		t.Fatalf("expected repaired tool-call name in history, got %q", assistant.Content[0].ToolCallName)
+	}
+	if string(assistant.Content[0].ToolCallArgs) != `{"q":"golang"}` {
+		t.Fatalf("expected original args preserved in repaired history, got %q", assistant.Content[0].ToolCallArgs)
+	}
+
+	toolMsg := model.requests[1].Messages[len(model.requests[1].Messages)-1]
+	if toolMsg.Role != "tool" {
+		t.Fatalf("expected tool history message, got %q", toolMsg.Role)
+	}
+	if toolMsg.Content[0].ToolResultName != "search" {
+		t.Fatalf("expected repaired tool result name in history, got %q", toolMsg.Content[0].ToolResultName)
+	}
+}
+
+func TestRunLoop_IsStepCount(t *testing.T) {
+	exec := &mockExecutor{}
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc1", "search", `{"q":"a"}`), finishEvt(FinishReasonToolCalls)},
+		{toolCallEvt(0, "tc2", "search", `{"q":"b"}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("done"), finishEvt(FinishReasonStop)},
+	}}
+
+	stopAfter1 := StopCondition(func(step int, _ *StepResult) bool { return step >= 1 })
+
+	ch := Run(context.Background(), RunParams{
+		Model:    model,
+		Tools:    &ToolSet{Executor: exec},
+		StopWhen: stopAfter1,
+		MaxSteps: 10,
+	})
+
+	var stepEnds int
+	for ev := range ch {
+		if ev.Type == StepEventStepEnd {
+			stepEnds++
+		}
+		if ev.Type == StepEventError {
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if stepEnds != 1 {
+		t.Errorf("expected 1 step end (stopped early), got %d", stepEnds)
+	}
+}
+
+func TestRunLoop_MaxStepsExhausted(t *testing.T) {
+	// When maxSteps is hit with pending tool_calls, the loop exits honestly
+	// with the last step's finish reason (ToolCalls). No forced "final text"
+	// pass is fired. Caller decides how to
+	// continue (bump budget, call again with tool_choice=none, etc.).
+	exec := &mockExecutor{}
+	calls := make([][]StreamEvent, 3) // exactly 3 tool-call steps, nothing more
+	for i := 0; i < 3; i++ {
+		calls[i] = []StreamEvent{
+			toolCallEvt(0, "tc", "loop", `{}`),
+			finishEvt(FinishReasonToolCalls),
+		}
+	}
+	model := &mockModel{calls: calls}
+
+	ch := Run(context.Background(), RunParams{
+		Model:    model,
+		Tools:    &ToolSet{Executor: exec},
+		MaxSteps: 3,
+	})
+
+	var doneCount, stepStarts, stepEnds int
+	var lastFinish FinishReason
+	for ev := range ch {
+		switch ev.Type {
+		case StepEventStepStart:
+			stepStarts++
+		case StepEventStepEnd:
+			stepEnds++
+			lastFinish = ev.FinishReason
+		case StepEventDone:
+			doneCount++
+		case StepEventError:
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+	if doneCount != 1 {
+		t.Errorf("expected 1 done event, got %d", doneCount)
+	}
+	if stepStarts != 3 {
+		t.Errorf("expected exactly 3 step starts (no forced final pass), got %d", stepStarts)
+	}
+	if stepEnds != 3 {
+		t.Errorf("expected exactly 3 step ends, got %d", stepEnds)
+	}
+	if lastFinish != FinishReasonToolCalls {
+		t.Errorf("expected last step finish=ToolCalls (honest exit), got %v", lastFinish)
+	}
+}
+
+func TestRunLoop_NonPositiveMaxStepsIsUnbounded(t *testing.T) {
+	for _, maxSteps := range []int{0, -1} {
+		t.Run(fmt.Sprintf("max_steps_%d", maxSteps), func(t *testing.T) {
+			model := &mockModel{calls: [][]StreamEvent{
+				{toolCallEvt(0, "tc1", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+				{toolCallEvt(0, "tc2", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+				{toolCallEvt(0, "tc3", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+			}}
+			ch := Run(context.Background(), RunParams{
+				Model:    model,
+				Tools:    &ToolSet{Executor: &mockExecutor{}},
+				StopWhen: IsStepCount(3),
+				MaxSteps: maxSteps,
+			})
+
+			var stepEnds int
+			for event := range ch {
+				if event.Type == StepEventStepEnd {
+					stepEnds++
+				}
+				if event.Type == StepEventError {
+					t.Fatalf("unexpected error: %v", event.Error)
+				}
+			}
+			if stepEnds != 3 {
+				t.Fatalf("completed steps = %d, want 3", stepEnds)
+			}
+			if model.idx != 3 {
+				t.Fatalf("model calls = %d, want 3", model.idx)
+			}
+		})
+	}
+}
+
+// TestRunLoop_ToolsNeverStripped is the regression guard for the Harmony-leak
+// family of bugs (Thai / Chinese / private-use-unicode garbage appearing in
+// delta.content when the gateway loses tool schema context). Verifies that no
+// model call inside the tool loop is issued with a smaller tools slice than
+// what the caller supplied — neither during normal steps nor at maxSteps
+// exhaustion. Every call sees the same stepTools slice unless the caller
+// explicitly filters via
+// PrepareStep.ActiveTools.
+func TestRunLoop_ToolsNeverStripped(t *testing.T) {
+	exec := &mockExecutor{}
+	// 2 tool-call steps, then one text step. No emitFinalGeneration should fire.
+	calls := [][]StreamEvent{
+		{toolCallEvt(0, "tc1", "search", `{}`), finishEvt(FinishReasonToolCalls)},
+		{toolCallEvt(0, "tc2", "search", `{}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("final answer"), finishEvt(FinishReasonStop)},
+	}
+	rm := &recordingModel{mockModel: mockModel{calls: calls}}
+
+	inputTools := []ToolDefinition{
+		{Name: "search"},
+		{Name: "fetch"},
+		{Name: "browse"},
+	}
+
+	ch := Run(context.Background(), RunParams{
+		Model: rm,
+		Request: Request{
+			Tools:    inputTools,
+			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "hi"}}}},
+		},
+		Tools:    &ToolSet{Definitions: inputTools, Executor: exec},
+		MaxSteps: 5,
+	})
+	for ev := range ch {
+		if ev.Type == StepEventError {
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if len(rm.requests) != 3 {
+		t.Fatalf("expected 3 model calls (2 tool + 1 text), got %d", len(rm.requests))
+	}
+	for i, r := range rm.requests {
+		if len(r.Tools) != len(inputTools) {
+			t.Errorf("step %d: tools stripped — expected %d tools, got %d",
+				i, len(inputTools), len(r.Tools))
+		}
+	}
+}
+
+// TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr verifies the OnEnd
+// callback receives the actual last-step streamResult (FinishReasonToolCalls)
+// instead of a faked FinishReasonStop that the old emitFinalGeneration path
+// used to synthesize.
+func TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr(t *testing.T) {
+	exec := &mockExecutor{}
+	calls := [][]StreamEvent{
+		{toolCallEvt(0, "tc", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+		{toolCallEvt(0, "tc", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
+	}
+	model := &mockModel{calls: calls}
+
+	var endEvent EndEvent
+	var endSeen bool
+	ch := Run(context.Background(), RunParams{
+		Model:    model,
+		Tools:    &ToolSet{Executor: exec},
+		MaxSteps: 2,
+		Callbacks: &LifecycleCallbacks{
+			OnEnd: func(event EndEvent) {
+				endEvent = event
+				endSeen = true
+			},
+		},
+	})
+	for ev := range ch {
+		if ev.Type == StepEventError {
+			t.Fatalf("unexpected error: %v", ev.Error)
+		}
+	}
+
+	if !endSeen {
+		t.Fatal("OnEnd was not called")
+	}
+	if endEvent.FinishReason != FinishReasonToolCalls {
+		t.Errorf("OnEnd.FinishReason: expected ToolCalls (honest), got %v", endEvent.FinishReason)
+	}
+	if len(endEvent.Steps) != 2 {
+		t.Errorf("expected 2 completed steps, got %d", len(endEvent.Steps))
+	}
+}
+
+// recordingModel wraps mockModel and records each Request received.
+type recordingModel struct {
+	mockModel
+	requests []Request
+}
+
+func (m *recordingModel) Stream(ctx context.Context, req Request) (<-chan StreamEvent, error) {
+	m.requests = append(m.requests, req)
+	return m.mockModel.Stream(ctx, req)
+}
+
+func TestParseStructuredOutput_ValidJSON(t *testing.T) {
+	raw := `{"name":"Alice","age":30}`
+	got := parseStructuredOutput(raw)
+	if got == nil {
+		t.Fatal("expected non-nil result")
+	}
+	var m map[string]any
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if m["name"] != "Alice" {
+		t.Errorf("unexpected name: %v", m["name"])
+	}
+}
+
+func TestParseStructuredOutput_FencedJSON(t *testing.T) {
+	raw := "```json\n{\"ok\":true}\n```"
+	got := parseStructuredOutput(raw)
+	if got == nil {
+		t.Fatal("expected non-nil result for fenced JSON")
+	}
+}
+
+func TestParseStructuredOutput_InvalidJSON(t *testing.T) {
+	got := parseStructuredOutput("not json at all")
+	if got != nil {
+		t.Error("expected nil for invalid JSON")
+	}
+}
+
+func TestValidateToolCall_InvalidArgsIncludesCause(t *testing.T) {
+	_, err := validateToolCall(&ToolSet{
+		Definitions: []ToolDefinition{{Name: "search"}},
+	}, toolCallState{
+		name: "search",
+		args: `{"q":}`,
+	})
+	if err == nil {
+		t.Fatal("expected invalid args error")
+	}
+
+	var invalidArgsErr *ToolInputError
+	if !errors.As(err, &invalidArgsErr) {
+		t.Fatalf("expected ToolInputError, got %T", err)
+	}
+	if invalidArgsErr.Cause == nil {
+		t.Fatal("expected ToolInputError.Cause to be populated")
+	}
+}
+
+func TestInvalidToolCallOutput_IsValidJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "unknown tool",
+			err: &NoSuchToolError{
+				ToolName: "search",
+			},
+		},
+		{
+			name: "invalid args",
+			err: &ToolInputError{
+				ToolName: "search",
+				Input:    json.RawMessage(`{"q":}`),
+				Cause:    errors.New("bad json"),
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := invalidToolCallOutput(toolCallState{name: "search"}, tc.err)
+			var payload map[string]string
+			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+				t.Fatalf("expected valid JSON output, got %q (%v)", raw, err)
+			}
+			if payload["error"] == "" {
+				t.Fatalf("expected JSON error payload, got %q", raw)
+			}
+		})
+	}
+}

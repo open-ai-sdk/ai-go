@@ -1,0 +1,38 @@
+{
+  "name": "ai-go-conformance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "vp check",
+    "test": "bun run union:check && vp test",
+    "test:browser": "playwright test",
+    "typecheck": "tsc -p tsconfig.json",
+    "union:generate": "tsx src/generate_union.ts",
+    "union:check": "tsx src/generate_union.ts --check"
+  },
+  "dependencies": {
+    "@ai-sdk/provider-utils": "5.0.12",
+    "@ai-sdk/react": "4.0.38",
+    "ai": "7.0.35",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "zod": "4.1.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "tsx": "4.22.0",
+    "typescript": "5.8.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.6",
+    "vite-plus": "0.2.6"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.6"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+  },
+  "packageManager": "bun@1.3.13"
+}

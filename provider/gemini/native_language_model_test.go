@@ -229,11 +229,15 @@ func TestNativeLanguageModel_Stream_GoogleSearch(t *testing.T) {
 	}
 }
 
-func TestNativeLanguageModel_Stream_Warnings(t *testing.T) {
+func TestNativeLanguageModel_Stream_SearchAndTopKReachWire(t *testing.T) {
 	sseData := `data: {"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":1,"totalTokenCount":6}}
 
 `
+	var received map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(sseData))
@@ -250,27 +254,45 @@ func TestNativeLanguageModel_Stream_Warnings(t *testing.T) {
 		Messages: []ai.Message{ai.UserMessage("test")},
 		Settings: ai.CallSettings{TopK: &topK},
 		ProviderOptions: map[string]any{
-			"gemini": ProviderOptions{EnableGoogleSearch: true},
+			"gemini": ProviderOptions{
+				EnableGoogleSearch: true,
+				ResponseModalities: []string{"TEXT", "IMAGE"},
+				ImageConfig: &ImageConfig{
+					AspectRatio: "16:9",
+					ImageSize:   "2K",
+				},
+			},
 		},
 	})
 	if err != nil {
 		t.Fatalf("Stream() error: %v", err)
 	}
 
-	var events []ai.StreamEvent
-	for ev := range ch {
-		events = append(events, ev)
+	for range ch {
 	}
 
-	for _, ev := range events {
-		if ev.Type == ai.StreamEventFinish {
-			if len(ev.Warnings) == 0 {
-				t.Error("expected warnings for topK + google search, got none")
-			}
-			return
-		}
+	config := received["generationConfig"].(map[string]any)
+	if config["topK"] != float64(topK) {
+		t.Fatalf("topK = %#v", config["topK"])
 	}
-	t.Error("no finish event found")
+	modalities := config["responseModalities"].([]any)
+	if len(modalities) != 2 ||
+		modalities[0] != "TEXT" ||
+		modalities[1] != "IMAGE" {
+		t.Fatalf("responseModalities = %#v", modalities)
+	}
+	image := config["imageConfig"].(map[string]any)
+	if image["aspectRatio"] != "16:9" || image["imageSize"] != "2K" {
+		t.Fatalf("imageConfig = %#v", image)
+	}
+	tools := received["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("tools = %#v", tools)
+	}
+	search := tools[0].(map[string]any)["googleSearch"].(map[string]any)
+	if len(search) != 0 {
+		t.Fatalf("googleSearch = %#v", search)
+	}
 }
 
 func TestNativeLanguageModel_Stream_ErrorStatus(t *testing.T) {

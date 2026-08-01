@@ -47,17 +47,12 @@ func (b *blockingBody) wasClosed() bool {
 // context unblocks a decoder stuck on a silent body and closes that body.
 func TestNativeSSEDecoder_CancelUnblocksAndClosesBody(t *testing.T) {
 	body := newBlockingBody()
-	ch := make(chan ai.StreamEvent, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		decodeNativeSSEStream(ctx, body, ch)
-	}()
-	// Drain events so the decoder never blocks on the channel.
-	go func() {
-		for range ch {
+		for range nativeTestStream(ctx, body) {
 		}
 	}()
 
@@ -80,11 +75,8 @@ func TestNativeSSEDecoder_LargeDataLineParses(t *testing.T) {
 	payload := `data: {"candidates":[{"content":{"parts":[{"text":"` + big + `"}]}}]}` + "\n"
 	body := io.NopCloser(strings.NewReader(payload))
 
-	ch := make(chan ai.StreamEvent, 16)
-	go decodeNativeSSEStream(context.Background(), body, ch)
-
 	var text string
-	for ev := range ch {
+	for ev := range nativeTestStream(context.Background(), body) {
 		if ev.Type == ai.StreamEventError {
 			t.Fatalf("unexpected error decoding a large line: %v", ev.Error)
 		}

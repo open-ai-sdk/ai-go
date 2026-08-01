@@ -1,0 +1,35 @@
+[
+  {
+    "name": "basic",
+    "secret": "test-secret-key-for-hmac-signing",
+    "approvalId": "approval-1",
+    "toolCallId": "call-1",
+    "toolName": "deleteFile",
+    "input": {"path": "/tmp/cache"},
+    "digest": "z6DfQ9QDa112neoYXpvHbdMcFAzyM-8SXyI_2NogPUA",
+    "signature": "KhhdqErvPwq9PCD-YYlVKgPDJ_tby36fpqptjJpmYhE",
+    "legacySignature": "m_3hnkZy4Mx-__NmCA7J5NTNUwAk3bhbUtXD7PDAF_k"
+  },
+  {
+    "name": "unicode-and-nested",
+    "secret": "0123456789abcdef0123456789abcdef",
+    "approvalId": "approval-ü",
+    "toolCallId": "call-😀",
+    "toolName": "lookup",
+    "input": {"z": [1, 0, 1e-7, 1e+21, {"😀": "emoji", "": "private"}], "a": {"nested": true, "nil": null}, "é": "café"},
+    "digest": "NYtb_4oO6x3HvhuK5z9labE3Hjhp-caMQgYh6kHhCXw",
+    "signature": "Q9XnmjsTI5hi3CaXsiSvN8NSe9IJYHwmmOWZ5IulAm8",
+    "legacySignature": "-E1aSB_yT9UkozEsCHuebYZ-oiBH-FogweqNtJLGbLY"
+  },
+  {
+    "name": "json-escaping",
+    "secret": "0123456789abcdef0123456789abcdef",
+    "approvalId": "approval\njson",
+    "toolCallId": "call\t1",
+    "toolName": "tool<&",
+    "input": {"html": "<script>&", "line": " "},
+    "digest": "6pqYUgQI0hNK3N1zDaTyG3ONZkmy-hRQTQBDAQ1eBKU",
+    "signature": "AIATWRXmV6XGRlL18Af-Gx0T5ymTOhTeyeB_ArggiOE",
+    "legacySignature": ""
+  }
+]

@@ -1,3 +1,4 @@
+// ai-go: file-length-justification: keeps the native Gemini request grammar and its coupled validation in one encoder.
 package gemini
 
 import (
@@ -5,7 +6,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // nativeRequest is the top-level JSON body for :streamGenerateContent.
@@ -88,9 +90,9 @@ type nativeImageConfig struct {
 	ImageSize   string `json:"imageSize,omitempty"`
 }
 
-// encodeNativeRequest converts an ai.LanguageModelRequest to the native Gemini
+// encodeNativeRequest converts an aikit.LanguageModelRequest to the native Gemini
 // request body for the :streamGenerateContent endpoint.
-func encodeNativeRequest(req ai.LanguageModelRequest) nativeRequest {
+func encodeNativeRequest(req llm.Request) nativeRequest {
 	nr := nativeRequest{}
 
 	// System instruction: collect from req.Instructions and any leading system messages.
@@ -107,7 +109,7 @@ func encodeNativeRequest(req ai.LanguageModelRequest) nativeRequest {
 
 // buildSystemInstruction collects system text from req.Instructions and any leading
 // RoleSystem messages in req.Messages.
-func buildSystemInstruction(req ai.LanguageModelRequest) *nativeSystemInstruction {
+func buildSystemInstruction(req llm.Request) *nativeSystemInstruction {
 	var parts []nativeTextPart
 
 	if req.Instructions != "" {
@@ -115,11 +117,11 @@ func buildSystemInstruction(req ai.LanguageModelRequest) *nativeSystemInstructio
 	}
 
 	for _, msg := range req.Messages {
-		if msg.Role != ai.RoleSystem {
+		if msg.Role != aikit.RoleSystem {
 			break
 		}
 		for _, p := range msg.Content {
-			if p.Type == ai.ContentPartTypeText && p.Text != "" {
+			if p.Type == aikit.ContentPartTypeText && p.Text != "" {
 				parts = append(parts, nativeTextPart{Text: p.Text})
 			}
 		}
@@ -133,28 +135,28 @@ func buildSystemInstruction(req ai.LanguageModelRequest) *nativeSystemInstructio
 
 // buildContents converts the message list to native Gemini contents,
 // skipping leading system messages (already handled by buildSystemInstruction).
-func buildContents(messages []ai.Message) []nativeContent {
+func buildContents(messages []aikit.Message) []nativeContent {
 	var contents []nativeContent
 
 	// Skip leading system messages.
 	startIdx := 0
-	for startIdx < len(messages) && messages[startIdx].Role == ai.RoleSystem {
+	for startIdx < len(messages) && messages[startIdx].Role == aikit.RoleSystem {
 		startIdx++
 	}
 
 	for _, msg := range messages[startIdx:] {
 		switch msg.Role {
-		case ai.RoleUser:
+		case aikit.RoleUser:
 			contents = append(contents, nativeContent{
 				Role:  "user",
 				Parts: encodeUserParts(msg.Content),
 			})
-		case ai.RoleAssistant:
+		case aikit.RoleAssistant:
 			contents = append(contents, nativeContent{
 				Role:  "model",
 				Parts: encodeAssistantParts(msg.Content),
 			})
-		case ai.RoleTool:
+		case aikit.RoleTool:
 			contents = append(contents, nativeContent{
 				Role:  "user",
 				Parts: encodeToolParts(msg.Content),
@@ -166,13 +168,13 @@ func buildContents(messages []ai.Message) []nativeContent {
 }
 
 // encodeUserParts converts user content parts to native parts.
-func encodeUserParts(parts []ai.ContentPart) []nativePart {
+func encodeUserParts(parts []aikit.ContentPart) []nativePart {
 	var out []nativePart
 	for _, p := range parts {
 		switch p.Type {
-		case ai.ContentPartTypeText:
+		case aikit.ContentPartTypeText:
 			out = append(out, nativePart{Text: p.Text})
-		case ai.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				out = append(out, encodeImagePart(p))
 			} else {
@@ -184,19 +186,19 @@ func encodeUserParts(parts []ai.ContentPart) []nativePart {
 }
 
 // encodeAssistantParts converts assistant content parts to native parts.
-func encodeAssistantParts(parts []ai.ContentPart) []nativePart {
+func encodeAssistantParts(parts []aikit.ContentPart) []nativePart {
 	var out []nativePart
 	for _, p := range parts {
 		switch p.Type {
-		case ai.ContentPartTypeText:
+		case aikit.ContentPartTypeText:
 			out = append(out, nativePart{Text: p.Text})
-		case ai.ContentPartTypeReasoning:
+		case aikit.ContentPartTypeReasoning:
 			np := nativePart{Text: p.ReasoningText, Thought: boolPtr(true)}
 			if p.ThoughtSignature != "" {
 				np.ThoughtSignature = p.ThoughtSignature
 			}
 			out = append(out, np)
-		case ai.ContentPartTypeToolCall:
+		case aikit.ContentPartTypeToolCall:
 			np := nativePart{
 				FunctionCall: &nativeFuncCall{
 					Name: p.ToolCallName,
@@ -207,7 +209,7 @@ func encodeAssistantParts(parts []ai.ContentPart) []nativePart {
 				np.ThoughtSignature = p.ThoughtSignature
 			}
 			out = append(out, np)
-		case ai.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				out = append(out, encodeImagePart(p))
 			} else {
@@ -219,10 +221,10 @@ func encodeAssistantParts(parts []ai.ContentPart) []nativePart {
 }
 
 // encodeToolParts converts tool-result content parts to native functionResponse parts.
-func encodeToolParts(parts []ai.ContentPart) []nativePart {
+func encodeToolParts(parts []aikit.ContentPart) []nativePart {
 	var out []nativePart
 	for _, p := range parts {
-		if p.Type == ai.ContentPartTypeToolResult {
+		if p.Type == aikit.ContentPartTypeToolResult {
 			out = append(out, nativePart{
 				FunctionResponse: &nativeFuncResp{
 					Name: p.ToolResultName,
@@ -239,7 +241,7 @@ func encodeToolParts(parts []ai.ContentPart) []nativePart {
 
 // encodeImagePart encodes an image ContentPart as inlineData or fileData.
 // It handles both inline binary data (from ImageDataPart) and URL references (from ImageURLPart).
-func encodeImagePart(p ai.ContentPart) nativePart {
+func encodeImagePart(p aikit.ContentPart) nativePart {
 	if len(p.Data) > 0 {
 		return nativePart{
 			InlineData: &nativeInlineData{
@@ -267,7 +269,7 @@ func encodeMediaFromURL(url, mimeType string) nativePart {
 }
 
 // encodeFilePart encodes a file ContentPart as inlineData or fileData.
-func encodeFilePart(p ai.ContentPart) nativePart {
+func encodeFilePart(p aikit.ContentPart) nativePart {
 	if len(p.Data) > 0 {
 		return nativePart{
 			InlineData: &nativeInlineData{
@@ -290,7 +292,7 @@ func encodeFilePart(p ai.ContentPart) nativePart {
 }
 
 // buildGenerationConfig constructs the generationConfig from settings, provider options, and output schema.
-func buildGenerationConfig(req ai.LanguageModelRequest) *nativeGenerationConfig {
+func buildGenerationConfig(req llm.Request) *nativeGenerationConfig {
 	cfg := &nativeGenerationConfig{}
 	opts := parseProviderOptions(req.ProviderOptions)
 
@@ -306,7 +308,7 @@ func buildGenerationConfig(req ai.LanguageModelRequest) *nativeGenerationConfig 
 
 // applyCallSettings maps CallSettings fields onto the generation config.
 // Returns true if any field was set.
-func applyCallSettings(cfg *nativeGenerationConfig, s ai.CallSettings) bool {
+func applyCallSettings(cfg *nativeGenerationConfig, s llm.CallSettings) bool {
 	set := false
 	if s.MaxTokens > 0 {
 		cfg.MaxOutputTokens = &s.MaxTokens
@@ -406,7 +408,7 @@ func buildNativeImageConfig(ic *ImageConfig) *nativeImageConfig {
 
 // applyOutputSchema maps output schema settings onto the generation config.
 // Returns true if any field was set.
-func applyOutputSchema(cfg *nativeGenerationConfig, output *ai.OutputSchema) bool {
+func applyOutputSchema(cfg *nativeGenerationConfig, output *llm.OutputSchema) bool {
 	if output == nil {
 		return false
 	}

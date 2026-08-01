@@ -1,0 +1,905 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/open-ai-sdk/ai-go/tool"
+)
+
+// fixedApprover returns the same decision for every request.
+type fixedApprover struct {
+	approved bool
+	reason   string
+	requests []ApprovalRequest
+}
+
+func (a *fixedApprover) RequestApproval(_ context.Context, req ApprovalRequest) (ApprovalResponse, error) {
+	a.requests = append(a.requests, req)
+	return ApprovalResponse{ApprovalID: req.ApprovalID, Approved: a.approved, Reason: a.reason}, nil
+}
+
+// blockingApprover blocks until the context is cancelled, then reports the
+// cancellation as an error. It models a decision that never arrives.
+type blockingApprover struct{}
+
+func (blockingApprover) RequestApproval(ctx context.Context, _ ApprovalRequest) (ApprovalResponse, error) {
+	<-ctx.Done()
+	return ApprovalResponse{}, ctx.Err()
+}
+
+type mismatchedApprover struct{}
+
+func (mismatchedApprover) RequestApproval(_ context.Context, _ ApprovalRequest) (ApprovalResponse, error) {
+	return ApprovalResponse{ApprovalID: "different-call", Approved: true}, nil
+}
+
+type cancelOnReserveGuard struct {
+	cancel   context.CancelFunc
+	released bool
+}
+
+type completeFailureGuard struct{}
+
+func (completeFailureGuard) ReserveApprovals(context.Context, []ApprovalGrant) (ApprovalReservation, error) {
+	return completeFailureGuard{}, nil
+}
+
+func (completeFailureGuard) Complete(context.Context, ApprovalGrant) error {
+	return errors.New("complete failed")
+}
+
+func (completeFailureGuard) Release(context.Context) error { return nil }
+
+type sideEffectPanicExecutor struct{ calls int }
+
+func (e *sideEffectPanicExecutor) Execute(context.Context, string, string) (string, error) {
+	e.calls++
+	panic("after side effect")
+}
+
+func (g *cancelOnReserveGuard) ReserveApprovals(
+	_ context.Context,
+	_ []ApprovalGrant,
+) (ApprovalReservation, error) {
+	g.cancel()
+	return g, nil
+}
+
+func (g *cancelOnReserveGuard) Complete(context.Context, ApprovalGrant) error {
+	return errors.New("unexpected completion")
+}
+
+func (g *cancelOnReserveGuard) Release(context.Context) error {
+	g.released = true
+	return nil
+}
+
+// requireApproval builds a policy map that marks the named tool as requiring
+// approval before it runs.
+func requireApproval(tool string) map[string]func(string, string) bool {
+	return map[string]func(string, string) bool{
+		tool: func(string, string) bool { return true },
+	}
+}
+
+var approvalTestKey = []byte("0123456789abcdef0123456789abcdef")
+
+func approvalSignatureForTest(t *testing.T, id, name, args string) string {
+	t.Helper()
+	signature, err := signApprovalRequest(approvalTestKey, ApprovalRequest{
+		ApprovalID: id, ToolCallID: id, ToolName: name, Args: args,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signature
+}
+
+func TestApprovalSignatureMatchesAISDKV1NodeVector(t *testing.T) {
+	request := ApprovalRequest{
+		ApprovalID: "approval-ü",
+		ToolCallID: "call-😀",
+		ToolName:   "lookup",
+		Args:       `{"z":[1,0,1e-7,1e+21,{"😀":"emoji","":"private"}],"a":{"nested":true,"nil":null},"é":"café"}`,
+	}
+	signature, err := signApprovalRequest(approvalTestKey, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "Q9XnmjsTI5hi3CaXsiSvN8NSe9IJYHwmmOWZ5IulAm8"
+	if signature != want {
+		t.Fatalf("signature = %q, want Node vector %q", signature, want)
+	}
+
+	request.Args = `{"é":"café","a":{"nil":null,"nested":true},"z":[1,-0,0.0000001,1000000000000000000000,{"":"private","😀":"emoji"}]}`
+	reordered, err := signApprovalRequest(approvalTestKey, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reordered != want {
+		t.Fatalf("reordered signature = %q, want %q", reordered, want)
+	}
+
+	extreme, err := signApprovalRequest(approvalTestKey, ApprovalRequest{
+		ApprovalID: "extreme", ToolCallID: "extreme", ToolName: "lookup",
+		Args: `{"huge":1e400,"tiny":-1e400}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantExtreme = "fhvJYeSwTQlLLtF7VKeYDLqlQuSnP2AAHyi9KsVevm4"
+	if extreme != wantExtreme {
+		t.Fatalf("extreme-number signature = %q, want Node vector %q", extreme, wantExtreme)
+	}
+}
+
+func TestApprovalSignatureRejectsNonInteroperableUnicode(t *testing.T) {
+	_, err := signApprovalRequest(approvalTestKey, ApprovalRequest{
+		ApprovalID: "bad-unicode", ToolCallID: "bad-unicode", ToolName: "lookup",
+		Args: `{"value":"\ud800"}`,
+	})
+	if err == nil {
+		t.Fatal("expected an unpaired UTF-16 surrogate to be rejected")
+	}
+}
+
+func collectEvents(ch <-chan StepEvent) []StepEvent {
+	var out []StepEvent
+	for ev := range ch {
+		out = append(out, ev)
+	}
+	return out
+}
+
+func hasEvent(events []StepEvent, typ StepEventType) bool {
+	for _, ev := range events {
+		if ev.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+// TestApproval_Approved_ExecutesTool verifies an approved tool call is executed
+// and no denial is emitted.
+func TestApproval_Approved_ExecutesTool(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", `{"path":"/tmp/x"}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("done"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{results: map[string]string{"deleteFile": `{"ok":true}`}}
+	approver := &fixedApprover{approved: true}
+
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		Approver:     approver,
+		ApprovalKey:  approvalTestKey,
+		MaxSteps:     5,
+	}))
+
+	if !hasEvent(events, StepEventToolApprovalRequest) {
+		t.Error("expected a tool-approval-request event")
+	}
+	if hasEvent(events, StepEventToolOutputDenied) {
+		t.Error("did not expect a tool-output-denied event for an approved call")
+	}
+	if len(exec.called) != 1 || exec.called[0] != "deleteFile" {
+		t.Errorf("expected deleteFile to execute once, got %v", exec.called)
+	}
+	if len(approver.requests) != 1 {
+		t.Errorf("expected exactly one approval request, got %d", len(approver.requests))
+	}
+}
+
+// TestApproval_Denied_SkipsToolAndEmitsDenial verifies a denied tool call is not
+// executed and surfaces a denial with the denied output.
+func TestApproval_Denied_SkipsToolAndEmitsDenial(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", `{"path":"/tmp/x"}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("acknowledged"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{}
+	approver := &fixedApprover{approved: false, reason: "not allowed"}
+	var denialChunk bool
+
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		Approver:     approver,
+		ApprovalKey:  approvalTestKey,
+		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
+			denialChunk = denialChunk || event.Type == StepEventToolOutputDenied
+		}},
+		MaxSteps: 5,
+	}))
+
+	if !hasEvent(events, StepEventToolApprovalRequest) {
+		t.Error("expected a tool-approval-request event")
+	}
+	if !hasEvent(events, StepEventToolOutputDenied) {
+		t.Error("expected a tool-output-denied event for a denied call")
+	}
+	if !denialChunk {
+		t.Fatal("expected synchronous denial through OnChunk")
+	}
+	if len(exec.called) != 0 {
+		t.Errorf("expected the tool NOT to execute when denied, got %v", exec.called)
+	}
+	var denied *ToolResult
+	for _, ev := range events {
+		if ev.Type == StepEventToolResult && ev.ToolResult != nil && ev.ToolResult.ID == "tc-1" {
+			denied = ev.ToolResult
+		}
+	}
+	if denied == nil {
+		t.Fatal("expected a tool result for the denied call")
+	}
+	if denied.Output != `{"error":"tool approval denied"}` {
+		t.Errorf("denied output = %q, want denied JSON", denied.Output)
+	}
+	if !errors.Is(denied.Error, tool.ErrDenied) {
+		t.Errorf("denied error = %v, want tool.ErrDenied", denied.Error)
+	}
+}
+
+func TestApproval_MismatchedResponderIDDoesNotExecuteTool(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", `{}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("acknowledged"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		Approver:     mismatchedApprover{},
+		ApprovalKey:  approvalTestKey,
+		MaxSteps:     2,
+	}))
+
+	if len(exec.called) != 0 {
+		t.Fatalf("mismatched approval executed tool: %v", exec.called)
+	}
+	if !hasEvent(events, StepEventToolOutputDenied) {
+		t.Fatal("expected mismatched response to deny the tool call")
+	}
+}
+
+// TestApproval_NoResponder_Suspends verifies that without an in-process
+// responder the run returns its pending approval instead of converting the
+// absence of a response into a denial.
+func TestApproval_NoResponder_Suspends(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", `{}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("ok"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{}
+
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		Approver:     nil,
+		ApprovalKey:  approvalTestKey,
+		MaxSteps:     5,
+	}))
+
+	if !hasEvent(events, StepEventToolApprovalRequest) {
+		t.Error("expected approval request when no approver is configured")
+	}
+	if hasEvent(events, StepEventToolOutputDenied) || hasEvent(events, StepEventToolResult) {
+		t.Error("a suspended call must not be denied or executed")
+	}
+	if !hasEvent(events, StepEventStepEnd) || !hasEvent(events, StepEventDone) {
+		t.Error("suspension must close the invocation cleanly with its partial step")
+	}
+	if len(exec.called) != 0 {
+		t.Errorf("expected no execution without an approver, got %v", exec.called)
+	}
+}
+
+func TestApproval_NoResponderRequiresSigningKey(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", `{}`), finishEvt(FinishReasonToolCalls)},
+	}}
+	exec := &mockExecutor{}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+	}))
+
+	if len(exec.called) != 0 || hasEvent(events, StepEventToolApprovalRequest) {
+		t.Fatalf("unsigned approval was exposed or executed: calls=%v events=%#v", exec.called, events)
+	}
+	assertApprovalError(t, events, nil)
+}
+
+func TestApproval_ResumesApprovedCallFromHistory(t *testing.T) {
+	model := &recordingModel{mockModel: mockModel{calls: [][]StreamEvent{
+		{textEvt("continued"), finishEvt(FinishReasonStop)},
+	}}}
+	exec := &mockExecutor{results: map[string]string{"deleteFile": `{"ok":true}`}}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{"path":"/tmp/x"}`)
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:               model,
+		Tools:               &ToolSet{Executor: exec},
+		ToolApproval:        requireApproval("deleteFile"),
+		ApprovalKey:         approvalTestKey,
+		ApprovalReplayGuard: NewMemoryApprovalReplayGuard(),
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile",
+				ToolCallArgs: json.RawMessage(`{"path":"/tmp/x"}`),
+			}}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature,
+				ToolApprovalApproved: true,
+			}}},
+		}},
+		MaxSteps: 1,
+	}))
+
+	if len(exec.called) != 1 || exec.called[0] != "deleteFile" {
+		t.Fatalf("resumed execution calls = %v", exec.called)
+	}
+	if !hasEvent(events, StepEventToolResult) {
+		t.Fatal("expected resumed tool result event")
+	}
+	if len(model.requests) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(model.requests))
+	}
+	var sawResult, sawApprovalPart bool
+	for _, message := range model.requests[0].Messages {
+		for _, part := range message.Content {
+			sawResult = sawResult || part.Type == "tool_result" && part.ToolResultID == "tc-1"
+			sawApprovalPart = sawApprovalPart || part.Type == "tool_approval_response"
+		}
+	}
+	if !sawResult || sawApprovalPart {
+		t.Fatalf("provider history result=%v approvalPart=%v, want result only", sawResult, sawApprovalPart)
+	}
+}
+
+func TestApproval_ResumesDeniedCallFromHistoryWithoutExecution(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{textEvt("continued"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+	var denialChunk bool
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey:  approvalTestKey,
+		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
+			denialChunk = denialChunk || event.Type == StepEventToolOutputDenied
+		}},
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
+			}}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-1", ToolApprovalSignature: signature,
+				ToolApprovalReason: "operator denied",
+			}}},
+		}},
+		MaxSteps: 1,
+	}))
+
+	if len(exec.called) != 0 {
+		t.Fatalf("denied resumed call executed: %v", exec.called)
+	}
+	if !hasEvent(events, StepEventToolOutputDenied) || !hasEvent(events, StepEventToolResult) {
+		t.Fatal("expected denial and denied tool-result events")
+	}
+	if !denialChunk {
+		t.Fatal("expected resumed denial through OnChunk")
+	}
+}
+
+func TestApproval_ResumeExecutesCanonicalSignedInput(t *testing.T) {
+	const raw = `{"n":9007199254740993,"a":1,"a":2}`
+	model := &mockModel{calls: [][]StreamEvent{{textEvt("continued"), finishEvt(FinishReasonStop)}}}
+	exec := &mockExecutor{}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", raw)
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey: approvalTestKey, ApprovalReplayGuard: NewMemoryApprovalReplayGuard(),
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(raw),
+			}}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-1",
+				ToolApprovalSignature: signature, ToolApprovalApproved: true,
+			}}},
+		}},
+	}))
+	if hasEvent(events, StepEventError) {
+		t.Fatalf("canonical resume events = %#v", events)
+	}
+	if len(exec.args) != 1 || exec.args[0] != `{"a":2,"n":9007199254740992}` {
+		t.Fatalf("executed args = %q, want JavaScript-canonical input", exec.args)
+	}
+}
+
+func TestApproval_SynchronousExecutionUsesCanonicalSignedInput(t *testing.T) {
+	const raw = `{"n":9007199254740993,"a":1,"a":2}`
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", raw), finishEvt(FinishReasonToolCalls)},
+	}}
+	exec := &mockExecutor{}
+	approver := &fixedApprover{approved: true}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey: approvalTestKey, Approver: approver, MaxSteps: 1,
+	}))
+	if hasEvent(events, StepEventError) {
+		t.Fatalf("synchronous canonical events = %#v", events)
+	}
+	if len(exec.args) != 1 || exec.args[0] != `{"a":2,"n":9007199254740992}` {
+		t.Fatalf("executed args = %q, want JavaScript-canonical input", exec.args)
+	}
+	if len(approver.requests) != 1 || approver.requests[0].Args != exec.args[0] {
+		t.Fatalf("approval request args = %#v, executed args = %q", approver.requests, exec.args[0])
+	}
+}
+
+func TestApproval_CancellationAfterReservationReleasesClaim(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	guard := &cancelOnReserveGuard{cancel: cancel}
+	exec := &mockExecutor{}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+	events := collectEvents(Run(ctx, RunParams{
+		Model: &mockModel{}, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard,
+		Request: Request{Messages: []Message{
+			{
+				Role: "assistant",
+				Content: []ContentPart{
+					{
+						Type:         "tool_call",
+						ToolCallID:   "tc-1",
+						ToolCallName: "deleteFile",
+						ToolCallArgs: json.RawMessage(`{}`),
+					},
+				},
+			},
+			{
+				Role: "user",
+				Content: []ContentPart{
+					{
+						Type:                  "tool_approval_response",
+						ToolApprovalID:        "tc-1",
+						ToolApprovalSignature: signature,
+						ToolApprovalApproved:  true,
+					},
+				},
+			},
+		}},
+	}))
+	if len(exec.called) != 0 || !guard.released {
+		t.Fatalf("calls=%v released=%v events=%#v", exec.called, guard.released, events)
+	}
+}
+
+func TestMemoryApprovalReplayGuardCompletesAndReleasesPerGrant(t *testing.T) {
+	guard := NewMemoryApprovalReplayGuard()
+	first := ApprovalGrant{CapabilityID: "first", ToolCallID: "tc-first"}
+	second := ApprovalGrant{CapabilityID: "second", ToolCallID: "tc-second"}
+	reservation, err := guard.ReserveApprovals(context.Background(), []ApprovalGrant{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reservation.Complete(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := reservation.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := guard.ReserveApprovals(
+		context.Background(),
+		[]ApprovalGrant{first},
+	); !errors.Is(
+		err,
+		ErrApprovalReplay,
+	) {
+		t.Fatalf("completed grant replay error = %v", err)
+	}
+	retry, err := guard.ReserveApprovals(context.Background(), []ApprovalGrant{second})
+	if err != nil {
+		t.Fatalf("released grant was not retryable: %v", err)
+	}
+	if err := retry.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApproval_ResumedPanicCompletesGrantAndPreservesResult(t *testing.T) {
+	exec := &sideEffectPanicExecutor{}
+	guard := NewMemoryApprovalReplayGuard()
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+	history := []Message{
+		{
+			Role: "assistant",
+			Content: []ContentPart{
+				{
+					Type:         "tool_call",
+					ToolCallID:   "tc-1",
+					ToolCallName: "deleteFile",
+					ToolCallArgs: json.RawMessage(`{}`),
+				},
+			},
+		},
+		{
+			Role: "user",
+			Content: []ContentPart{
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "tc-1",
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
+			},
+		},
+	}
+	model := &mockModel{calls: [][]StreamEvent{{textEvt("must not run"), finishEvt(FinishReasonStop)}}}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard, Request: Request{Messages: history},
+	}))
+	if exec.calls != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) ||
+		!hasEvent(events, StepEventError) {
+		t.Fatalf("calls=%d model=%d events=%#v", exec.calls, model.idx, events)
+	}
+
+	replay := collectEvents(Run(context.Background(), RunParams{
+		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard, Request: Request{Messages: history},
+	}))
+	if exec.calls != 1 {
+		t.Fatalf("panicking side effect replayed: %d calls", exec.calls)
+	}
+	assertApprovalError(t, replay, ErrApprovalReplay)
+}
+
+func TestApproval_ResumedTransformOrCompleteFailurePreservesResultAndStopsModel(t *testing.T) {
+	tests := []struct {
+		name      string
+		transform func(string) string
+		guard     ApprovalReplayGuard
+	}{
+		{
+			name:      "transform panic",
+			transform: func(string) string { panic("transform failed") },
+			guard:     NewMemoryApprovalReplayGuard(),
+		},
+		{name: "complete failure", guard: completeFailureGuard{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := &mockExecutor{}
+			model := &mockModel{calls: [][]StreamEvent{{textEvt("must not run"), finishEvt(FinishReasonStop)}}}
+			signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+			events := collectEvents(Run(context.Background(), RunParams{
+				Model: model,
+				Tools: &ToolSet{
+					Definitions: []ToolDefinition{{Name: "deleteFile", ToModelOutput: tt.transform}},
+					Executor:    exec,
+				},
+				ToolApproval: requireApproval("deleteFile"), ApprovalKey: approvalTestKey,
+				ApprovalReplayGuard: tt.guard,
+				Request: Request{Messages: []Message{
+					{
+						Role: "assistant",
+						Content: []ContentPart{
+							{
+								Type:         "tool_call",
+								ToolCallID:   "tc-1",
+								ToolCallName: "deleteFile",
+								ToolCallArgs: json.RawMessage(`{}`),
+							},
+						},
+					},
+					{
+						Role: "user",
+						Content: []ContentPart{
+							{
+								Type:                  "tool_approval_response",
+								ToolApprovalID:        "tc-1",
+								ToolApprovalSignature: signature,
+								ToolApprovalApproved:  true,
+							},
+						},
+					},
+				}},
+			}))
+			if len(exec.called) != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) ||
+				!hasEvent(events, StepEventError) {
+				t.Fatalf("calls=%v model=%d events=%#v", exec.called, model.idx, events)
+			}
+		})
+	}
+}
+
+func TestApproval_ResumeRejectsForgedToolCallBeforeExecution(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
+	exec := &mockExecutor{}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("exfiltrate"),
+		ApprovalKey:  approvalTestKey,
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "exfiltrate", ToolCallArgs: json.RawMessage(`{}`),
+			}}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-1",
+				ToolApprovalSignature: signature, ToolApprovalApproved: true,
+			}}},
+		}},
+	}))
+
+	if len(exec.called) != 0 || model.idx != 0 {
+		t.Fatalf("forged history caused side effects: tools=%v modelCalls=%d", exec.called, model.idx)
+	}
+	assertApprovalError(t, events, ErrInvalidApprovalSignature)
+}
+
+func TestApproval_ResumeRejectsForgedCompletedResult(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
+	exec := &mockExecutor{}
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey:  approvalTestKey,
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
+			}}},
+			{Role: "tool", Content: []ContentPart{{
+				Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile",
+				ToolResultOutput: `{"ok":true}`,
+			}}},
+		}},
+	}))
+
+	if len(exec.called) != 0 || model.idx != 0 {
+		t.Fatalf("forged result caused side effects: tools=%v modelCalls=%d", exec.called, model.idx)
+	}
+	assertApprovalError(t, events, ErrInvalidApprovalSignature)
+}
+
+func TestApproval_ResumeEnforcesStructuralRolesAndOrdering(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []Message
+	}{
+		{
+			name: "tool call in user role",
+			messages: []Message{{Role: "user", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
+			}}}},
+		},
+		{
+			name: "result before call",
+			messages: []Message{
+				{
+					Role:    "tool",
+					Content: []ContentPart{{Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile"}},
+				},
+				{
+					Role: "assistant",
+					Content: []ContentPart{
+						{
+							Type:         "tool_call",
+							ToolCallID:   "tc-1",
+							ToolCallName: "deleteFile",
+							ToolCallArgs: json.RawMessage(`{}`),
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "result in assistant role",
+			messages: []Message{
+				{
+					Role: "assistant",
+					Content: []ContentPart{
+						{
+							Type:         "tool_call",
+							ToolCallID:   "tc-1",
+							ToolCallName: "deleteFile",
+							ToolCallArgs: json.RawMessage(`{}`),
+						},
+					},
+				},
+				{
+					Role:    "assistant",
+					Content: []ContentPart{{Type: "tool_result", ToolResultID: "tc-1", ToolResultName: "deleteFile"}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
+			events := collectEvents(Run(context.Background(), RunParams{
+				Model: model, Tools: &ToolSet{Executor: &mockExecutor{}},
+				ToolApproval: requireApproval("deleteFile"), ApprovalKey: approvalTestKey,
+				Request: Request{Messages: tt.messages},
+			}))
+			if model.idx != 0 {
+				t.Fatalf("malformed history reached model: %d calls", model.idx)
+			}
+			assertApprovalError(t, events, nil)
+		})
+	}
+}
+
+func TestApproval_ResumeRequiresAtomicDecisionsForEveryPendingCall(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
+	exec := &mockExecutor{}
+	signatureA := approvalSignatureForTest(t, "tc-a", "first", `{}`)
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model: model,
+		Tools: &ToolSet{Executor: exec},
+		ToolApproval: map[string]func(string, string) bool{
+			"first":  func(string, string) bool { return true },
+			"second": func(string, string) bool { return true },
+		},
+		ApprovalKey: approvalTestKey,
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{
+				{Type: "tool_call", ToolCallID: "tc-a", ToolCallName: "first", ToolCallArgs: json.RawMessage(`{}`)},
+				{Type: "tool_call", ToolCallID: "tc-b", ToolCallName: "second", ToolCallArgs: json.RawMessage(`{}`)},
+			}},
+			{Role: "user", Content: []ContentPart{{
+				Type: "tool_approval_response", ToolApprovalID: "tc-a",
+				ToolApprovalSignature: signatureA, ToolApprovalApproved: true,
+			}}},
+		}},
+	}))
+
+	if len(exec.called) != 0 || model.idx != 0 {
+		t.Fatalf("partial approval caused side effects: tools=%v modelCalls=%d", exec.called, model.idx)
+	}
+	assertApprovalError(t, events, nil)
+}
+
+func TestApproval_ResumeValidatesWholeEnvelopeBeforeExecution(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
+	exec := &mockExecutor{}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey:  approvalTestKey,
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
+			}}},
+			{Role: "user", Content: []ContentPart{
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "tc-1",
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "unknown",
+					ToolApprovalSignature: "invalid",
+					ToolApprovalApproved:  true,
+				},
+			}},
+		}},
+	}))
+
+	if len(exec.called) != 0 || model.idx != 0 {
+		t.Fatalf("invalid envelope caused side effects: tools=%v modelCalls=%d", exec.called, model.idx)
+	}
+	assertApprovalError(t, events, nil)
+}
+
+func TestApproval_ResumeRejectsMixedApprovalMessage(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
+	exec := &mockExecutor{}
+	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
+	events := collectEvents(Run(context.Background(), RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		ApprovalKey:  approvalTestKey,
+		Request: Request{Messages: []Message{
+			{Role: "assistant", Content: []ContentPart{{
+				Type: "tool_call", ToolCallID: "tc-1", ToolCallName: "deleteFile", ToolCallArgs: json.RawMessage(`{}`),
+			}}},
+			{Role: "user", Content: []ContentPart{
+				{Type: "text", Text: "also do something else"},
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        "tc-1",
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
+			}},
+		}},
+	}))
+
+	if len(exec.called) != 0 || model.idx != 0 {
+		t.Fatalf("mixed approval caused side effects: tools=%v modelCalls=%d", exec.called, model.idx)
+	}
+	assertApprovalError(t, events, nil)
+}
+
+func assertApprovalError(t *testing.T, events []StepEvent, target error) {
+	t.Helper()
+	for _, event := range events {
+		if event.Type != StepEventError {
+			continue
+		}
+		if target == nil || errors.Is(event.Error, target) {
+			return
+		}
+	}
+	t.Fatalf("events = %#v, want approval error matching %v", events, target)
+}
+
+// TestApproval_ContextCancel_NoDeadlock verifies the engine does not deadlock
+// when the context is cancelled while an approval decision is pending. The
+// blocking approver only returns once the context is cancelled, so the run must
+// still drain to completion.
+func TestApproval_ContextCancel_NoDeadlock(t *testing.T) {
+	model := &mockModel{calls: [][]StreamEvent{
+		{toolCallEvt(0, "tc-1", "deleteFile", `{}`), finishEvt(FinishReasonToolCalls)},
+		{textEvt("after"), finishEvt(FinishReasonStop)},
+	}}
+	exec := &mockExecutor{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := Run(ctx, RunParams{
+		Model:        model,
+		Tools:        &ToolSet{Executor: exec},
+		ToolApproval: requireApproval("deleteFile"),
+		Approver:     blockingApprover{},
+		ApprovalKey:  approvalTestKey,
+		MaxSteps:     5,
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range ch {
+			// Cancel once the approval request surfaces; this unblocks the
+			// approver, which then reports the cancellation.
+			if ev.Type == StepEventToolApprovalRequest {
+				cancel()
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+		// Channel drained and closed — no deadlock.
+	case <-time.After(3 * time.Second):
+		t.Fatal("engine deadlocked awaiting approval after context cancel")
+	}
+}

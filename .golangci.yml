@@ -107,7 +107,7 @@ linters:
       # goroutine that closes it (or return it from a helper for the caller to
       # own); bodyclose cannot trace a close across the goroutine/helper boundary
       # and false-positives on these Do() calls. The bodies ARE closed.
-      - path: 'provider/(anthropic/anthropic-language-model|internal/openaichat/model|gemini/native_language_model|openai/openai-language-model-provider)\.go'
+      - path: 'provider/(anthropic/anthropic-language-model|openaicompat/model|gemini/native_language_model|openai/openai-language-model-provider)\.go'
         linters:
           - bodyclose
 
