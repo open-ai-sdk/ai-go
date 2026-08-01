@@ -45,6 +45,10 @@ func emitTerminalError(
 	for {
 		select {
 		case ch <- event:
+			if callbacks != nil && callbacks.OnChunk != nil {
+				callbackEvent := snapshotStepEvent(event)
+				safeObserver(logger, func() { callbacks.OnChunk(callbackEvent) })
+			}
 			notifyError(logger, callbacks, err)
 			return
 		default:
@@ -108,7 +112,9 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 
 	r := &run{
 		ctx: ctx, out: out, logger: params.Logger, callbacks: params.Callbacks,
-		tracer: tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
+		approvalKey:         append([]byte(nil), params.ApprovalKey...),
+		approvalReplayGuard: params.ApprovalReplayGuard,
+		tracer:              tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
 	}
 	if err := params.Tools.Validate(); err != nil {
 		r.emitError(err)
@@ -133,7 +139,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	for step := 0; params.MaxSteps <= 0 || step < params.MaxSteps; step++ {
 		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
 		// cancelled context makes the StepStart send return false and unwinds.
-		if !r.emit(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
+		if !r.emitObserved(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
 			return ctx.Err()
 		}
 
@@ -220,7 +226,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 				stepSpan.SetAttributes(stepAttrs(sr)...)
 			}
 			stepSpan.End()
-			if !r.emit(StepEvent{
+			if !r.emitObserved(StepEvent{
 				Type:             StepEventStepEnd,
 				StepNumber:       step,
 				FinishReason:     sr.finish,
@@ -245,7 +251,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 				return ctx.Err()
 			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
-			r.emit(StepEvent{Type: StepEventDone})
+			r.emitObserved(StepEvent{Type: StepEventDone})
 			return nil
 		}
 
@@ -265,7 +271,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		return ctx.Err()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
-	r.emit(StepEvent{Type: StepEventDone})
+	r.emitObserved(StepEvent{Type: StepEventDone})
 	return nil
 }
 
@@ -313,7 +319,7 @@ func (r *run) executeToolStep(
 		}
 		stepSpan.End()
 		if errors.Is(controlErr, errApprovalPending) {
-			r.emit(StepEvent{
+			r.emitObserved(StepEvent{
 				Type:         StepEventStepEnd,
 				StepNumber:   step,
 				FinishReason: FinishReasonToolCalls,
@@ -331,7 +337,9 @@ func (r *run) executeToolStep(
 				FinishReason: FinishReasonToolCalls,
 			})
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })
-			r.emit(StepEvent{Type: StepEventDone})
+			r.emitObserved(StepEvent{Type: StepEventDone})
+		} else {
+			r.emitError(controlErr)
 		}
 		return true
 	}
@@ -341,7 +349,7 @@ func (r *run) executeToolStep(
 	}
 	stepSpan.End()
 
-	if !r.emit(StepEvent{
+	if !r.emitObserved(StepEvent{
 		Type:             StepEventStepEnd,
 		StepNumber:       step,
 		FinishReason:     sr.finish,
@@ -375,7 +383,7 @@ func (r *run) executeToolStep(
 				return true
 			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })
-			r.emit(StepEvent{Type: StepEventDone})
+			r.emitObserved(StepEvent{Type: StepEventDone})
 			return true
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
@@ -22,7 +23,7 @@ func executeToolCalls(
 	for _, preparedCall := range prepared {
 		tc := preparedCall.tc
 		if preparedCall.invalidErr != nil {
-			r.emit(StepEvent{
+			r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
 				ToolCallID:        tc.id,
 				ToolCallName:      tc.name,
@@ -34,7 +35,7 @@ func executeToolCalls(
 			continue
 		}
 
-		r.emit(StepEvent{
+		r.emitObserved(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
 			ToolCallName:      tc.name,
@@ -50,27 +51,43 @@ func executeToolCalls(
 			ThoughtSignature: tc.thoughtSignature,
 		})
 
-		result, approvalErr := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
+		result, approvalResolved, approvalErr := approvedToolCall(r, r.ctx, tools, tc, preparedCall.def, approval, approver)
 		if approvalErr != nil {
 			if controlErr == nil {
 				controlErr = approvalErr
 			}
 			continue
 		}
-		// The invocation result is caller-visible even if the history-only
-		// transform below fails. Emit it before crossing that user callback
-		// boundary so a later panic cannot erase completed work.
-		r.emit(StepEvent{Type: StepEventToolResult, ToolResult: result})
-
 		// Apply ToModelOutput transform for history; event keeps original output.
 		// def was resolved once during validation (prepareToolCalls), so no
 		// second scan of tools.Definitions is needed here.
-		modelOutput := result.Output
-		if preparedCall.def.ToModelOutput != nil {
-			modelOutput = preparedCall.def.ToModelOutput(result.Output)
+		modelOutput, transformErr := transformToolOutput(r, preparedCall.def, result)
+		if transformErr != nil {
+			result.ModelOutput = result.Output
+			result.ModelOutputSet = true
+			r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result})
+			if controlErr == nil {
+				controlErr = transformErr
+			}
+			continue
 		}
+		result.ModelOutput = modelOutput
+		result.ModelOutputSet = true
+		if err := attachApprovalReceipt(r, tc, result, approvalResolved, modelOutput); err != nil {
+			if controlErr == nil {
+				controlErr = err
+			}
+			continue
+		}
+		if result.ApprovalID != "" {
+			stepToolCalls[len(stepToolCalls)-1].ApprovalID = result.ApprovalID
+			stepToolCalls[len(stepToolCalls)-1].ApprovalSignature = result.ApprovalRequestSignature
+		}
+		stepToolCalls[len(stepToolCalls)-1].Args = json.RawMessage(result.Args)
 
-		*history = append(*history, buildToolResultMessage(tc.id, tc.name, modelOutput))
+		r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result})
+		updateLatestToolCallArgs(history, result.ID, result.Args)
+		*history = append(*history, toolResultHistoryMessage(result, modelOutput))
 		stepToolResults = append(stepToolResults, *result)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
@@ -128,7 +145,7 @@ func executeToolCallsParallel(
 		}
 
 		// Emit ToolCallReady before execution starts (matches sequential contract).
-		r.emit(StepEvent{
+		r.emitObserved(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
 			ToolCallName:      tc.name,
@@ -176,15 +193,25 @@ func executeToolCallsParallel(
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			result, approvalErr := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			result, approvalResolved, approvalErr := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
 			if approvalErr != nil {
 				results[idx].controlErr = approvalErr
 				return nil
 			}
 			results[idx].result = result
-			modelOutput := result.Output
-			if def.ToModelOutput != nil {
-				modelOutput = def.ToModelOutput(result.Output)
+			modelOutput, transformErr := transformToolOutput(r, def, result)
+			if transformErr != nil {
+				result.ModelOutput = result.Output
+				result.ModelOutputSet = true
+				results[idx].controlErr = transformErr
+				results[idx].modelOutput = result.Output
+				return nil
+			}
+			result.ModelOutput = modelOutput
+			result.ModelOutputSet = true
+			if err := attachApprovalReceipt(r, tc, result, approvalResolved, modelOutput); err != nil {
+				results[idx].controlErr = err
+				return nil
 			}
 			results[idx].modelOutput = modelOutput
 			return nil
@@ -204,7 +231,7 @@ func executeToolCallsParallel(
 	toolNames = make([]string, 0, len(prepared))
 	for _, res := range results {
 		if !res.valid {
-			r.emit(StepEvent{
+			r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
 				ToolCallID:        res.tc.id,
 				ToolCallName:      res.tc.name,
@@ -216,16 +243,29 @@ func executeToolCallsParallel(
 		}
 
 		if res.result != nil {
-			r.emit(StepEvent{Type: StepEventToolResult, ToolResult: res.result})
-			*history = append(*history, buildToolResultMessage(res.tc.id, res.tc.name, res.modelOutput))
+			r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result})
+			updateLatestToolCallArgs(history, res.result.ID, res.result.Args)
+			*history = append(*history, toolResultHistoryMessage(res.result, res.modelOutput))
 		}
 		toolNames = append(toolNames, res.tc.name)
+		approvalID, approvalSignature := "", ""
+		if res.result != nil {
+			approvalID = res.result.ApprovalID
+			approvalSignature = res.result.ApprovalRequestSignature
+		}
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
-			ID:               res.tc.id,
-			Name:             res.tc.name,
-			Args:             json.RawMessage(res.tc.args),
-			ArgsSet:          true,
-			ThoughtSignature: res.tc.thoughtSignature,
+			ID:   res.tc.id,
+			Name: res.tc.name,
+			Args: func() json.RawMessage {
+				if res.result != nil {
+					return json.RawMessage(res.result.Args)
+				}
+				return json.RawMessage(res.tc.args)
+			}(),
+			ArgsSet:           true,
+			ThoughtSignature:  res.tc.thoughtSignature,
+			ApprovalID:        approvalID,
+			ApprovalSignature: approvalSignature,
 		})
 		if res.result != nil {
 			stepToolResults = append(stepToolResults, *res.result)
@@ -234,9 +274,6 @@ func executeToolCallsParallel(
 			(errors.Is(controlErr, errApprovalPending) && !errors.Is(res.controlErr, errApprovalPending))) {
 			controlErr = res.controlErr
 		}
-	}
-	if controlErr != nil && !errors.Is(controlErr, errApprovalPending) {
-		r.emitError(controlErr)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
 }
@@ -249,27 +286,82 @@ func approvedToolCall(
 	def ToolDefinition,
 	approval map[string]func(string, string) bool,
 	approver ApprovalResponder,
-) (*ToolResult, error) {
-	if policy := approval[tc.name]; policy != nil && policy(tc.name, tc.args) {
-		request := ApprovalRequest{ApprovalID: tc.id, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
-		r.emit(
+) (*ToolResult, bool, error) {
+	if policy := approval[tc.name]; policy != nil {
+		canonicalArgs, _, err := canonicalizeApprovalInput(tc.args)
+		if err != nil {
+			return nil, false, fmt.Errorf("agent: canonicalize approval input: %w", err)
+		}
+		tc.args = canonicalArgs
+		if _, err := validateToolCall(tools, tc); err != nil {
+			return nil, false, fmt.Errorf("agent: validate canonical approval input: %w", err)
+		}
+		if !policy(tc.name, tc.args) {
+			if err := ctx.Err(); err != nil {
+				return nil, false, err
+			}
+			return executeApprovedToolCall(r, ctx, tools, tc, def), false, nil
+		}
+		approvalID, err := newApprovalID()
+		if err != nil {
+			return nil, false, err
+		}
+		request := ApprovalRequest{ApprovalID: approvalID, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args}
+		signature, err := signApprovalRequest(r.approvalKey, request)
+		if err != nil {
+			return nil, false, err
+		}
+		if !r.emitObserved(
 			StepEvent{
 				Type:              StepEventToolApprovalRequest,
 				ToolCallID:        tc.id,
 				ToolCallName:      tc.name,
 				ToolCallArgsDelta: tc.args,
+				ApprovalID:        request.ApprovalID,
+				ApprovalSignature: signature,
 			},
-		)
+		) {
+			return nil, false, ctx.Err()
+		}
 		if approver == nil {
-			return nil, errApprovalPending
+			return nil, false, errApprovalPending
 		}
 		response, err := approver.RequestApproval(ctx, request)
-		if err != nil || !response.Approved {
-			r.emit(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
-			return deniedToolResult(tc, response.Reason, err), nil
+		if err == nil && response.ApprovalID != request.ApprovalID {
+			err = fmt.Errorf(
+				"agent: approval responder returned ID %q for request %q",
+				response.ApprovalID, request.ApprovalID,
+			)
 		}
+		if err != nil || !response.Approved {
+			r.emitObserved(StepEvent{Type: StepEventToolOutputDenied, ToolCallID: tc.id})
+			result := deniedToolResult(tc, response.Reason, err)
+			result.ApprovalID = request.ApprovalID
+			result.ApprovalRequestSignature = signature
+			return result, true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		result := executeApprovedToolCall(r, ctx, tools, tc, def)
+		result.ApprovalID = request.ApprovalID
+		result.ApprovalRequestSignature = signature
+		result.ApprovalApproved = true
+		return result, true, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	return executeApprovedToolCall(r, ctx, tools, tc, def), false, nil
+}
 
+func executeApprovedToolCall(
+	r *run,
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+) *ToolResult {
 	// Built only when tracing is enabled — see the matching comment in
 	// runLoop for why this can't just rely on NoopTracer discarding attrs.
 	var startAttrs []tracing.Attr
@@ -285,7 +377,59 @@ func approvedToolCall(
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.output", Value: result.Output})
 	}
-	return result, nil
+	return result
+}
+
+func transformToolOutput(r *run, def ToolDefinition, result *ToolResult) (output string, err error) {
+	output = result.Output
+	if def.ToModelOutput == nil {
+		return output, nil
+	}
+	defer safego.Recover(r.logger, func(recovered error) { err = recovered }, "phase", "tool-output-transform")
+	output = def.ToModelOutput(result.Output)
+	return output, nil
+}
+
+func attachApprovalReceipt(
+	r *run,
+	tc toolCallState,
+	result *ToolResult,
+	approvalResolved bool,
+	modelOutput string,
+) error {
+	if !approvalResolved {
+		return nil
+	}
+	request := ApprovalRequest{
+		ApprovalID: result.ApprovalID, ToolCallID: tc.id, ToolName: tc.name, Args: tc.args,
+	}
+	receipt, err := signApprovalResult(r.approvalKey, request, result.ApprovalApproved, modelOutput)
+	if err != nil {
+		return err
+	}
+	result.ApprovalSignature = receipt
+	return nil
+}
+
+func toolResultHistoryMessage(result *ToolResult, modelOutput string) Message {
+	message := buildToolResultMessageWithApproval(
+		result.ID, result.Name, modelOutput, result.ApprovalSignature, result.ApprovalApproved,
+	)
+	message.Content[0].ToolApprovalID = result.ApprovalID
+	return message
+}
+
+func updateLatestToolCallArgs(history *[]Message, toolCallID, args string) {
+	for messageIndex := len(*history) - 1; messageIndex >= 0; messageIndex-- {
+		message := &(*history)[messageIndex]
+		for partIndex := len(message.Content) - 1; partIndex >= 0; partIndex-- {
+			part := &message.Content[partIndex]
+			if part.Type == "tool_call" && part.ToolCallID == toolCallID {
+				part.ToolCallArgs = json.RawMessage(args)
+				return
+			}
+		}
+	}
 }
 
 func deniedToolResult(

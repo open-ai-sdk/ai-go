@@ -128,14 +128,17 @@ func ToolResultPart(id, name, output string) ContentPart {
 }
 
 // ToolApprovalResponsePart carries a decision for a previously emitted tool
-// approval request. Add it to the next request's message history; the agent
-// resolves the matching pending tool call without retaining server state.
-func ToolApprovalResponsePart(approvalID string, approved bool, reason string) ContentPart {
+// approval request. Add it as the only content of a user message in the next
+// request's history and echo the request signature. The agent verifies the
+// signature and resolves the matching pending tool call without retaining
+// server state.
+func ToolApprovalResponsePart(approvalID, signature string, approved bool, reason string) ContentPart {
 	return ContentPart{
-		Type:                 ContentPartTypeToolApprovalResponse,
-		ToolApprovalID:       approvalID,
-		ToolApprovalApproved: approved,
-		ToolApprovalReason:   reason,
+		Type:                  ContentPartTypeToolApprovalResponse,
+		ToolApprovalID:        approvalID,
+		ToolApprovalSignature: signature,
+		ToolApprovalApproved:  approved,
+		ToolApprovalReason:    reason,
 	}
 }
 

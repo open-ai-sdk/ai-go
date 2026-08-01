@@ -15,6 +15,14 @@ func chunkEvent(event StepEvent) ChunkEvent {
 		eventType = "tool-call-ready"
 	case StepEventToolResult:
 		eventType = "tool-result"
+	case StepEventToolApprovalRequest:
+		eventType = "tool-approval-request"
+	case StepEventToolOutputDenied:
+		eventType = "tool-output-denied"
+	case StepEventToolCallInvalid:
+		eventType = "tool-call-invalid"
+	case StepEventStructuredOutput:
+		eventType = "structured-output"
 	case StepEventUsage:
 		eventType = "usage"
 	case StepEventStepStart:
@@ -39,6 +47,8 @@ func chunkEvent(event StepEvent) ChunkEvent {
 		ToolCallID:        event.ToolCallID,
 		ToolCallName:      event.ToolCallName,
 		ToolCallArgsDelta: event.ToolCallArgsDelta,
+		ApprovalID:        event.ApprovalID,
+		ApprovalSignature: event.ApprovalSignature,
 		StepNumber:        event.StepNumber,
 		FinishReason:      event.FinishReason,
 		Usage:             event.Usage,

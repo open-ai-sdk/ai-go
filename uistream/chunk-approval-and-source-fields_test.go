@@ -14,6 +14,7 @@ func TestChunkProducer_ToolApprovalRequest_OptionalFields(t *testing.T) {
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{
 			Type:                aikit.StepEventToolApprovalRequest,
+			ApprovalID:          "approval-1",
 			ToolCallID:          "call-1",
 			ToolCallName:        "deleteFile",
 			ToolCallArgsDelta:   `{"path":"/tmp/x"}`,
@@ -30,8 +31,8 @@ func TestChunkProducer_ToolApprovalRequest_OptionalFields(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool-approval-request chunk")
 	}
-	if c.Fields["approvalId"] != "call-1" {
-		t.Errorf("approvalId = %v, want call-1", c.Fields["approvalId"])
+	if c.Fields["approvalId"] != "approval-1" {
+		t.Errorf("approvalId = %v, want approval-1", c.Fields["approvalId"])
 	}
 	if c.Fields["isAutomatic"] != true {
 		t.Errorf("isAutomatic = %v, want true", c.Fields["isAutomatic"])

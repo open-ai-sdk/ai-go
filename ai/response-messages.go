@@ -19,11 +19,13 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	}
 	for _, tc := range step.ToolCalls {
 		assistantParts = append(assistantParts, ContentPart{
-			Type:             ContentPartTypeToolCall,
-			ToolCallID:       tc.ID,
-			ToolCallName:     tc.Name,
-			ToolCallArgs:     tc.Args,
-			ThoughtSignature: tc.ThoughtSignature,
+			Type:                  ContentPartTypeToolCall,
+			ToolCallID:            tc.ID,
+			ToolCallName:          tc.Name,
+			ToolCallArgs:          tc.Args,
+			ThoughtSignature:      tc.ThoughtSignature,
+			ToolApprovalID:        tc.ApprovalID,
+			ToolApprovalSignature: tc.ApprovalSignature,
 		})
 	}
 	if len(assistantParts) > 0 {
@@ -34,11 +36,13 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	}
 
 	for _, tr := range step.ToolResults {
+		part := ToolResultPart(tr.ID, tr.Name, responseMessageToolOutput(tr, tools))
+		part.ToolApprovalID = tr.ApprovalID
+		part.ToolResultApprovalSignature = tr.ApprovalSignature
+		part.ToolResultApprovalApproved = tr.ApprovalApproved
 		messages = append(messages, Message{
-			Role: RoleTool,
-			Content: []ContentPart{
-				ToolResultPart(tr.ID, tr.Name, responseMessageToolOutput(tr, tools)),
-			},
+			Role:    RoleTool,
+			Content: []ContentPart{part},
 		})
 	}
 
@@ -59,6 +63,9 @@ func ResponseMessagesForSteps(steps []StepOutput, tools *ToolSet) []Message {
 }
 
 func responseMessageToolOutput(result ToolResult, tools *ToolSet) string {
+	if result.ModelOutputSet {
+		return result.ModelOutput
+	}
 	if tools == nil {
 		return result.Output
 	}

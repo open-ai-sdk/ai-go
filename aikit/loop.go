@@ -17,11 +17,13 @@ type StepResult struct {
 
 // ToolCallInfo describes a completed model tool call.
 type ToolCallInfo struct {
-	ID               string
-	Name             string
-	Args             json.RawMessage
-	ArgsSet          bool
-	ThoughtSignature string
+	ID                string
+	Name              string
+	Args              json.RawMessage
+	ArgsSet           bool
+	ThoughtSignature  string
+	ApprovalID        string
+	ApprovalSignature string
 }
 
 // RepairToolCallInput describes a tool call that failed validation.

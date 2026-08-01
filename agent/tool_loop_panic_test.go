@@ -91,9 +91,13 @@ func TestRun_OnChunkPanic_RunCompletes(t *testing.T) {
 }
 
 func TestRun_PanicDuringInitialization_EmitsErrorAndClosesChannel(t *testing.T) {
+	var chunkError bool
 	ch := Run(context.Background(), RunParams{
 		Model:  &mockModel{},
 		tracer: panicStartTracer{},
+		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
+			chunkError = chunkError || event.Type == StepEventError
+		}},
 	})
 
 	var events []StepEvent
@@ -106,5 +110,8 @@ func TestRun_PanicDuringInitialization_EmitsErrorAndClosesChannel(t *testing.T) 
 	var panicErr *safego.PanicError
 	if !errors.As(events[0].Error, &panicErr) {
 		t.Fatalf("error = %T %v, want *safego.PanicError", events[0].Error, events[0].Error)
+	}
+	if !chunkError {
+		t.Fatal("terminal initialization error did not reach OnChunk")
 	}
 }

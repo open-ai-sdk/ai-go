@@ -88,6 +88,16 @@ func WithToolApproval(approval map[string]ToolApprovalFunc) Option {
 	return func(r *GenerateTextRequest) { r.ToolApproval = approval }
 }
 
+// WithToolApprovalKey sets the HMAC key used for stateless approval
+// suspension and resumption. The key must contain at least 32 random bytes.
+func WithToolApprovalKey(key []byte) Option {
+	return func(r *GenerateTextRequest) { r.ToolApprovalKey = append([]byte(nil), key...) }
+}
+
+func WithToolApprovalReplayGuard(guard ToolApprovalReplayGuard) Option {
+	return func(r *GenerateTextRequest) { r.ToolApprovalReplayGuard = guard }
+}
+
 // WithModel overrides the model for this single call, ignoring the Runtime default.
 func WithModel(m LanguageModel) Option {
 	return func(r *GenerateTextRequest) { r.Model = m }

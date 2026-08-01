@@ -207,6 +207,7 @@ result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
     Model:    model,
     Messages: []ai.Message{ai.UserMessage("Delete stale records")},
     Tools:    tools,
+    ToolApprovalKey: approvalKey, // 32+ server-side random bytes
     ToolApproval: map[string]ai.ToolApprovalFunc{
         "deleteRecords": func(name string, args json.RawMessage) ai.ApprovalDecision {
             return ai.ApprovalRequired
@@ -220,19 +221,53 @@ result, _ := ai.GenerateText(ctx, ai.GenerateTextRequest{
 ```
 
 For a UI or other asynchronous approval flow, omit the responder and resume
-after the operator decides:
+after the operator decides. Configure the same random key, replay guard, and
+approval policy on both invocations. Derive a distinct server-side key for each
+authenticated tenant or conversation audience; never send that key to the
+client. The AI SDK v7 signature binds the approval ID, tool call ID, tool name,
+and canonical arguments so edited or fabricated history is rejected before any
+tool runs. It proves that the server gated the exact call, not that a user chose
+`Approved`; authenticate and authorize the user who submits that decision.
+Non-I-JSON input containing invalid UTF-8 or unpaired surrogate escapes fails
+closed instead of being silently repaired differently by Go and JavaScript.
+
+Keep approval responses in a dedicated user message with no other content. An
+approved signature is an at-most-once capability: the replay guard reserves it,
+marks it complete after a tool attempt, and releases unstarted claims on
+cancellation. `NewMemoryToolApprovalReplayGuard` is for tests, development, and
+bounded-lifetime jobs; production needs a bounded shared transactional store
+with claim leases/fencing. Preserve the returned, runtime-signed tool result
+messages on later continuations. Side-effecting executors should also use
+`tool.ToolCallIDFromContext` as their idempotency key for client retries and
+cancellation reconciliation.
 
 ```go
+approvalKey := make([]byte, 32)
+_, _ = rand.Read(approvalKey) // persist/share this key across server instances
+approvalPolicy := map[string]ai.ToolApprovalFunc{
+    "deleteRecords": func(string, json.RawMessage) ai.ApprovalDecision {
+        return ai.ApprovalRequired
+    },
+}
+replayGuard := ai.NewMemoryToolApprovalReplayGuard() // use a durable shared guard in a cluster
+
+result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+    Model: model, Messages: request.Messages, Tools: tools,
+    ToolApproval: approvalPolicy, ToolApprovalKey: approvalKey,
+})
+pending := result.ToolApprovalRequests[0]
 history := append(append([]ai.Message{}, request.Messages...), result.Response.Messages...)
 history = append(history, ai.Message{
     Role: ai.RoleUser,
     Content: []ai.ContentPart{
-        ai.ToolApprovalResponsePart(pendingToolCallID, true, "approved"),
+        ai.ToolApprovalResponsePart(pending.ApprovalID, pending.Signature, true, "approved"),
     },
 })
 
 result, err = ai.GenerateText(ctx, ai.GenerateTextRequest{
     Model: model, Messages: history, Tools: tools,
+    ToolApproval: approvalPolicy, ToolApprovalKey: approvalKey,
+    ToolApprovalReplayGuard: replayGuard,
 })
 ```
 

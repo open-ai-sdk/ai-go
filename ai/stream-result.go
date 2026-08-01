@@ -214,6 +214,7 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 	result := &GenerateTextResult{}
 	var currentStep *StepOutput
 	var currentUsage Usage
+	var preludeToolResults []ToolResult
 
 	for ev := range b.ch {
 		switch ev.Type {
@@ -243,6 +244,14 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 			handleToolCallReady(ev, currentStep)
 
 		case StepEventToolResult:
+			if currentStep == nil && ev.ToolResult != nil {
+				preludeToolResults = append(preludeToolResults, *ev.ToolResult)
+			}
+			if ev.ToolResult != nil {
+				result.ToolApprovalRequests = removeResolvedApprovalRequest(
+					result.ToolApprovalRequests, ev.ToolResult.ID,
+				)
+			}
 			handleToolResult(ev, result, currentStep)
 
 		case StepEventUsage:
@@ -261,17 +270,76 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 		case StepEventStructuredOutput:
 			result.StructuredOutput = ev.StructuredOutput
 
-		case StepEventToolApprovalRequest, StepEventToolOutputDenied, StepEventToolCallInvalid:
-			// Observed for streaming/UI consumers; they carry no aggregate state
-			// into the non-streaming result, so Consume records nothing here.
+		case StepEventToolApprovalRequest:
+			handleToolApprovalRequest(ev, currentStep)
+			result.ToolApprovalRequests = append(result.ToolApprovalRequests, ToolApprovalRequest{
+				ApprovalID: ev.ApprovalID,
+				ToolCallID: ev.ToolCallID,
+				ToolName:   ev.ToolCallName,
+				Args:       json.RawMessage(ev.ToolCallArgsDelta),
+				Signature:  ev.ApprovalSignature,
+			})
+
+		case StepEventToolOutputDenied, StepEventToolCallInvalid:
+			// Observed for streaming/UI consumers; aggregate state is carried by
+			// the corresponding ToolResult event.
 
 		case StepEventError:
+			result.Response = Response{Messages: responseMessagesWithPrelude(
+				preludeToolResults, result.Steps, sr.tools,
+			)}
 			return result, ev.Error
 		}
 	}
 
-	result.Response = Response{Messages: ResponseMessagesForSteps(result.Steps, sr.tools)}
+	result.Response = Response{Messages: responseMessagesWithPrelude(
+		preludeToolResults, result.Steps, sr.tools,
+	)}
 	return result, nil
+}
+
+func handleToolApprovalRequest(event StepEvent, step *StepOutput) {
+	if step == nil {
+		return
+	}
+	for i := range step.ToolCalls {
+		if step.ToolCalls[i].ID == event.ToolCallID {
+			step.ToolCalls[i].ApprovalID = event.ApprovalID
+			step.ToolCalls[i].ApprovalSignature = event.ApprovalSignature
+			return
+		}
+	}
+}
+
+func removeResolvedApprovalRequest(
+	requests []ToolApprovalRequest,
+	toolCallID string,
+) []ToolApprovalRequest {
+	for i, request := range requests {
+		if request.ToolCallID == toolCallID {
+			return append(requests[:i], requests[i+1:]...)
+		}
+	}
+	return requests
+}
+
+func responseMessagesWithPrelude(
+	prelude []ToolResult,
+	steps []StepOutput,
+	tools *ToolSet,
+) []Message {
+	messages := make([]Message, 0, len(prelude)+len(steps))
+	for _, result := range prelude {
+		part := ToolResultPart(result.ID, result.Name, responseMessageToolOutput(result, tools))
+		part.ToolResultApprovalSignature = result.ApprovalSignature
+		part.ToolResultApprovalApproved = result.ApprovalApproved
+		part.ToolApprovalID = result.ApprovalID
+		messages = append(messages, Message{
+			Role:    RoleTool,
+			Content: []ContentPart{part},
+		})
+	}
+	return append(messages, ResponseMessagesForSteps(steps, tools)...)
 }
 
 func handleToolCallStart(event StepEvent, step *StepOutput) {
@@ -323,6 +391,16 @@ func handleToolResult(event StepEvent, result *GenerateTextResult, step *StepOut
 	}
 	result.ToolResults = append(result.ToolResults, *event.ToolResult)
 	if step != nil {
+		for i := range step.ToolCalls {
+			if step.ToolCalls[i].ID == event.ToolResult.ID {
+				step.ToolCalls[i].Args = json.RawMessage(event.ToolResult.Args)
+				if event.ToolResult.ApprovalID != "" {
+					step.ToolCalls[i].ApprovalID = event.ToolResult.ApprovalID
+					step.ToolCalls[i].ApprovalSignature = event.ToolResult.ApprovalRequestSignature
+				}
+				break
+			}
+		}
 		step.ToolResults = append(step.ToolResults, *event.ToolResult)
 	}
 }

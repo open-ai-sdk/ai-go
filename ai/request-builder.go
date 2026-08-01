@@ -156,6 +156,16 @@ func (b RequestBuilder) ToolApproval(policies map[string]ToolApprovalFunc) Reque
 	return b
 }
 
+func (b RequestBuilder) ToolApprovalKey(key []byte) RequestBuilder {
+	b.request.ToolApprovalKey = append([]byte(nil), key...)
+	return b
+}
+
+func (b RequestBuilder) ToolApprovalReplayGuard(guard ToolApprovalReplayGuard) RequestBuilder {
+	b.request.ToolApprovalReplayGuard = guard
+	return b
+}
+
 func (b RequestBuilder) ToolApprovalResponder(responder ToolApprovalResponder) RequestBuilder {
 	b.request.ToolApprovalResponder = responder
 	return b

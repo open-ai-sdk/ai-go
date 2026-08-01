@@ -118,14 +118,18 @@ type EndEvent struct {
 
 // RunParams configures a single agent run.
 type RunParams struct {
-	Model                 Model
-	Request               Request
-	Tools                 *ToolSet
-	StopWhen              StopCondition
-	MaxSteps              int
-	PrepareStep           PrepareStepFunc
-	RepairToolCall        ToolCallRepairFunc
-	ToolApproval          map[string]func(string, string) bool
+	Model          Model
+	Request        Request
+	Tools          *ToolSet
+	StopWhen       StopCondition
+	MaxSteps       int
+	PrepareStep    PrepareStepFunc
+	RepairToolCall ToolCallRepairFunc
+	ToolApproval   map[string]func(string, string) bool
+	// ApprovalKey authenticates stateless approval requests and responses.
+	// It must contain at least 32 bytes when an approval can suspend.
+	ApprovalKey           []byte
+	ApprovalReplayGuard   ApprovalReplayGuard
 	Approver              ApprovalResponder
 	Callbacks             *LifecycleCallbacks
 	ParallelToolExecution bool

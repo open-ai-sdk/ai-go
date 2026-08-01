@@ -46,10 +46,16 @@ type ContentPart struct {
 	ToolResultID     string
 	ToolResultName   string
 	ToolResultOutput string
+	// ToolResultApprovalSignature authenticates a runtime-produced result for
+	// an approval-gated call when the consumed approval response is omitted
+	// from clean continuation history.
+	ToolResultApprovalSignature string
+	ToolResultApprovalApproved  bool
 
-	ToolApprovalID       string
-	ToolApprovalApproved bool
-	ToolApprovalReason   string
+	ToolApprovalID        string
+	ToolApprovalSignature string
+	ToolApprovalApproved  bool
+	ToolApprovalReason    string
 
 	ReasoningText string
 }

@@ -32,13 +32,22 @@ func buildAssistantToolCallMessage(text, reasoning string, calls []toolCallState
 }
 
 func buildToolResultMessage(toolCallID, toolName, output string) Message {
+	return buildToolResultMessageWithApproval(toolCallID, toolName, output, "", false)
+}
+
+func buildToolResultMessageWithApproval(
+	toolCallID, toolName, output, signature string,
+	approved bool,
+) Message {
 	return Message{
 		Role: "tool",
 		Content: []ContentPart{{
-			Type:             "tool_result",
-			ToolResultID:     toolCallID,
-			ToolResultName:   toolName,
-			ToolResultOutput: output,
+			Type:                        "tool_result",
+			ToolResultID:                toolCallID,
+			ToolResultName:              toolName,
+			ToolResultOutput:            output,
+			ToolResultApprovalSignature: signature,
+			ToolResultApprovalApproved:  approved,
 		}},
 	}
 }

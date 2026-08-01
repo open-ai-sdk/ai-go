@@ -172,7 +172,8 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 				ToolApproval: map[string]func(string, string) bool{
 					"search": func(string, string) bool { return true },
 				},
-				Approver: panicApprovalResponder{},
+				Approver:    panicApprovalResponder{},
+				ApprovalKey: approvalTestKey,
 			},
 		},
 	}

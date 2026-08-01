@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -38,6 +39,66 @@ func runStructuredOutputEngine(t *testing.T, modelResponse string) []StepEvent {
 		events = append(events, ev)
 	}
 	return events
+}
+
+func TestStructuredOutput_EnforcesStandardSchemaConstraints(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		schema map[string]any
+	}{
+		{
+			name: "pattern",
+			raw:  `{"code":"lower"}`,
+			schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{"code": map[string]any{
+					"type": "string", "pattern": "^[A-Z]+$",
+				}},
+			},
+		},
+		{name: "minimum", raw: `3`, schema: map[string]any{"type": "number", "minimum": 5}},
+		{name: "minItems", raw: `[]`, schema: map[string]any{"type": "array", "minItems": 1}},
+		{name: "format", raw: `"not-a-date"`, schema: map[string]any{"type": "string", "format": "date-time"}},
+		{
+			name: "oneOf",
+			raw:  `true`,
+			schema: map[string]any{"oneOf": []any{
+				map[string]any{"type": "string"}, map[string]any{"type": "number"},
+			}},
+		},
+		{name: "type array", raw: `true`, schema: map[string]any{"type": []any{"string", "null"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateStructuredOutput(json.RawMessage(test.raw), &OutputSchema{
+				Type: "object", Schema: test.schema,
+			})
+			if err == nil {
+				t.Fatal("expected schema validation error")
+			}
+			var structuredErr *StructuredOutputError
+			if !errors.As(err, &structuredErr) {
+				t.Fatalf("error = %T %v, want StructuredOutputError", err, err)
+			}
+		})
+	}
+}
+
+func TestStructuredOutput_ExternalSchemaReferenceFailsClosed(t *testing.T) {
+	err := validateStructuredOutput(json.RawMessage(`{"ok":true}`), &OutputSchema{
+		Type: "object",
+		Schema: map[string]any{
+			"$ref": "https://example.invalid/untrusted-schema.json",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected an unresolved external schema reference to fail closed")
+	}
+	var structuredErr *StructuredOutputError
+	if !errors.As(err, &structuredErr) || structuredErr.Path != "$schema" {
+		t.Fatalf("error = %T %v, want $schema StructuredOutputError", err, err)
+	}
 }
 
 func findStructuredOutput(events []StepEvent) (StepEvent, bool) {

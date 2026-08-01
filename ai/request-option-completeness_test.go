@@ -13,32 +13,34 @@ func TestGenerateTextRequest_OptionCompleteness(t *testing.T) {
 	// Fields settable via a dedicated WithX option (Settings is covered by the
 	// sub-field options WithTemperature/WithMaxTokens/WithTopP).
 	optioned := map[string]bool{
-		"Model":                 true, // WithModel
-		"Instructions":          true, // WithInstructions
-		"Messages":              true, // WithMessages
-		"Tools":                 true, // WithTools
-		"ToolChoice":            true, // WithToolChoice
-		"StopWhen":              true, // WithStopWhen
-		"Output":                true, // WithOutput
-		"Settings":              true, // WithTemperature/WithMaxTokens/WithTopP
-		"MaxSteps":              true, // WithMaxSteps
-		"ProviderOptions":       true, // WithProviderOptions
-		"PrepareStep":           true, // WithPrepareStep
-		"RepairToolCall":        true, // WithRepairToolCall
-		"ActiveTools":           true, // WithActiveTools
-		"ToolsContext":          true, // WithToolsContext
-		"RuntimeContext":        true, // WithRuntimeContext
-		"ToolApproval":          true, // WithToolApproval
-		"OnStepEnd":             true, // WithOnStepEnd
-		"OnEnd":                 true, // WithOnEnd
-		"OnChunk":               true, // WithOnChunk
-		"OnError":               true, // WithOnError
-		"SmoothStream":          true, // WithSmoothStream
-		"Middlewares":           true, // WithMiddleware
-		"ParallelToolExecution": true, // WithParallelToolExecution
-		"MaxParallelTools":      true, // WithMaxParallelTools
-		"Logger":                true, // WithLogger
-		"TraceContent":          true, // WithTraceContent
+		"Model":                   true, // WithModel
+		"Instructions":            true, // WithInstructions
+		"Messages":                true, // WithMessages
+		"Tools":                   true, // WithTools
+		"ToolChoice":              true, // WithToolChoice
+		"StopWhen":                true, // WithStopWhen
+		"Output":                  true, // WithOutput
+		"Settings":                true, // WithTemperature/WithMaxTokens/WithTopP
+		"MaxSteps":                true, // WithMaxSteps
+		"ProviderOptions":         true, // WithProviderOptions
+		"PrepareStep":             true, // WithPrepareStep
+		"RepairToolCall":          true, // WithRepairToolCall
+		"ActiveTools":             true, // WithActiveTools
+		"ToolsContext":            true, // WithToolsContext
+		"RuntimeContext":          true, // WithRuntimeContext
+		"ToolApproval":            true, // WithToolApproval
+		"ToolApprovalKey":         true, // WithToolApprovalKey
+		"ToolApprovalReplayGuard": true, // WithToolApprovalReplayGuard
+		"OnStepEnd":               true, // WithOnStepEnd
+		"OnEnd":                   true, // WithOnEnd
+		"OnChunk":                 true, // WithOnChunk
+		"OnError":                 true, // WithOnError
+		"SmoothStream":            true, // WithSmoothStream
+		"Middlewares":             true, // WithMiddleware
+		"ParallelToolExecution":   true, // WithParallelToolExecution
+		"MaxParallelTools":        true, // WithMaxParallelTools
+		"Logger":                  true, // WithLogger
+		"TraceContent":            true, // WithTraceContent
 	}
 	// Fields intentionally without a top-level option, with the reason.
 	exempt := map[string]bool{

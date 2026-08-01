@@ -46,11 +46,22 @@ type GenerateTextRequest struct {
 	// before they are surfaced as invalid.
 	RepairToolCall RepairToolCallFunc
 	// ActiveTools filters the tool set to only these tool names. Nil means all tools.
-	ActiveTools           []string
-	ToolsContext          ToolsContext
-	RuntimeContext        RuntimeContext
-	ToolApproval          map[string]ToolApprovalFunc
-	ToolApprovalResponder ToolApprovalResponder
+	ActiveTools    []string
+	ToolsContext   ToolsContext
+	RuntimeContext RuntimeContext
+	ToolApproval   map[string]ToolApprovalFunc
+	// ToolApprovalKey authenticates approval requests resumed through message
+	// history and signs completed results from synchronous responders. Every
+	// approval-gated call requires at least 32 random bytes; keep the same key
+	// across continuations. Derive separate keys for separate authenticated
+	// audiences because the frozen v1 wire signature contains no tenant field.
+	ToolApprovalKey []byte
+	// ToolApprovalReplayGuard atomically reserves approved capabilities before
+	// tools run and completes them afterward. It is required for approved
+	// history resume. Production deployments should use a bounded, durable
+	// lease/fencing implementation shared by every server instance.
+	ToolApprovalReplayGuard ToolApprovalReplayGuard
+	ToolApprovalResponder   ToolApprovalResponder
 	// OnStepEnd is called after each step completes.
 	OnStepEnd func(StepEndEvent)
 	// OnEnd is called when the entire run completes.
@@ -110,14 +121,18 @@ type GenerateTextResult struct {
 	Reasoning string
 	Steps     []StepOutput
 	// FinalStep contains the complete final-step output. It is zero when no step completed.
-	FinalStep        StepOutput
-	ToolResults      []ToolResult
-	Usage            Usage
-	FinishReason     FinishReason
-	RawFinishReason  string
-	ProviderMetadata map[string]any
-	Warnings         []Warning
-	Sources          []Source
+	FinalStep   StepOutput
+	ToolResults []ToolResult
+	// ToolApprovalRequests contains calls that suspended awaiting a stateless
+	// approval decision. Their signatures must be echoed through
+	// ToolApprovalResponsePart on resume.
+	ToolApprovalRequests []ToolApprovalRequest
+	Usage                Usage
+	FinishReason         FinishReason
+	RawFinishReason      string
+	ProviderMetadata     map[string]any
+	Warnings             []Warning
+	Sources              []Source
 	// Files holds file/image outputs from the model (aggregated across all steps).
 	Files            []GeneratedFile
 	StructuredOutput json.RawMessage
@@ -165,6 +180,8 @@ type ChunkEvent struct {
 	ToolCallID        string
 	ToolCallName      string
 	ToolCallArgsDelta string
+	ApprovalID        string
+	ApprovalSignature string
 	StepNumber        int
 	FinishReason      FinishReason
 	// Typed payloads previously dropped by the flattening converter. Each is set

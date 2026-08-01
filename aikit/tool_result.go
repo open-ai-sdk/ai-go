@@ -19,6 +19,16 @@ type ToolResult struct {
 	Name   string
 	Args   string
 	Output string
+	// ModelOutput is the already-computed provider-history representation.
+	// ModelOutputSet distinguishes an intentional empty transform result.
+	ModelOutput    string
+	ModelOutputSet bool
+	// ApprovalSignature authenticates model-visible output produced while
+	// resolving a signed history approval.
+	ApprovalSignature        string
+	ApprovalApproved         bool
+	ApprovalID               string
+	ApprovalRequestSignature string
 	// Error retains typed tool failure classification for agent and wire
 	// adapters. Output remains the model-visible raw string.
 	Error   error `json:"-"`

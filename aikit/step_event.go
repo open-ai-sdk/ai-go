@@ -44,9 +44,10 @@ type StepEvent struct {
 
 	// Approval fields (set for StepEventToolApprovalRequest). ApprovalIsAutomatic
 	// marks an approval that was granted without human input; ApprovalSignature
-	// carries a provider-supplied signature for the approval. Both are optional
-	// and omitted from the UI chunk when unset.
+	// carries the runtime HMAC signature that must be echoed on stateless resume.
+	// Both are optional and omitted from the UI chunk when unset.
 	ApprovalIsAutomatic bool
+	ApprovalID          string
 	ApprovalSignature   string
 
 	// Tool result.

@@ -13,10 +13,12 @@ import (
 // cancellation latency to one in-flight event: a cancelled context unblocks any
 // pending send instead of leaving a goroutine parked on a full channel.
 type run struct {
-	ctx       context.Context
-	out       chan<- StepEvent
-	logger    *slog.Logger
-	callbacks *LifecycleCallbacks
+	ctx                 context.Context
+	out                 chan<- StepEvent
+	logger              *slog.Logger
+	callbacks           *LifecycleCallbacks
+	approvalKey         []byte
+	approvalReplayGuard ApprovalReplayGuard
 	// tracer is never nil: runLoop substitutes tracing.NoopTracer{} when the
 	// caller configured none, so every call site can use it unconditionally.
 	tracer tracing.Tracer
@@ -58,7 +60,7 @@ func notifyError(logger *slog.Logger, callbacks *LifecycleCallbacks, err error) 
 }
 
 func (r *run) emitError(err error) bool {
-	if !r.emit(StepEvent{Type: StepEventError, Error: err}) {
+	if !r.emitObserved(StepEvent{Type: StepEventError, Error: err}) {
 		return false
 	}
 	notifyError(r.logger, r.callbacks, err)
@@ -80,4 +82,18 @@ func (r *run) emit(ev StepEvent) bool {
 	case <-r.ctx.Done():
 		return false
 	}
+}
+
+// emitObserved delivers a runtime-generated event and mirrors it to OnChunk.
+// Provider stream events use applyStreamEvent, which already performs the same
+// callback dispatch and therefore must continue to call emit directly.
+func (r *run) emitObserved(ev StepEvent) bool {
+	if !r.emit(ev) {
+		return false
+	}
+	if r.callbacks != nil && r.callbacks.OnChunk != nil {
+		callbackEvent := snapshotStepEvent(ev)
+		r.safeObserver(func() { r.callbacks.OnChunk(callbackEvent) })
+	}
+	return true
 }

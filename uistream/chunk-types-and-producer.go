@@ -118,8 +118,12 @@ func (cp *ChunkProducer) translateEvent(ev aikit.StepEvent) ([]Chunk, string) {
 	case aikit.StepEventToolResult:
 		return cp.chunksToolResult(ev), ""
 	case aikit.StepEventToolApprovalRequest:
+		approvalID := ev.ApprovalID
+		if approvalID == "" {
+			approvalID = ev.ToolCallID
+		}
 		fields := map[string]any{
-			"approvalId": ev.ToolCallID,
+			"approvalId": approvalID,
 			"toolCallId": ev.ToolCallID,
 			"toolName":   ev.ToolCallName,
 			"args":       ev.ToolCallArgsDelta,

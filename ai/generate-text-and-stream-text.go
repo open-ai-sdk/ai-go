@@ -121,6 +121,8 @@ func runParams(req GenerateTextRequest) agent.RunParams {
 		PrepareStep:           req.PrepareStep,
 		RepairToolCall:        req.RepairToolCall,
 		ToolApproval:          approval,
+		ApprovalKey:           append([]byte(nil), req.ToolApprovalKey...),
+		ApprovalReplayGuard:   req.ToolApprovalReplayGuard,
 		Approver:              approver,
 		Callbacks:             lifecycleCallbacks(req),
 		ParallelToolExecution: req.ParallelToolExecution,

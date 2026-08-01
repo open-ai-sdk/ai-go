@@ -63,6 +63,16 @@ func WithAgentToolApproval(approval map[string]ToolApprovalFunc) AgentOption {
 	return func(a *ToolLoopAgent) { a.settings.ToolApproval = approval }
 }
 
+// WithAgentToolApprovalKey sets the default HMAC key for stateless approval
+// suspension and resumption.
+func WithAgentToolApprovalKey(key []byte) AgentOption {
+	return func(a *ToolLoopAgent) { a.settings.ToolApprovalKey = append([]byte(nil), key...) }
+}
+
+func WithAgentToolApprovalReplayGuard(guard ToolApprovalReplayGuard) AgentOption {
+	return func(a *ToolLoopAgent) { a.settings.ToolApprovalReplayGuard = guard }
+}
+
 // WithAgentToolApprovalResponder sets the agent's default approval responder.
 func WithAgentToolApprovalResponder(fn ToolApprovalResponder) AgentOption {
 	return func(a *ToolLoopAgent) { a.settings.ToolApprovalResponder = fn }

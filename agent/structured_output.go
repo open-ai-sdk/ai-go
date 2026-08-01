@@ -94,7 +94,7 @@ complete:
 		r.emitError(err)
 		return false
 	}
-	return r.emit(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
+	return r.emitObserved(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
 }
 
 // parseStructuredOutput extracts valid JSON from content, stripping markdown fences if present.

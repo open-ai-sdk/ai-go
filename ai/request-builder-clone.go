@@ -13,6 +13,7 @@ func cloneGenerateTextRequest(request GenerateTextRequest) GenerateTextRequest {
 	request.ToolsContext = cloneMap(request.ToolsContext)
 	request.RuntimeContext = cloneMap(request.RuntimeContext)
 	request.ToolApproval = cloneMap(request.ToolApproval)
+	request.ToolApprovalKey = append([]byte(nil), request.ToolApprovalKey...)
 	request.Middlewares = append(
 		[]LanguageModelMiddleware(nil),
 		request.Middlewares...,

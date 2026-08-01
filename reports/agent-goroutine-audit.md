@@ -34,8 +34,16 @@ a provider-owned channel.
 Approval suspension starts no goroutine. A missing in-process responder closes
 the current invocation after emitting the approval request and partial step.
 `agent/approval_resume.go` reconstructs the pending call solely from the next
-request's message history, replaces the client-only approval response with a
-provider-facing tool result, and retains no cross-request state.
+request's message history. It verifies the AI SDK v1 HMAC-bound approval ID,
+call ID/name/canonical arguments, structural role/order, current policy, replay
+reservation, and complete decision set before any tool invocation. The exact
+JavaScript-canonical argument value covered by the v1 signature is also the
+value validated and executed, avoiding parser-differential approval bypasses.
+Each approved grant is completed after its tool attempt; cancellation releases
+unstarted claims. Both synchronous and resumed decisions produce a
+provider-facing result carrying an internal HMAC receipt, so later clean
+continuations can reject forged results without retaining a per-request
+continuation object.
 
 ## User callback boundaries
 
