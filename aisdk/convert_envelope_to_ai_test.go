@@ -1,9 +1,9 @@
-package uistream
+package aisdk
 
 import (
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestToAIContentParts_ImageFileID verifies that an image envelope part with a
@@ -17,7 +17,7 @@ func TestToAIContentParts_ImageFileID(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeFile {
+	if p.Type != aikit.ContentPartTypeFile {
 		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileID != "file-abc123" {
@@ -43,7 +43,7 @@ func TestToAIContentParts_ImageData(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeFile {
+	if p.Type != aikit.ContentPartTypeFile {
 		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if string(p.Data) != string(data) {
@@ -68,7 +68,7 @@ func TestToAIContentParts_ImageURL(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeFile {
+	if p.Type != aikit.ContentPartTypeFile {
 		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileURL != "https://example.com/img.png" {
@@ -87,7 +87,7 @@ func TestToAIContentParts_FileFileID(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeFile {
+	if p.Type != aikit.ContentPartTypeFile {
 		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileID != "file-xyz" {
@@ -110,7 +110,7 @@ func TestToAIContentParts_FileData(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeFile {
+	if p.Type != aikit.ContentPartTypeFile {
 		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if string(p.Data) != string(data) {
@@ -140,7 +140,7 @@ func TestToAIContentParts_FileURL(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeFile {
+	if p.Type != aikit.ContentPartTypeFile {
 		t.Errorf("expected type file, got %q", p.Type)
 	}
 	if p.FileURL != "https://cdn.example.com/doc.pdf" {
@@ -164,7 +164,7 @@ func TestToAIContentParts_TextPart(t *testing.T) {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
 	p := got[0]
-	if p.Type != ai.ContentPartTypeText {
+	if p.Type != aikit.ContentPartTypeText {
 		t.Errorf("expected type text, got %q", p.Type)
 	}
 	if p.Text != "hello world" {
@@ -202,7 +202,7 @@ func TestToAIMessages_TextContent(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(got))
 	}
-	if got[0].Role != ai.RoleUser {
+	if got[0].Role != aikit.RoleUser {
 		t.Errorf("expected role user, got %q", got[0].Role)
 	}
 	if len(got[0].Content) != 1 || got[0].Content[0].Text != "hello" {

@@ -1,9 +1,9 @@
-package uistream
+package ai
 
 import (
 	"fmt"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aisdk"
 )
 
 // ToGenerateTextRequest converts a ChatRequestEnvelope (from an HTTP body)
@@ -13,10 +13,10 @@ import (
 //   - "system"    string  — system prompt
 //   - "maxSteps"  float64 — maximum tool-loop iterations (JSON numbers are float64)
 //   - "maxTokens" float64 — max completion tokens
-func ToGenerateTextRequest(envelope ChatRequestEnvelope, model ai.LanguageModel) ai.GenerateTextRequest {
-	req := ai.GenerateTextRequest{
+func ToGenerateTextRequest(envelope aisdk.ChatRequestEnvelope, model LanguageModel) GenerateTextRequest {
+	req := GenerateTextRequest{
 		Model:    model,
-		Messages: ToAIMessages(envelope.Messages),
+		Messages: aisdk.ToAIMessages(envelope.Messages),
 	}
 
 	applyBodyHints(&req, envelope.Body)
@@ -24,44 +24,28 @@ func ToGenerateTextRequest(envelope ChatRequestEnvelope, model ai.LanguageModel)
 	return req
 }
 
-// ApplyApprovalResponses delivers approval responses decoded from a UI request envelope.
-func ApplyApprovalResponses(envelope ChatRequestEnvelope, broker *ApprovalBroker) {
-	if broker == nil {
-		return
-	}
-	for _, response := range envelope.ToolApprovalResponses {
-		broker.Respond(
-			ai.ToolApprovalResponse{
-				ApprovalID: response.ApprovalID,
-				Approved:   response.Approved,
-				Reason:     response.Reason,
-			},
-		)
-	}
-}
-
 // ToGenerateTextRequestFromRegistry resolves the model from the registry using
 // envelope.Body["modelId"] (falling back to the registry's default prefix) and
 // then delegates to ToGenerateTextRequest.
 func ToGenerateTextRequestFromRegistry(
-	envelope ChatRequestEnvelope,
-	registry *ai.Registry,
-) (ai.GenerateTextRequest, error) {
+	envelope aisdk.ChatRequestEnvelope,
+	registry *Registry,
+) (GenerateTextRequest, error) {
 	modelID, _ := envelope.Body["modelId"].(string) //nolint:errcheck // type assertion ok
 	if modelID == "" {
-		return ai.GenerateTextRequest{}, fmt.Errorf("envelope-converter: Body[\"modelId\"] is missing or empty")
+		return GenerateTextRequest{}, fmt.Errorf("ui message request: Body[\"modelId\"] is missing or empty")
 	}
 
 	model, err := registry.Model(modelID)
 	if err != nil {
-		return ai.GenerateTextRequest{}, fmt.Errorf("envelope-converter: %w", err)
+		return GenerateTextRequest{}, fmt.Errorf("ui message request: %w", err)
 	}
 
 	return ToGenerateTextRequest(envelope, model), nil
 }
 
 // applyBodyHints reads well-known keys from the body map and populates the request.
-func applyBodyHints(req *ai.GenerateTextRequest, body map[string]any) {
+func applyBodyHints(req *GenerateTextRequest, body map[string]any) {
 	if body == nil {
 		return
 	}

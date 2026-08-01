@@ -1,10 +1,9 @@
-package uistream
+package aisdk
 
 import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ToUIStreamOptions configures the ToUIMessageStream bridge.
@@ -108,7 +107,7 @@ func interceptEvents(
 
 	go func() {
 		defer close(intercepted)
-		defer safego.Recover(nil, recoverToEvent(intercepted))
+		defer recoverPanic(recoverToEvent(intercepted))
 		for ev := range eventCh {
 			if ev.Type == aikit.StepEventStepStart {
 				usageMu.Lock()
@@ -148,7 +147,7 @@ func wrapChunksWithMetadata(
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
-		defer safego.Recover(nil, recoverToChunk(out))
+		defer recoverPanic(recoverToChunk(out))
 		var lastFinishReason string
 		for c := range chunks {
 			if !sendStart && c.Type == ChunkStart {

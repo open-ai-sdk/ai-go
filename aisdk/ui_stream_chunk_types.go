@@ -1,6 +1,6 @@
-// Package uistream provides an SSE adapter that translates aikit.StepEvents into
+// Package aisdk provides an SSE adapter that translates aikit.StepEvents into
 // the AI SDK UI message stream wire format.
-package uistream
+package aisdk
 
 // Chunk type names as used in the x-vercel-ai-ui-message-stream protocol.
 const (

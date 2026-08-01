@@ -1,4 +1,4 @@
-package uistream
+package aisdk
 
 import "encoding/json"
 
@@ -41,14 +41,27 @@ type ChatRequestEnvelope struct {
 	// MessageID is the target message ID for regeneration.
 	// Set when Trigger == "regenerate-message".
 	// ResolveMessageID returns this when non-empty.
-	MessageID             string                 `json:"messageId,omitempty"`
-	ToolApprovalResponses []ToolApprovalResponse `json:"toolApprovalResponses,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
 }
 
+// ToolApproval is the nested state that useChat round-trips on a tool UI part.
+// Approved is a pointer so a pending request is distinguishable from a denial.
+type ToolApproval struct {
+	ID          string `json:"id"`
+	Approved    *bool  `json:"approved,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	IsAutomatic bool   `json:"isAutomatic,omitempty"`
+	Signature   string `json:"signature,omitempty"`
+}
+
+// ToolApprovalResponse is extracted from an approval-responded message part.
 type ToolApprovalResponse struct {
-	ApprovalID string `json:"approvalId"`
-	Approved   bool   `json:"approved"`
-	Reason     string `json:"reason,omitempty"`
+	ApprovalID string
+	ToolCallID string
+	ToolName   string
+	Signature  string
+	Approved   bool
+	Reason     string
 }
 
 // EnvelopeMessage is a single message inside ChatRequestEnvelope.
@@ -101,6 +114,7 @@ const (
 	EnvelopePartTypeImage          EnvelopePartType = "image"
 	EnvelopePartTypeFile           EnvelopePartType = "file"
 	EnvelopePartTypeToolInvocation EnvelopePartType = "tool-invocation"
+	EnvelopePartTypeDynamicTool    EnvelopePartType = "dynamic-tool"
 )
 
 // EnvelopePartUnion holds one content part inside an EnvelopeMessage.
@@ -140,4 +154,29 @@ type EnvelopePartUnion struct {
 	Output string `json:"output,omitempty"`
 	// State is the tool invocation state: "partial-call", "call", "result", "error".
 	State string `json:"state,omitempty"`
+
+	// Approval is present on v7 tool parts in approval-requested,
+	// approval-responded, and approval-derived terminal states.
+	Approval *ToolApproval `json:"approval,omitempty"`
+}
+
+// ApprovalResponses extracts the decisions useChat stores inside tool parts.
+func ApprovalResponses(messages []EnvelopeMessage) []ToolApprovalResponse {
+	var responses []ToolApprovalResponse
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			if part.State != "approval-responded" || part.Approval == nil || part.Approval.Approved == nil {
+				continue
+			}
+			responses = append(responses, ToolApprovalResponse{
+				ApprovalID: part.Approval.ID,
+				ToolCallID: part.ToolCallID,
+				ToolName:   envelopeToolName(part),
+				Signature:  part.Approval.Signature,
+				Approved:   *part.Approval.Approved,
+				Reason:     part.Approval.Reason,
+			})
+		}
+	}
+	return responses
 }

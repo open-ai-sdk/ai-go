@@ -164,7 +164,7 @@ func (sr *StreamResult) TextStream() <-chan string {
 }
 
 // Stream returns the raw engine StepEvent channel, closed when the stream
-// completes. This is an escape hatch for callers such as uistream.Adapter that
+// completes. This is an escape hatch for callers such as aisdk.Adapter that
 // need full event visibility.
 //
 // Unlike TextStream/Events, this channel has no break signal: abandoning it
@@ -180,7 +180,7 @@ func (sr *StreamResult) Stream() <-chan StepEvent {
 }
 
 // DrainUnused exists for backward compatibility and to satisfy the
-// uistream.StreamEventer interface. With the on-demand fan-out it is a no-op:
+// aisdk.StreamEventer interface. With the on-demand fan-out it is a no-op:
 // unrequested views are never created, so there is nothing to drain. Safe to
 // call any number of times, in any order relative to the view methods.
 func (sr *StreamResult) DrainUnused() {}

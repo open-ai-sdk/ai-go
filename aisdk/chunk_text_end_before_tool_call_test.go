@@ -10,7 +10,7 @@
 //
 // chunksToolCallStart must emit ChunkTextEnd, clear textStarted, and advance
 // textBlockID so post-tool text gets a fresh ChunkTextStart with a new id.
-package uistream
+package aisdk
 
 import (
 	"testing"

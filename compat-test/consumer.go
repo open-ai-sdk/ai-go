@@ -10,9 +10,9 @@ import (
 	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/aisdk"
 	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/openaicompat"
-	"github.com/open-ai-sdk/ai-go/uistream"
 )
 
 // fakeModel is a hand-written ai.LanguageModel built entirely from the public
@@ -60,7 +60,7 @@ func CompatibleModel() llm.Model {
 	})
 }
 
-// fakeStreamEventer implements uistream.StreamEventer from outside the module,
+// fakeStreamEventer implements aisdk.StreamEventer from outside the module,
 // proving the UI-stream surface is mockable — its Stream() returns the public
 // aikit.StepEvent, not an unnameable internal type.
 type fakeStreamEventer struct{ ch <-chan aikit.StepEvent }
@@ -68,8 +68,8 @@ type fakeStreamEventer struct{ ch <-chan aikit.StepEvent }
 func (f fakeStreamEventer) Stream() <-chan aikit.StepEvent { return f.ch }
 func (fakeStreamEventer) DrainUnused()                     {}
 
-// Compile-time proof an external consumer can implement the uistream surface.
-var _ uistream.StreamEventer = fakeStreamEventer{}
+// Compile-time proof an external consumer can implement the aisdk surface.
+var _ aisdk.StreamEventer = fakeStreamEventer{}
 
 // ConsumeFakeStream builds a StepEvent channel by hand and drives it through
 // ai.NewStreamResult — both the channel element type and NewStreamResult's

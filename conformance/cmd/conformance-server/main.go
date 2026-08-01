@@ -12,7 +12,7 @@ import (
 	"os"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/uistream"
+	"github.com/open-ai-sdk/ai-go/aisdk"
 )
 
 const (
@@ -86,30 +86,30 @@ func main() {
 }
 
 func serveText(w http.ResponseWriter, r *http.Request, fail bool) {
-	var envelope uistream.ChatRequestEnvelope
+	var envelope aisdk.ChatRequestEnvelope
 	if err := json.NewDecoder(r.Body).Decode(&envelope); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	result := ai.StreamText(r.Context(), ai.GenerateTextRequest{
 		Model:    textModel{fail: fail},
-		Messages: uistream.ToAIMessages(envelope.Messages),
+		Messages: aisdk.ToAIMessages(envelope.Messages),
 	})
-	uistream.SetUIMessageStreamHeaders(w.Header())
-	chunks := uistream.ToUIMessageStream(
+	aisdk.SetUIMessageStreamHeaders(w.Header())
+	chunks := aisdk.ToUIMessageStream(
 		result,
-		uistream.ResolveMessageIDFromEnvelope(envelope, "assistant-text"),
-		uistream.ToUIStreamOptions{},
+		aisdk.ResolveMessageIDFromEnvelope(envelope, "assistant-text"),
+		aisdk.ToUIStreamOptions{},
 	)
-	if err := uistream.WriteSSEStream(w, chunks); err != nil {
+	if err := aisdk.WriteSSEStream(w, chunks); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
 }
 
 func serveTool(w http.ResponseWriter, r *http.Request) {
 	body := decodeBody(r)
-	uistream.SetUIMessageStreamHeaders(w.Header())
-	writer := uistream.NewWriter(w)
+	aisdk.SetUIMessageStreamHeaders(w.Header())
+	writer := aisdk.NewWriter(w)
 
 	if containsKeyValue(body, "result", "tool-ok") {
 		writeText(writer, "Tool round-trip complete")
@@ -117,26 +117,26 @@ func serveTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mustWrite(writer.WriteStart("assistant-tool"))
-	mustWrite(writer.WriteChunk(uistream.ChunkStartStep, nil))
-	mustWrite(writer.WriteChunk(uistream.ChunkToolInputAvailable, map[string]any{
+	mustWrite(writer.WriteChunk(aisdk.ChunkStartStep, nil))
+	mustWrite(writer.WriteChunk(aisdk.ChunkToolInputAvailable, map[string]any{
 		"toolCallId": toolCallID,
 		"toolName":   "echo",
 		"input":      map[string]any{"value": "ping"},
 	}))
-	mustWrite(writer.WriteChunk(uistream.ChunkFinishStep, nil))
+	mustWrite(writer.WriteChunk(aisdk.ChunkFinishStep, nil))
 	mustWrite(writer.WriteFinishWithReason("tool-calls", nil))
 }
 
 func serveApproval(w http.ResponseWriter, r *http.Request) {
 	body := decodeBody(r)
-	uistream.SetUIMessageStreamHeaders(w.Header())
-	writer := uistream.NewWriter(w)
+	aisdk.SetUIMessageStreamHeaders(w.Header())
+	writer := aisdk.NewWriter(w)
 
 	if approved, ok := findApprovalResponse(body); ok {
 		mustWrite(writer.WriteStart("assistant-final"))
-		mustWrite(writer.WriteChunk(uistream.ChunkStartStep, nil))
+		mustWrite(writer.WriteChunk(aisdk.ChunkStartStep, nil))
 		if approved {
-			mustWrite(writer.WriteChunk(uistream.ChunkToolOutputAvailable, map[string]any{
+			mustWrite(writer.WriteChunk(aisdk.ChunkToolOutputAvailable, map[string]any{
 				"toolCallId": toolCallID,
 				"output":     map[string]any{"ok": true},
 			}))
@@ -145,14 +145,14 @@ func serveApproval(w http.ResponseWriter, r *http.Request) {
 			mustWrite(writer.WriteToolOutputDenied(toolCallID, nil))
 			writeTextBlock(writer, "Approval denied")
 		}
-		mustWrite(writer.WriteChunk(uistream.ChunkFinishStep, nil))
+		mustWrite(writer.WriteChunk(aisdk.ChunkFinishStep, nil))
 		mustWrite(writer.WriteFinishWithReason("stop", nil))
 		return
 	}
 
 	mustWrite(writer.WriteStart("assistant-approval"))
-	mustWrite(writer.WriteChunk(uistream.ChunkStartStep, nil))
-	mustWrite(writer.WriteChunk(uistream.ChunkToolInputAvailable, map[string]any{
+	mustWrite(writer.WriteChunk(aisdk.ChunkStartStep, nil))
+	mustWrite(writer.WriteChunk(aisdk.ChunkToolInputAvailable, map[string]any{
 		"toolCallId": toolCallID,
 		"toolName":   "dangerous_action",
 		"input":      map[string]any{"target": "fixture"},
@@ -163,25 +163,25 @@ func serveApproval(w http.ResponseWriter, r *http.Request) {
 		"dangerous_action",
 		map[string]any{"target": "fixture"},
 	))
-	mustWrite(writer.WriteChunk(uistream.ChunkFinishStep, nil))
+	mustWrite(writer.WriteChunk(aisdk.ChunkFinishStep, nil))
 	mustWrite(writer.WriteFinishWithReason("tool-calls", nil))
 }
 
-func writeText(writer *uistream.Writer, text string) {
+func writeText(writer *aisdk.Writer, text string) {
 	mustWrite(writer.WriteStart("assistant-final"))
-	mustWrite(writer.WriteChunk(uistream.ChunkStartStep, nil))
+	mustWrite(writer.WriteChunk(aisdk.ChunkStartStep, nil))
 	writeTextBlock(writer, text)
-	mustWrite(writer.WriteChunk(uistream.ChunkFinishStep, nil))
+	mustWrite(writer.WriteChunk(aisdk.ChunkFinishStep, nil))
 	mustWrite(writer.WriteFinishWithReason("stop", nil))
 }
 
-func writeTextBlock(writer *uistream.Writer, text string) {
-	mustWrite(writer.WriteChunk(uistream.ChunkTextStart, map[string]any{"id": "text-1"}))
-	mustWrite(writer.WriteChunk(uistream.ChunkTextDelta, map[string]any{
+func writeTextBlock(writer *aisdk.Writer, text string) {
+	mustWrite(writer.WriteChunk(aisdk.ChunkTextStart, map[string]any{"id": "text-1"}))
+	mustWrite(writer.WriteChunk(aisdk.ChunkTextDelta, map[string]any{
 		"id":    "text-1",
 		"delta": text,
 	}))
-	mustWrite(writer.WriteChunk(uistream.ChunkTextEnd, map[string]any{"id": "text-1"}))
+	mustWrite(writer.WriteChunk(aisdk.ChunkTextEnd, map[string]any{"id": "text-1"}))
 }
 
 func decodeBody(r *http.Request) any {

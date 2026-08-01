@@ -11,7 +11,7 @@
 // chunksTextDelta already inserts reasoning-end at the reasoning→text
 // boundary. This test verifies chunksToolCallStart does the same at the
 // reasoning→tool boundary.
-package uistream
+package aisdk
 
 import (
 	"testing"

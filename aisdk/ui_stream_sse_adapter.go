@@ -1,11 +1,10 @@
-package uistream
+package aisdk
 
 import (
 	"io"
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // ToolResult is a public-facing tool result notification emitted during streaming.
@@ -97,7 +96,7 @@ func (a *Adapter) interceptEvents(
 	intercepted := make(chan aikit.StepEvent, 64)
 	go func() {
 		defer close(intercepted)
-		defer safego.Recover(nil, recoverToEvent(intercepted))
+		defer recoverPanic(recoverToEvent(intercepted))
 		for ev := range ch {
 			if ev.Type == aikit.StepEventStepStart {
 				state.mu.Lock()

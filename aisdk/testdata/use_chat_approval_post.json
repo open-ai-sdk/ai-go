@@ -1,0 +1,36 @@
+{
+  "id": "thread-1",
+  "trigger": "submit-message",
+  "messages": [
+    {
+      "id": "assistant-1",
+      "role": "assistant",
+      "parts": [
+        {
+          "type": "tool-deleteFile",
+          "toolCallId": "call-static",
+          "state": "approval-responded",
+          "input": {"path": "/tmp/cache"},
+          "approval": {
+            "id": "approval-static",
+            "approved": true,
+            "signature": "signed-static"
+          }
+        },
+        {
+          "type": "dynamic-tool",
+          "toolName": "publish",
+          "toolCallId": "call-dynamic",
+          "state": "approval-responded",
+          "input": {"channel": "prod"},
+          "approval": {
+            "id": "approval-dynamic",
+            "approved": false,
+            "reason": "user denied",
+            "signature": "signed-dynamic"
+          }
+        }
+      ]
+    }
+  ]
+}

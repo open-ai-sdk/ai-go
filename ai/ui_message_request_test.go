@@ -1,11 +1,11 @@
-package uistream_test
+package ai_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
-	"github.com/open-ai-sdk/ai-go/uistream"
+	"github.com/open-ai-sdk/ai-go/aisdk"
 )
 
 // stubModel is a minimal ai.LanguageModel for envelope converter tests.
@@ -19,16 +19,16 @@ func (s *stubModel) Stream(
 }
 
 func TestToGenerateTextRequest_BasicMessages(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
+	env := aisdk.ChatRequestEnvelope{
 		ID: "session-1",
-		Messages: []uistream.EnvelopeMessage{
+		Messages: []aisdk.EnvelopeMessage{
 			{Role: "user", Content: "Hello"},
 			{Role: "assistant", Content: "Hi there"},
 		},
 	}
 
 	model := &stubModel{id: "gpt-4o"}
-	req := uistream.ToGenerateTextRequest(env, model)
+	req := ai.ToGenerateTextRequest(env, model)
 
 	if req.Model != model {
 		t.Error("expected model to be set on request")
@@ -45,12 +45,12 @@ func TestToGenerateTextRequest_BasicMessages(t *testing.T) {
 }
 
 func TestToGenerateTextRequest_BodyHints_Instructions(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{"system": "You are a helpful assistant."},
 	}
 
-	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
+	req := ai.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
 	if req.Instructions != "You are a helpful assistant." {
 		t.Errorf("Instructions: got %q", req.Instructions)
@@ -58,12 +58,12 @@ func TestToGenerateTextRequest_BodyHints_Instructions(t *testing.T) {
 }
 
 func TestToGenerateTextRequest_BodyHints_MaxSteps(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{"maxSteps": float64(5)},
 	}
 
-	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
+	req := ai.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
 	if req.MaxSteps != 5 {
 		t.Errorf("MaxSteps: got %d, want 5", req.MaxSteps)
@@ -71,12 +71,12 @@ func TestToGenerateTextRequest_BodyHints_MaxSteps(t *testing.T) {
 }
 
 func TestToGenerateTextRequest_BodyHints_MaxTokens(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{"maxTokens": float64(1024)},
 	}
 
-	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
+	req := ai.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
 	if req.Settings.MaxTokens != 1024 {
 		t.Errorf("Settings.MaxTokens: got %d, want 1024", req.Settings.MaxTokens)
@@ -84,12 +84,12 @@ func TestToGenerateTextRequest_BodyHints_MaxTokens(t *testing.T) {
 }
 
 func TestToGenerateTextRequest_NilBody(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 	}
 
 	// Should not panic.
-	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
+	req := ai.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
 	if req.Instructions != "" {
 		t.Errorf("expected empty system, got %q", req.Instructions)
@@ -102,12 +102,12 @@ func TestToGenerateTextRequestFromRegistry_ResolvesModel(t *testing.T) {
 		return &stubModel{id: "openai:" + modelID}
 	})
 
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{"modelId": "openai:gpt-4o"},
 	}
 
-	req, err := uistream.ToGenerateTextRequestFromRegistry(env, registry)
+	req, err := ai.ToGenerateTextRequestFromRegistry(env, registry)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,12 +119,12 @@ func TestToGenerateTextRequestFromRegistry_ResolvesModel(t *testing.T) {
 func TestToGenerateTextRequestFromRegistry_MissingModelID(t *testing.T) {
 	registry := ai.NewRegistry()
 
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{},
 	}
 
-	_, err := uistream.ToGenerateTextRequestFromRegistry(env, registry)
+	_, err := ai.ToGenerateTextRequestFromRegistry(env, registry)
 	if err == nil {
 		t.Fatal("expected error when modelId missing, got nil")
 	}
@@ -133,23 +133,23 @@ func TestToGenerateTextRequestFromRegistry_MissingModelID(t *testing.T) {
 func TestToGenerateTextRequestFromRegistry_UnknownPrefix(t *testing.T) {
 	registry := ai.NewRegistry()
 
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{{Role: "user", Content: "Hi"}},
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{{Role: "user", Content: "Hi"}},
 		Body:     map[string]any{"modelId": "unknown:model"},
 	}
 
-	_, err := uistream.ToGenerateTextRequestFromRegistry(env, registry)
+	_, err := ai.ToGenerateTextRequestFromRegistry(env, registry)
 	if err == nil {
 		t.Fatal("expected error for unknown prefix, got nil")
 	}
 }
 
 func TestChatRequestEnvelope_TriggerAndMessageID_RoundTrip(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
+	env := aisdk.ChatRequestEnvelope{
 		ID:        "sess-1",
 		Trigger:   "regenerate-message",
 		MessageID: "msg-regen-42",
-		Messages: []uistream.EnvelopeMessage{
+		Messages: []aisdk.EnvelopeMessage{
 			{Role: "user", Content: "Hi", Metadata: map[string]any{"clientTime": "12:00"}},
 		},
 	}
@@ -170,58 +170,58 @@ func TestChatRequestEnvelope_TriggerAndMessageID_RoundTrip(t *testing.T) {
 }
 
 func TestResolveMessageIDFromEnvelope_PrefersEnvelopeMessageID(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
+	env := aisdk.ChatRequestEnvelope{
 		MessageID: "explicit-msg-id",
-		Messages: []uistream.EnvelopeMessage{
+		Messages: []aisdk.EnvelopeMessage{
 			{Role: "assistant", ID: "last-assistant-id"},
 		},
 	}
-	got := uistream.ResolveMessageIDFromEnvelope(env, "fallback-id")
+	got := aisdk.ResolveMessageIDFromEnvelope(env, "fallback-id")
 	if got != "explicit-msg-id" {
 		t.Errorf("expected explicit MessageID to win, got %q", got)
 	}
 }
 
 func TestResolveMessageIDFromEnvelope_FallsBackToLastAssistant(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
+	env := aisdk.ChatRequestEnvelope{
 		// MessageID not set
-		Messages: []uistream.EnvelopeMessage{
+		Messages: []aisdk.EnvelopeMessage{
 			{Role: "user", Content: "hi"},
 			{Role: "assistant", ID: "asst-msg-99"},
 		},
 	}
-	got := uistream.ResolveMessageIDFromEnvelope(env, "fallback-id")
+	got := aisdk.ResolveMessageIDFromEnvelope(env, "fallback-id")
 	if got != "asst-msg-99" {
 		t.Errorf("expected last assistant ID, got %q", got)
 	}
 }
 
 func TestResolveMessageIDFromEnvelope_FallbackWhenNeitherSet(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{
 			{Role: "user", Content: "hi"},
 		},
 	}
-	got := uistream.ResolveMessageIDFromEnvelope(env, "generated-id")
+	got := aisdk.ResolveMessageIDFromEnvelope(env, "generated-id")
 	if got != "generated-id" {
 		t.Errorf("expected fallback, got %q", got)
 	}
 }
 
 func TestToGenerateTextRequest_MessageParts(t *testing.T) {
-	env := uistream.ChatRequestEnvelope{
-		Messages: []uistream.EnvelopeMessage{
+	env := aisdk.ChatRequestEnvelope{
+		Messages: []aisdk.EnvelopeMessage{
 			{
 				Role: "user",
-				Parts: []uistream.EnvelopePartUnion{
-					{Type: uistream.EnvelopePartTypeText, Text: "What's in this image?"},
-					{Type: uistream.EnvelopePartTypeImage, URL: "https://example.com/img.png"},
+				Parts: []aisdk.EnvelopePartUnion{
+					{Type: aisdk.EnvelopePartTypeText, Text: "What's in this image?"},
+					{Type: aisdk.EnvelopePartTypeImage, URL: "https://example.com/img.png"},
 				},
 			},
 		},
 	}
 
-	req := uistream.ToGenerateTextRequest(env, &stubModel{id: "m"})
+	req := ai.ToGenerateTextRequest(env, &stubModel{id: "m"})
 
 	if len(req.Messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(req.Messages))

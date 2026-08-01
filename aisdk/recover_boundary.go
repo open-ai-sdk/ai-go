@@ -1,14 +1,29 @@
-package uistream
+package aisdk
 
 import (
+	"fmt"
+
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
+
+func recoverPanic(onPanic func(error)) {
+	value := recover()
+	if value == nil || onPanic == nil {
+		return
+	}
+	var err error
+	if recovered, ok := value.(error); ok {
+		err = recovered
+	} else {
+		err = fmt.Errorf("panic: %v", value)
+	}
+	onPanic(err)
+}
 
 // recoverToChunk builds an onPanic that surfaces a recovered panic as a
 // best-effort error chunk on out before the producer goroutine's deferred
 // close runs. The send is non-blocking: a recovery path must never deadlock on
-// a full or abandoned channel. uistream has no logger injection yet, so the
+// a full or abandoned channel. aisdk has no logger injection yet, so the
 // panic is surfaced to the consumer rather than logged.
 func recoverToChunk(out chan<- Chunk) func(error) {
 	return func(err error) {
@@ -37,6 +52,6 @@ func recoverToEvent(out chan<- aikit.StepEvent) func(error) {
 // Promise.allSettled and swallows their errors: an observer panic must not tear
 // down the UI stream.
 func safeObserver(fn func()) {
-	defer safego.Recover(nil, nil)
+	defer recoverPanic(nil)
 	fn()
 }

@@ -1,4 +1,4 @@
-package uistream
+package aisdk
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ func WriteSSE(w io.Writer, c Chunk) error {
 
 	b, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("uistream: marshal %q chunk: %w", c.Type, err)
+		return fmt.Errorf("aisdk: marshal %q chunk: %w", c.Type, err)
 	}
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
 		return err

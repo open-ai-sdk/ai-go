@@ -1,11 +1,10 @@
-package uistream
+package aisdk
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
@@ -160,8 +159,8 @@ func TestMergeStreamResult_OnEnd(t *testing.T) {
 	}
 }
 
-// TestMergeStreamResult_ImplementsStreamEventer verifies *ai.StreamResult satisfies
+// TestMergeStreamResult_ImplementsStreamEventer verifies the test stream satisfies
 // the StreamEventer interface used by MergeStreamResult.
 func TestMergeStreamResult_ImplementsStreamEventer(t *testing.T) {
-	var _ StreamEventer = (*ai.StreamResult)(nil)
+	var _ StreamEventer = (*testStreamResult)(nil)
 }

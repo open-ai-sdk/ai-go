@@ -8,7 +8,7 @@
 // shapes (parsed object / wrap object / re-stringified string in some
 // persistence paths). Downstream code that expected a string silently lost
 // the payload — see godhitech/1s-cli sse_bridge `event["output"].(string)`.
-package uistream
+package aisdk
 
 import (
 	"testing"

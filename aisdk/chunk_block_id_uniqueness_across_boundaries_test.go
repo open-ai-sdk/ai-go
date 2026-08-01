@@ -9,7 +9,7 @@
 // (find-or-merge by id) collapse consecutive same-type blocks into one part
 // — e.g. text → tool → text shows up as a single text part with the tool
 // rendered after, instead of [text, tool, text] in chronological order.
-package uistream
+package aisdk
 
 import (
 	"testing"

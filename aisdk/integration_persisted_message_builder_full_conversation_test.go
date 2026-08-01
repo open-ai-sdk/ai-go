@@ -1,4 +1,4 @@
-package uistream
+package aisdk
 
 import (
 	"encoding/json"

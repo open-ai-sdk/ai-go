@@ -1,9 +1,7 @@
-package uistream
+package aisdk
 
 import (
 	"io"
-
-	"github.com/open-ai-sdk/ai-go/ai"
 )
 
 // UIStreamOption configures StreamToWriter behavior.
@@ -53,7 +51,7 @@ func WithUIPersistence(b *PersistedMessageBuilder) UIStreamOption {
 //
 // msgID is the assistant message identifier emitted in the start chunk.
 // Callers may pass UIStreamOption values to attach hooks.
-func StreamToWriter(sr *ai.StreamResult, w io.Writer, msgID string, opts ...UIStreamOption) string {
+func StreamToWriter(sr StreamEventer, w io.Writer, msgID string, opts ...UIStreamOption) string {
 	cfg := &uiStreamBridgeConfig{}
 	for _, o := range opts {
 		o(cfg)

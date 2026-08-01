@@ -1,4 +1,4 @@
-package uistream
+package ai
 
 import (
 	"context"
@@ -7,21 +7,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/open-ai-sdk/ai-go/ai"
 )
 
-// erroringAgent is a custom ai.Agent whose Stream fails before any bytes are
+// erroringAgent is a custom Agent whose Stream fails before any bytes are
 // written — the case ToolLoopAgent never hits (its failures ride the stream).
 type erroringAgent struct{}
 
-func (erroringAgent) ID() string         { return "err" }
-func (erroringAgent) Tools() *ai.ToolSet { return nil }
-func (erroringAgent) Generate(context.Context, ...ai.Option) (*ai.GenerateTextResult, error) {
+func (erroringAgent) ID() string      { return "err" }
+func (erroringAgent) Tools() *ToolSet { return nil }
+func (erroringAgent) Generate(context.Context, ...Option) (*GenerateTextResult, error) {
 	return nil, errors.New("boom")
 }
 
-func (erroringAgent) Stream(context.Context, ...ai.Option) (*ai.StreamResult, error) {
+func (erroringAgent) Stream(context.Context, ...Option) (*StreamResult, error) {
 	return nil, errors.New("boom")
 }
 

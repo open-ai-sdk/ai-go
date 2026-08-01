@@ -1,4 +1,4 @@
-package uistream
+package aisdk
 
 import "github.com/open-ai-sdk/ai-go/aikit"
 

@@ -1,14 +1,13 @@
-package uistream
+package aisdk
 
 import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // StreamEventer is satisfied by *ai.StreamResult; using an interface avoids
-// an import cycle between the uistream and ai packages.
+// an import cycle between the aisdk and ai packages.
 type StreamEventer interface {
 	Stream() <-chan aikit.StepEvent
 	// DrainUnused prevents fan-out deadlocks when only Stream() is consumed.
@@ -53,7 +52,7 @@ func MergeWithOnEnd(fn func(text string)) MergeOption {
 //
 // Example:
 //
-//	wr := uistream.NewWriter(sseWriter)
+//	wr := aisdk.NewWriter(sseWriter)
 //	wr.WriteStart(msgID)
 //	wr.WriteData("plan", planData)           // custom data before stream
 //	text := wr.MergeStreamResult(result)     // model stream events
@@ -96,7 +95,7 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 		intercepted := make(chan aikit.StepEvent, 64)
 		go func() {
 			defer close(intercepted)
-			defer safego.Recover(nil, recoverToEvent(intercepted))
+			defer recoverPanic(recoverToEvent(intercepted))
 			for ev := range ch {
 				if ev.Type == aikit.StepEventToolResult && ev.ToolResult != nil {
 					tr := ev.ToolResult

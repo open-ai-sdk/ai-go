@@ -1,9 +1,7 @@
-package uistream
+package aisdk
 
 import (
 	"encoding/json"
-
-	"github.com/open-ai-sdk/ai-go/internal/safego"
 )
 
 // UIMessagePart represents a typed part accumulated from stream chunks.
@@ -67,7 +65,7 @@ func ProcessUIMessageStream(chunks <-chan Chunk, state *StreamingUIMessageState)
 	out := make(chan Chunk, 64)
 	go func() {
 		defer close(out)
-		defer safego.Recover(nil, recoverToChunk(out))
+		defer recoverPanic(recoverToChunk(out))
 		for c := range chunks {
 			processChunkIntoState(c, state)
 			out <- c

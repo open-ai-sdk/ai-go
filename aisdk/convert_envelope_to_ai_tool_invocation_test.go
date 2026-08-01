@@ -1,10 +1,10 @@
-package uistream
+package aisdk
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestToAIContentParts_ToolInvocation_Call verifies state="call" produces a single ToolCallPart.
@@ -23,7 +23,7 @@ func TestToAIContentParts_ToolInvocation_Call(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
-	if got[0].Type != ai.ContentPartTypeToolCall {
+	if got[0].Type != aikit.ContentPartTypeToolCall {
 		t.Errorf("expected tool_call type, got %q", got[0].Type)
 	}
 	if got[0].ToolCallID != "tc-1" {
@@ -48,7 +48,7 @@ func TestToAIContentParts_ToolInvocation_PartialCall(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 part, got %d", len(got))
 	}
-	if got[0].Type != ai.ContentPartTypeToolCall {
+	if got[0].Type != aikit.ContentPartTypeToolCall {
 		t.Errorf("expected tool_call type for partial-call, got %q", got[0].Type)
 	}
 }
@@ -70,10 +70,10 @@ func TestToAIContentParts_ToolInvocation_Result(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 parts (tool-call + tool-result), got %d", len(got))
 	}
-	if got[0].Type != ai.ContentPartTypeToolCall {
+	if got[0].Type != aikit.ContentPartTypeToolCall {
 		t.Errorf("expected tool_call first, got %q", got[0].Type)
 	}
-	if got[1].Type != ai.ContentPartTypeToolResult {
+	if got[1].Type != aikit.ContentPartTypeToolResult {
 		t.Errorf("expected tool_result second, got %q", got[1].Type)
 	}
 	if got[1].ToolResultID != "tc-3" {

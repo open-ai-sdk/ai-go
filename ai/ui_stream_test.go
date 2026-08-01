@@ -1,4 +1,4 @@
-package uistream
+package ai
 
 import (
 	"context"
@@ -8,35 +8,40 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/aisdk"
 )
 
-// fakeAgent is a minimal ai.Agent test double: Stream returns a pre-built
-// *ai.StreamResult (or an error), Generate is never exercised by these tests.
+// fakeAgent is a minimal Agent test double: Stream returns a pre-built
+// *StreamResult (or an error), Generate is never exercised by these tests.
 type fakeAgent struct {
-	sr  *ai.StreamResult
+	sr  *StreamResult
 	err error
 }
 
-func (f *fakeAgent) ID() string         { return "fake" }
-func (f *fakeAgent) Tools() *ai.ToolSet { return nil }
+func (f *fakeAgent) ID() string      { return "fake" }
+func (f *fakeAgent) Tools() *ToolSet { return nil }
 
-func (f *fakeAgent) Generate(context.Context, ...ai.Option) (*ai.GenerateTextResult, error) {
+func (f *fakeAgent) Generate(context.Context, ...Option) (*GenerateTextResult, error) {
 	return nil, errors.New("fakeAgent.Generate not implemented")
 }
 
-func (f *fakeAgent) Stream(context.Context, ...ai.Option) (*ai.StreamResult, error) {
+func (f *fakeAgent) Stream(context.Context, ...Option) (*StreamResult, error) {
 	return f.sr, f.err
 }
 
-func textOnlyStreamResult() *ai.StreamResult {
-	return makeStreamResult(
+func textOnlyStreamResult() *StreamResult {
+	ch := make(chan aikit.StepEvent, 4)
+	for _, event := range []aikit.StepEvent{
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
 		aikit.StepEvent{Type: aikit.StepEventDone},
-	)
+	} {
+		ch <- event
+	}
+	close(ch)
+	return NewStreamResult(ch)
 }
 
 // TestAgentStream_YieldsChunksFromAgentRun verifies AgentStream drives a's
@@ -49,17 +54,34 @@ func TestAgentStream_YieldsChunksFromAgentRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentStream: %v", err)
 	}
-	chunks := drainChunks(ch)
+	chunks := drainAgentChunks(ch)
 
-	if _, ok := findChunk(chunks, ChunkStart); !ok {
+	if _, ok := findAgentChunk(chunks, aisdk.ChunkStart); !ok {
 		t.Error("expected start chunk")
 	}
-	if _, ok := findChunk(chunks, ChunkTextDelta); !ok {
+	if _, ok := findAgentChunk(chunks, aisdk.ChunkTextDelta); !ok {
 		t.Error("expected text-delta chunk")
 	}
-	if _, ok := findChunk(chunks, ChunkFinish); !ok {
+	if _, ok := findAgentChunk(chunks, aisdk.ChunkFinish); !ok {
 		t.Error("expected finish chunk")
 	}
+}
+
+func drainAgentChunks(ch <-chan aisdk.Chunk) []aisdk.Chunk {
+	var chunks []aisdk.Chunk
+	for chunk := range ch {
+		chunks = append(chunks, chunk)
+	}
+	return chunks
+}
+
+func findAgentChunk(chunks []aisdk.Chunk, typ string) (aisdk.Chunk, bool) {
+	for _, chunk := range chunks {
+		if chunk.Type == typ {
+			return chunk, true
+		}
+	}
+	return aisdk.Chunk{}, false
 }
 
 // TestAgentStream_PropagatesAgentError verifies an error from a.Stream is
@@ -127,10 +149,10 @@ func TestPipeAgentStream_ReturnsErrorOnWriteFailure(t *testing.T) {
 
 // TestAgentHandler_DecodesEnvelopeAndStreams verifies the handler decodes a
 // ChatRequestEnvelope body, forwards its messages to the agent via
-// ai.WithMessages, and streams the SSE response.
+// WithMessages, and streams the SSE response.
 func TestAgentHandler_DecodesEnvelopeAndStreams(t *testing.T) {
-	var capturedMessages []ai.Message
-	agent := &capturingAgent{sr: textOnlyStreamResult(), onGenerateOpts: func(req *ai.GenerateTextRequest) {
+	var capturedMessages []Message
+	agent := &capturingAgent{sr: textOnlyStreamResult(), onGenerateOpts: func(req *GenerateTextRequest) {
 		capturedMessages = req.Messages
 	}}
 
@@ -146,7 +168,7 @@ func TestAgentHandler_DecodesEnvelopeAndStreams(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), `"type":"start"`) {
 		t.Errorf("expected start chunk in body, got: %s", rr.Body.String())
 	}
-	if len(capturedMessages) != 1 || capturedMessages[0].Role != ai.RoleUser {
+	if len(capturedMessages) != 1 || capturedMessages[0].Role != RoleUser {
 		t.Fatalf("expected one user message forwarded to the agent, got: %+v", capturedMessages)
 	}
 }
@@ -169,19 +191,19 @@ func TestAgentHandler_InvalidBodyReturns400(t *testing.T) {
 // so AgentHandler's message-forwarding can be asserted without depending on
 // AgentStream's internals.
 type capturingAgent struct {
-	sr             *ai.StreamResult
-	onGenerateOpts func(*ai.GenerateTextRequest)
+	sr             *StreamResult
+	onGenerateOpts func(*GenerateTextRequest)
 }
 
-func (c *capturingAgent) ID() string         { return "capturing" }
-func (c *capturingAgent) Tools() *ai.ToolSet { return nil }
+func (c *capturingAgent) ID() string      { return "capturing" }
+func (c *capturingAgent) Tools() *ToolSet { return nil }
 
-func (c *capturingAgent) Generate(context.Context, ...ai.Option) (*ai.GenerateTextResult, error) {
+func (c *capturingAgent) Generate(context.Context, ...Option) (*GenerateTextResult, error) {
 	return nil, errors.New("capturingAgent.Generate not implemented")
 }
 
-func (c *capturingAgent) Stream(_ context.Context, opts ...ai.Option) (*ai.StreamResult, error) {
-	req := &ai.GenerateTextRequest{}
+func (c *capturingAgent) Stream(_ context.Context, opts ...Option) (*StreamResult, error) {
+	req := &GenerateTextRequest{}
 	for _, o := range opts {
 		o(req)
 	}

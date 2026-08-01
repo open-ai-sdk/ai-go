@@ -1,22 +1,25 @@
-package uistream
+package aisdk
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// makeStreamResult creates an *ai.StreamResult from a list of StepEvents.
-func makeStreamResult(evs ...aikit.StepEvent) *ai.StreamResult {
+type testStreamResult struct{ ch <-chan aikit.StepEvent }
+
+func (s *testStreamResult) Stream() <-chan aikit.StepEvent { return s.ch }
+func (*testStreamResult) DrainUnused()                     {}
+
+func makeStreamResult(evs ...aikit.StepEvent) *testStreamResult {
 	ch := make(chan aikit.StepEvent, len(evs))
 	for _, e := range evs {
 		ch <- e
 	}
 	close(ch)
-	return ai.NewStreamResult(ch)
+	return &testStreamResult{ch: ch}
 }
 
 // TestStreamToWriter_BasicTextStream verifies SSE output contains expected chunks.
