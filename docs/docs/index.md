@@ -9,8 +9,8 @@ specific service.
 
 - [Get started](/getting-started) — install ai-go, create a provider client,
   and generate text.
-- [Generate text](/core/generate-text) — run the high-level generation
-  workflow.
+- [Agents](/core/agents) — configure reusable and request-scoped generation
+  workflows.
 - [Tools](/core/tools) — define schema-backed tools and execute multi-step
   model calls.
 

@@ -19,12 +19,14 @@ const docsSidebar = [
     items: [
       { text: 'Overview', link: '/core/' },
       { text: 'Providers and clients', link: '/core/providers-and-clients' },
-      { text: 'Generate text', link: '/core/generate-text' },
-      { text: 'Direct completions', link: '/core/completions' },
+      { text: 'Agents', link: '/core/agents' },
+      { text: 'Completions', link: '/core/completions' },
       { text: 'Streaming', link: '/core/streaming' },
       { text: 'Structured output', link: '/core/structured-output' },
       { text: 'Tools', link: '/core/tools' },
-      { text: 'Observability', link: '/guides/observability' },
+      { text: 'Embeddings', link: '/core/embeddings' },
+      { text: 'Media generation', link: '/core/media-generation' },
+      { text: 'Observability', link: '/core/observability' },
     ],
   },
   {
@@ -57,7 +59,6 @@ const guidesSidebar = [
     items: [
       { text: 'Overview', link: '/guides/' },
       { text: 'Build a chat server', link: '/guides/chat-server' },
-      { text: 'Observability', link: '/guides/observability' },
     ],
   },
 ]

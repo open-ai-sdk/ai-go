@@ -41,6 +41,6 @@ func main() {
 }
 ```
 
-Continue with [text generation](/core/generate-text), learn the
+Continue with [agents](/core/agents), learn the
 [provider/client model](/core/providers-and-clients), or select another
 [provider integration](/providers/).
