@@ -6,7 +6,9 @@
 go get github.com/open-ai-sdk/ai-go
 ```
 
-Set an OpenAI API key and create a Responses API model. The `ai` facade owns the common generation API; the provider package owns the provider-specific constructor and options.
+Set an OpenAI API key, create one provider client, and derive a Responses API
+model. The `ai` facade owns the common generation API; the provider client owns
+credentials and reusable HTTP resources.
 
 ```go
 package main
@@ -21,9 +23,12 @@ import (
 )
 
 func main() {
-  model := openai.NewLanguageModel("gpt-5", openai.Config{
+  client, err := openai.NewClient(openai.Config{
     APIKey: os.Getenv("OPENAI_API_KEY"),
   })
+  if err != nil { panic(err) }
+
+  model := client.CompletionModel("gpt-5")
 
   result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
     Model:        model,
@@ -36,4 +41,6 @@ func main() {
 }
 ```
 
-Continue with [text generation](/core/generate-text), or replace the provider with one from the [provider guide](/providers/).
+Continue with [text generation](/core/generate-text), learn the
+[provider/client model](/core/providers-and-clients), or select another
+[provider integration](/providers/).

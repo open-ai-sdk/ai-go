@@ -5,15 +5,16 @@ A concrete provider `Client` owns credentials, endpoint configuration, and
 reusable HTTP resources. A model handle adds a model ID and one operation, such
 as a Responses completion or a Chat Completions request.
 
-```text
-provider config
-      |
-      v
-concrete provider Client -----> provider-wide operations (for example, file upload)
-      |
-      +---- CompletionModel(id) ----> llm.Model
-      |
-      +---- ChatModel(id) ----------> llm.Model
+```mermaid
+flowchart TD
+    Config["Provider config"] --> Client["Concrete provider Client"]
+
+    Client --> Operations["Provider-wide operations<br/>for example, UploadFile"]
+    Client --> Completion["CompletionModel(id)"]
+    Client --> Chat["ChatModel(id)"]
+
+    Completion --> Model["llm.Model"]
+    Chat --> Model
 ```
 
 Create one client and reuse it for related models:
@@ -106,14 +107,15 @@ request construction and regular or streaming HTTP execution.
 Concrete packages compose that infrastructure and expose an idiomatic public
 API:
 
-```text
-provider.Client[policy]   reusable request and transport behavior
-           |
-           v
-openai.Client             concrete configuration and capabilities
-           |
-           v
-CompletionModel / ChatModel / UploadFile
+```mermaid
+flowchart TD
+    Core["provider.Client[policy]<br/>Reusable request and transport behavior"]
+    OpenAI["openai.Client<br/>Concrete configuration and capabilities"]
+
+    Core --> OpenAI
+    OpenAI --> Completion["CompletionModel"]
+    OpenAI --> Chat["ChatModel"]
+    OpenAI --> Upload["UploadFile"]
 ```
 
 Applications should normally use `openai.Client` or another concrete provider
