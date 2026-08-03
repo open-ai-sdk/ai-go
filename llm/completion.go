@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps direct completion request building, stream aggregation, and response normalization together.
 package llm
 
 import (

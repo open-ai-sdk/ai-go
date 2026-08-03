@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps tool-loop lifecycle, cancellation, tracing, and terminal-event ownership together.
 package agent
 
 import (

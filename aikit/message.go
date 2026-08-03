@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps the role-aware message contract and its content constructors together.
 package aikit
 
 import (

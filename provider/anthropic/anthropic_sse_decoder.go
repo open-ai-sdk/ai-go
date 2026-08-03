@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps Anthropic's stateful content-block SSE grammar in one decoder.
 package anthropic
 
 import (

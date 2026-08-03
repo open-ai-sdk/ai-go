@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps MCP streamable-HTTP session, reconnect, and protocol-version state in one transport.
 package mcp
 
 import (

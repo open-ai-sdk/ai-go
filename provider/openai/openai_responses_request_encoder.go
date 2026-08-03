@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps the OpenAI Responses request union mapping in one wire encoder.
 package openai
 
 import (

@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps approval policy, canonical signing, replay protection, and validation together.
 package agent
 
 import (

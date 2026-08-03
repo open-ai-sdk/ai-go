@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps the native Gemini request grammar and its coupled validation in one encoder.
 package gemini
 
 import (

@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps synchronized stream aggregation and its dependent result views in one state owner.
 package generate
 
 import (

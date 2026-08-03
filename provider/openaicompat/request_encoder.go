@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps the shared Chat Completions request grammar and hook ordering in one encoder.
 package openaicompat
 
 import (

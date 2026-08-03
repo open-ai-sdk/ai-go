@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps Anthropic model request preparation and response normalization at one API boundary.
 package anthropic
 
 import (

@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps MCP initialization, capabilities, request routing, and client lifecycle together.
 package mcp
 
 import (
