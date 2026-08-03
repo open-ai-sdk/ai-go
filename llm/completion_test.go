@@ -60,20 +60,39 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 	model := &completionModel{events: []aikit.StreamEvent{
 		{Type: aikit.StreamEventTextDelta, TextDelta: "before "},
 		{Type: aikit.StreamEventReasoningDelta, TextDelta: "think", ThoughtSignature: "sig-1"},
-		{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallName: "lookup", ToolCallArgsDelta: `{"city":`},
+		{
+			Type:              aikit.StreamEventToolCallDelta,
+			ToolCallIndex:     0,
+			ToolCallID:        "call-1",
+			ToolCallName:      "lookup",
+			ToolCallArgsDelta: `{"city":`,
+		},
 		{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallArgsDelta: `"Hanoi"}`},
 		{Type: aikit.StreamEventTextDelta, TextDelta: "after"},
-		{Type: aikit.StreamEventUsage, Usage: &aikit.Usage{InputTokens: 3, InputTokenDetails: aikit.InputTokenDetails{CacheReadTokens: 1}}},
+		{
+			Type:  aikit.StreamEventUsage,
+			Usage: &aikit.Usage{InputTokens: 3, InputTokenDetails: aikit.InputTokenDetails{CacheReadTokens: 1}},
+		},
 		{Type: aikit.StreamEventUsage, Usage: &aikit.Usage{OutputTokens: 5, Raw: map[string]any{"provider": "test"}}},
 		{Type: aikit.StreamEventSource, Source: &aikit.Source{ID: "source-1"}},
 		{Type: aikit.StreamEventFileDelta, FileData: []byte("file"), FileMediaType: "text/plain"},
-		{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonToolCalls, RawFinishReason: "tool_calls", ProviderMetadata: map[string]any{"request": "r1"}, Warnings: []aikit.Warning{{Message: "warn"}}},
+		{
+			Type:             aikit.StreamEventFinish,
+			FinishReason:     aikit.FinishReasonToolCalls,
+			RawFinishReason:  "tool_calls",
+			ProviderMetadata: map[string]any{"request": "r1"},
+			Warnings:         []aikit.Warning{{Message: "warn"}},
+		},
 	}}
 	response, err := llm.NewCompletion(model, "prompt").Send(context.Background())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if response.Text != "before after" || response.Reasoning != "think" || response.Usage.InputTokens != 3 || response.Usage.InputTokenDetails.CacheReadTokens != 1 || response.Usage.OutputTokens != 5 || len(response.Sources) != 1 || len(response.Files) != 1 {
+	if response.Text != "before after" || response.Reasoning != "think" || response.Usage.InputTokens != 3 ||
+		response.Usage.InputTokenDetails.CacheReadTokens != 1 ||
+		response.Usage.OutputTokens != 5 ||
+		len(response.Sources) != 1 ||
+		len(response.Files) != 1 {
 		t.Fatalf("response summary = %#v", response)
 	}
 	parts := response.Message.Content
@@ -125,7 +144,8 @@ func TestCompletionToolCallUsesIndexUntilIDArrives(t *testing.T) {
 		{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallArgsDelta: `"Hanoi"}`},
 	}}
 	response, err := llm.NewCompletion(model, "prompt").Send(context.Background())
-	if err != nil || len(response.Message.Content) != 1 || response.Message.Content[0].ToolCallID != "call-1" || string(response.Message.Content[0].ToolCallArgs) != `{"city":"Hanoi"}` {
+	if err != nil || len(response.Message.Content) != 1 || response.Message.Content[0].ToolCallID != "call-1" ||
+		string(response.Message.Content[0].ToolCallArgs) != `{"city":"Hanoi"}` {
 		t.Fatalf("response=%#v err=%v", response, err)
 	}
 }
@@ -136,7 +156,8 @@ func TestCompletionKeepsReasoningPartsWithDifferentSignaturesSeparate(t *testing
 		{Type: aikit.StreamEventReasoningDelta, TextDelta: "second", ThoughtSignature: "sig-2"},
 	}}
 	response, err := llm.NewCompletion(model, "prompt").Send(context.Background())
-	if err != nil || len(response.Message.Content) != 2 || response.Message.Content[0].ThoughtSignature != "sig-1" || response.Message.Content[1].ThoughtSignature != "sig-2" {
+	if err != nil || len(response.Message.Content) != 2 || response.Message.Content[0].ThoughtSignature != "sig-1" ||
+		response.Message.Content[1].ThoughtSignature != "sig-2" {
 		t.Fatalf("response=%#v err=%v", response, err)
 	}
 }
@@ -155,8 +176,17 @@ func TestPromptAndChatConveniences(t *testing.T) {
 		t.Fatalf("Prompt text=%q err=%v request=%#v", text, err, model.request)
 	}
 
-	text, err = llm.Chat(context.Background(), model, "next", aikit.Message{Role: aikit.RoleUser, Content: []aikit.ContentPart{{Type: aikit.ContentPartTypeText, Text: "history"}}})
-	if err != nil || text != "answer" || len(model.request.Messages) != 2 || model.request.Messages[1].Content[0].Text != "next" {
+	text, err = llm.Chat(
+		context.Background(),
+		model,
+		"next",
+		aikit.Message{
+			Role:    aikit.RoleUser,
+			Content: []aikit.ContentPart{{Type: aikit.ContentPartTypeText, Text: "history"}},
+		},
+	)
+	if err != nil || text != "answer" || len(model.request.Messages) != 2 ||
+		model.request.Messages[1].Content[0].Text != "next" {
 		t.Fatalf("Chat text=%q err=%v request=%#v", text, err, model.request)
 	}
 }

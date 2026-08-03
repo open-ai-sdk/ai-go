@@ -92,7 +92,6 @@ func validateUploadFileRequest(req UploadFileRequest) error {
 }
 
 func (c *Client) uploadFile(ctx context.Context, req UploadFileRequest) (*UploadedFile, error) {
-
 	mimeType := req.MediaType
 	if mimeType == "" {
 		mimeType = "application/octet-stream"

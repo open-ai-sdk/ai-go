@@ -127,7 +127,10 @@ func (b CompletionRequestBuilder) StopSequences(values ...string) CompletionRequ
 	return b
 }
 
-func (b CompletionRequestBuilder) ProviderOptionsJSON(provider string, options map[string]any) CompletionRequestBuilder {
+func (b CompletionRequestBuilder) ProviderOptionsJSON(
+	provider string,
+	options map[string]any,
+) CompletionRequestBuilder {
 	b.request.ProviderOptions = withProviderOption(b.request.ProviderOptions, provider, cloneMap(options))
 	return b
 }
@@ -247,22 +250,32 @@ func appendText(parts *[]aikit.ContentPart, value, signature string) {
 	if value == "" {
 		return
 	}
-	if n := len(*parts); n > 0 && (*parts)[n-1].Type == aikit.ContentPartTypeText && (*parts)[n-1].ThoughtSignature == signature {
+	if n := len(*parts); n > 0 &&
+		(*parts)[n-1].Type == aikit.ContentPartTypeText &&
+		(*parts)[n-1].ThoughtSignature == signature {
 		(*parts)[n-1].Text += value
 		return
 	}
-	*parts = append(*parts, aikit.ContentPart{Type: aikit.ContentPartTypeText, Text: value, ThoughtSignature: signature})
+	*parts = append(
+		*parts,
+		aikit.ContentPart{Type: aikit.ContentPartTypeText, Text: value, ThoughtSignature: signature},
+	)
 }
 
 func appendReasoning(parts *[]aikit.ContentPart, value, signature string) {
 	if value == "" {
 		return
 	}
-	if n := len(*parts); n > 0 && (*parts)[n-1].Type == aikit.ContentPartTypeReasoning && (*parts)[n-1].ThoughtSignature == signature {
+	if n := len(*parts); n > 0 &&
+		(*parts)[n-1].Type == aikit.ContentPartTypeReasoning &&
+		(*parts)[n-1].ThoughtSignature == signature {
 		(*parts)[n-1].ReasoningText += value
 		return
 	}
-	*parts = append(*parts, aikit.ContentPart{Type: aikit.ContentPartTypeReasoning, ReasoningText: value, ThoughtSignature: signature})
+	*parts = append(
+		*parts,
+		aikit.ContentPart{Type: aikit.ContentPartTypeReasoning, ReasoningText: value, ThoughtSignature: signature},
+	)
 }
 
 func appendToolCall(parts *[]aikit.ContentPart, indexes map[int]int, event aikit.StreamEvent) {
@@ -270,7 +283,15 @@ func appendToolCall(parts *[]aikit.ContentPart, indexes map[int]int, event aikit
 	if !found {
 		index = len(*parts)
 		indexes[event.ToolCallIndex] = index
-		*parts = append(*parts, aikit.ContentPart{Type: aikit.ContentPartTypeToolCall, ToolCallID: event.ToolCallID, ToolCallName: event.ToolCallName, ThoughtSignature: event.ThoughtSignature})
+		*parts = append(
+			*parts,
+			aikit.ContentPart{
+				Type:             aikit.ContentPartTypeToolCall,
+				ToolCallID:       event.ToolCallID,
+				ToolCallName:     event.ToolCallName,
+				ThoughtSignature: event.ThoughtSignature,
+			},
+		)
 	}
 	part := &(*parts)[index]
 	if event.ToolCallID != "" {
@@ -298,11 +319,26 @@ func mergeUsage(prior, incoming aikit.Usage) aikit.Usage {
 	merged.InputTokens = take(prior.InputTokens, incoming.InputTokens)
 	merged.OutputTokens = take(prior.OutputTokens, incoming.OutputTokens)
 	merged.TotalTokens = take(prior.TotalTokens, incoming.TotalTokens)
-	merged.InputTokenDetails.NoCacheTokens = take(prior.InputTokenDetails.NoCacheTokens, incoming.InputTokenDetails.NoCacheTokens)
-	merged.InputTokenDetails.CacheReadTokens = take(prior.InputTokenDetails.CacheReadTokens, incoming.InputTokenDetails.CacheReadTokens)
-	merged.InputTokenDetails.CacheWriteTokens = take(prior.InputTokenDetails.CacheWriteTokens, incoming.InputTokenDetails.CacheWriteTokens)
-	merged.OutputTokenDetails.TextTokens = take(prior.OutputTokenDetails.TextTokens, incoming.OutputTokenDetails.TextTokens)
-	merged.OutputTokenDetails.ReasoningTokens = take(prior.OutputTokenDetails.ReasoningTokens, incoming.OutputTokenDetails.ReasoningTokens)
+	merged.InputTokenDetails.NoCacheTokens = take(
+		prior.InputTokenDetails.NoCacheTokens,
+		incoming.InputTokenDetails.NoCacheTokens,
+	)
+	merged.InputTokenDetails.CacheReadTokens = take(
+		prior.InputTokenDetails.CacheReadTokens,
+		incoming.InputTokenDetails.CacheReadTokens,
+	)
+	merged.InputTokenDetails.CacheWriteTokens = take(
+		prior.InputTokenDetails.CacheWriteTokens,
+		incoming.InputTokenDetails.CacheWriteTokens,
+	)
+	merged.OutputTokenDetails.TextTokens = take(
+		prior.OutputTokenDetails.TextTokens,
+		incoming.OutputTokenDetails.TextTokens,
+	)
+	merged.OutputTokenDetails.ReasoningTokens = take(
+		prior.OutputTokenDetails.ReasoningTokens,
+		incoming.OutputTokenDetails.ReasoningTokens,
+	)
 	if incoming.Raw != nil {
 		merged.Raw = cloneMap(incoming.Raw)
 	} else {

@@ -48,14 +48,21 @@ func TestCompleteObjectMakesOneDirectCall(t *testing.T) {
 	if result.Object.Answer != "Hanoi" || result.Response == nil || result.Response.Text != model.text {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	if len(model.requests) != 1 || model.requests[0].Instructions != "Answer as JSON." || model.requests[0].Settings.Temperature == nil || *model.requests[0].Settings.Temperature != 0.2 || len(model.requests[0].Messages) != 1 {
+	if len(model.requests) != 1 || model.requests[0].Instructions != "Answer as JSON." ||
+		model.requests[0].Settings.Temperature == nil ||
+		*model.requests[0].Settings.Temperature != 0.2 ||
+		len(model.requests[0].Messages) != 1 {
 		t.Fatalf("unexpected direct requests: %#v", model.requests)
 	}
 }
 
 func TestCompleteObjectReturnsResponseWithDecodeError(t *testing.T) {
 	model := &directCompletionObjectModel{text: "not json"}
-	result, err := ai.CompleteObject[directCompletionObject](context.Background(), model, ai.NewCompletion(model, "answer").Build())
+	result, err := ai.CompleteObject[directCompletionObject](
+		context.Background(),
+		model,
+		ai.NewCompletion(model, "answer").Build(),
+	)
 	if err == nil || result.Response == nil || result.Response.Text != "not json" {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}

@@ -61,7 +61,8 @@ func TestClientFormattingDoesNotLeakAPIKey(t *testing.T) {
 		fmt.Sprintf("%v", client), fmt.Sprintf("%#v", client),
 		fmt.Sprintf("%+v", *client), fmt.Sprintf("%#v", *client),
 	} {
-		if strings.Contains(formatted, "super-secret-value") || strings.Contains(formatted, "password") || strings.Contains(formatted, "query-secret") {
+		if strings.Contains(formatted, "super-secret-value") || strings.Contains(formatted, "password") ||
+			strings.Contains(formatted, "query-secret") {
 			t.Fatalf("formatted client leaked credentials: %s", formatted)
 		}
 	}
@@ -81,7 +82,10 @@ func TestClientUploadFile(t *testing.T) {
 			t.Errorf("ParseMultipartForm: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"file-123","object":"file","filename":"notes.txt","bytes":5,"status":"processed"}`)
+		_, _ = io.WriteString(
+			w,
+			`{"id":"file-123","object":"file","filename":"notes.txt","bytes":5,"status":"processed"}`,
+		)
 	}))
 	defer server.Close()
 

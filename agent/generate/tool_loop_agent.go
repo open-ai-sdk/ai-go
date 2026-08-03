@@ -17,8 +17,10 @@ type ToolLoopAgent struct {
 	settings GenerateTextRequest
 }
 
-var _ Agent = (*ToolLoopAgent)(nil)
-var _ Completion = (*ToolLoopAgent)(nil)
+var (
+	_ Agent      = (*ToolLoopAgent)(nil)
+	_ Completion = (*ToolLoopAgent)(nil)
+)
 
 // NewToolLoopAgent creates a ToolLoopAgent bound to model, configured by opts.
 // Messages are never set here — they are per-call, supplied via WithMessages

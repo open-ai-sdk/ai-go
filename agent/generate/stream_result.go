@@ -294,7 +294,9 @@ func appendStepText(step *StepOutput, text, signature string) {
 	if text == "" {
 		return
 	}
-	if n := len(step.Content); n > 0 && step.Content[n-1].Type == ContentPartTypeText && step.Content[n-1].ThoughtSignature == signature {
+	if n := len(step.Content); n > 0 &&
+		step.Content[n-1].Type == ContentPartTypeText &&
+		step.Content[n-1].ThoughtSignature == signature {
 		step.Content[n-1].Text += text
 		return
 	}
@@ -305,11 +307,17 @@ func appendStepReasoning(step *StepOutput, reasoning, signature string) {
 	if reasoning == "" {
 		return
 	}
-	if n := len(step.Content); n > 0 && step.Content[n-1].Type == ContentPartTypeReasoning && step.Content[n-1].ThoughtSignature == signature {
+	if n := len(step.Content); n > 0 &&
+		step.Content[n-1].Type == ContentPartTypeReasoning &&
+		step.Content[n-1].ThoughtSignature == signature {
 		step.Content[n-1].ReasoningText += reasoning
 		return
 	}
-	step.Content = append(step.Content, ContentPart{Type: ContentPartTypeReasoning, ReasoningText: reasoning, ThoughtSignature: signature})
+	step.Content = append(step.Content, ContentPart{
+		Type:             ContentPartTypeReasoning,
+		ReasoningText:    reasoning,
+		ThoughtSignature: signature,
+	})
 }
 
 func (state *consumeState) consumeToolResult(ev StepEvent) {

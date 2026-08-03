@@ -72,7 +72,8 @@ func TestLifecycleCallbackResponsesPreserveMixedContent(t *testing.T) {
 		FinishReason: FinishReasonStop,
 	})
 
-	if len(stepEvent.Response.Messages) != 1 || len(stepEvent.Response.Messages[0].Content) != 3 || len(stepEvent.Files) != 1 {
+	if len(stepEvent.Response.Messages) != 1 || len(stepEvent.Response.Messages[0].Content) != 3 ||
+		len(stepEvent.Files) != 1 {
 		t.Fatalf("step callback = %#v", stepEvent)
 	}
 	if len(endEvent.Response.Messages) != 1 || len(endEvent.Response.Messages[0].Content) != 3 ||

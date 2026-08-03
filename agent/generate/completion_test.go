@@ -51,7 +51,11 @@ func TestToolLoopAgentCompletionUsesAgentDefaultsAndTools(t *testing.T) {
 	if result.Text != "done" || model.calls != 2 || atomic.LoadInt32(&executor.calls) != 1 {
 		t.Fatalf("result=%#v model.calls=%d executor.calls=%d", result, model.calls, executor.calls)
 	}
-	if len(model.requests[0].Messages) != 2 || model.requests[0].Messages[0].Role != RoleSystem || model.requests[0].Messages[0].Content[0].Text != "override" || model.requests[0].Settings.Temperature == nil || *model.requests[0].Settings.Temperature != 0.2 || model.requests[0].Messages[1].Content[0].Text != "weather" {
+	if len(model.requests[0].Messages) != 2 || model.requests[0].Messages[0].Role != RoleSystem ||
+		model.requests[0].Messages[0].Content[0].Text != "override" ||
+		model.requests[0].Settings.Temperature == nil ||
+		*model.requests[0].Settings.Temperature != 0.2 ||
+		model.requests[0].Messages[1].Content[0].Text != "weather" {
 		t.Fatalf("first request = %#v", model.requests[0])
 	}
 }
@@ -65,7 +69,8 @@ func TestToolLoopAgentCompletionPromptAndChat(t *testing.T) {
 	}
 
 	text, err = agent.Chat(context.Background(), "next", UserMessage("history"))
-	if err != nil || text != "done" || len(model.requests[1].Messages) != 2 || model.requests[1].Messages[1].Content[0].Text != "next" {
+	if err != nil || text != "done" || len(model.requests[1].Messages) != 2 ||
+		model.requests[1].Messages[1].Content[0].Text != "next" {
 		t.Fatalf("Chat text=%q err=%v request=%#v", text, err, model.requests[1])
 	}
 }
@@ -92,10 +97,22 @@ func TestToolLoopAgentCompletionBuilderAppliesRequestShapingOptions(t *testing.T
 		Options(WithMaxTokens(128)).
 		Build()
 
-	if request.Model != overrideModel || request.Settings.TopP == nil || *request.Settings.TopP != 0.8 || request.Settings.TopK == nil || *request.Settings.TopK != 40 || request.Settings.Seed == nil || *request.Settings.Seed != 7 || request.Settings.MaxTokens != 128 || len(request.Settings.StopSequences) != 1 || request.Settings.StopSequences[0] != "END" || request.MaxSteps != 3 || request.StopWhen == nil || len(request.ActiveTools) != 1 || request.ActiveTools[0] != "lookup" {
+	if request.Model != overrideModel || request.Settings.TopP == nil || *request.Settings.TopP != 0.8 ||
+		request.Settings.TopK == nil ||
+		*request.Settings.TopK != 40 ||
+		request.Settings.Seed == nil ||
+		*request.Settings.Seed != 7 ||
+		request.Settings.MaxTokens != 128 ||
+		len(request.Settings.StopSequences) != 1 ||
+		request.Settings.StopSequences[0] != "END" ||
+		request.MaxSteps != 3 ||
+		request.StopWhen == nil ||
+		len(request.ActiveTools) != 1 ||
+		request.ActiveTools[0] != "lookup" {
 		t.Fatalf("unexpected request settings: %#v", request)
 	}
-	if request.ToolsContext["lookup"].(map[string]any)["city"] != "Hanoi" || request.RuntimeContext["requestID"] != "req-1" {
+	if request.ToolsContext["lookup"].(map[string]any)["city"] != "Hanoi" ||
+		request.RuntimeContext["requestID"] != "req-1" {
 		t.Fatalf("unexpected request context: %#v %#v", request.ToolsContext, request.RuntimeContext)
 	}
 }
@@ -108,7 +125,8 @@ func TestToolLoopAgentCompletionOptionsCanReplaceMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if len(model.requests) != 1 || len(model.requests[0].Messages) != 1 || model.requests[0].Messages[0].Content[0].Text != "replacement" {
+	if len(model.requests) != 1 || len(model.requests[0].Messages) != 1 ||
+		model.requests[0].Messages[0].Content[0].Text != "replacement" {
 		t.Fatalf("unexpected request: %#v", model.requests)
 	}
 }

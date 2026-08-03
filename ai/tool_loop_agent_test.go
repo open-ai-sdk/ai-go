@@ -29,6 +29,7 @@ func (m *minimalAgent) Prompt(ctx context.Context, prompt string) (string, error
 	}
 	return result.Text, err
 }
+
 func (m *minimalAgent) Chat(ctx context.Context, prompt string, history ...ai.Message) (string, error) {
 	messages := append(append([]ai.Message(nil), history...), ai.UserMessage(prompt))
 	result, err := m.Generate(ctx, ai.WithMessages(messages...))
@@ -37,6 +38,7 @@ func (m *minimalAgent) Chat(ctx context.Context, prompt string, history ...ai.Me
 	}
 	return result.Text, err
 }
+
 func (m *minimalAgent) Generate(ctx context.Context, opts ...ai.Option) (*ai.GenerateTextResult, error) {
 	req := ai.GenerateTextRequest{Tools: m.tools}
 	for _, o := range opts {

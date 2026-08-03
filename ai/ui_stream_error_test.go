@@ -18,9 +18,11 @@ func (erroringAgent) Tools() *ToolSet { return nil }
 func (erroringAgent) Prompt(context.Context, string) (string, error) {
 	return "", errors.New("boom")
 }
+
 func (erroringAgent) Chat(context.Context, string, ...Message) (string, error) {
 	return "", errors.New("boom")
 }
+
 func (erroringAgent) Generate(context.Context, ...Option) (*GenerateTextResult, error) {
 	return nil, errors.New("boom")
 }
