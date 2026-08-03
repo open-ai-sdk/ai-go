@@ -114,12 +114,13 @@ jobs:
 
       - name: Enforce transport leaf boundary
         run: |
-          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./transport/... \
-            | grep -v '^$' \
-            | grep -v '^github.com/open-ai-sdk/ai-go/aikit$' \
-            | grep -v '^github.com/open-ai-sdk/ai-go/transport$' || true)"
+          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./transport/...)"
+          deps="$(printf '%s\n' "$deps" | awk 'NF &&
+            $0 != "github.com/open-ai-sdk/ai-go/aikit" &&
+            $0 != "github.com/open-ai-sdk/ai-go/transport" &&
+            $0 != "github.com/open-ai-sdk/ai-go/internal/jsonclone"')"
           test -z "$deps" || {
-            echo "transport must depend only on aikit and the Go standard library:"
+            echo "transport may use the standard library, aikit, and internal/jsonclone only:"
             echo "$deps"
             exit 1
           }
