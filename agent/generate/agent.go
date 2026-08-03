@@ -19,6 +19,7 @@ import "context"
 // This interface fixes the shape to *ToolSet and the existing
 // GenerateTextResult/StreamResult types; tool typing stays at tool.New[In, Out].
 type Agent interface {
+	Completion
 	// ID identifies the agent. Empty when unset.
 	ID() string
 	// Tools returns the tool set the agent calls by default. Nil if none.

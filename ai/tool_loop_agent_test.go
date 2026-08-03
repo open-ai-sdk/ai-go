@@ -22,6 +22,23 @@ var _ ai.Agent = (*minimalAgent)(nil)
 
 func (m *minimalAgent) ID() string         { return "minimal" }
 func (m *minimalAgent) Tools() *ai.ToolSet { return m.tools }
+func (m *minimalAgent) Prompt(ctx context.Context, prompt string) (string, error) {
+	result, err := m.Generate(ctx, ai.WithMessages(ai.UserMessage(prompt)))
+	if result == nil {
+		return "", err
+	}
+	return result.Text, err
+}
+
+func (m *minimalAgent) Chat(ctx context.Context, prompt string, history ...ai.Message) (string, error) {
+	messages := append(append([]ai.Message(nil), history...), ai.UserMessage(prompt))
+	result, err := m.Generate(ctx, ai.WithMessages(messages...))
+	if result == nil {
+		return "", err
+	}
+	return result.Text, err
+}
+
 func (m *minimalAgent) Generate(ctx context.Context, opts ...ai.Option) (*ai.GenerateTextResult, error) {
 	req := ai.GenerateTextRequest{Tools: m.tools}
 	for _, o := range opts {

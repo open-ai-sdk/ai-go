@@ -1,5 +1,7 @@
 package generate
 
+import "encoding/json"
+
 // Response contains messages callers use to continue multi-step conversations.
 type Response struct {
 	Messages []Message
@@ -9,23 +11,27 @@ type Response struct {
 func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	var messages []Message
 
-	assistantParts := make([]ContentPart, 0, len(step.ToolCalls)+2)
-	if step.Reasoning != "" {
+	assistantParts := cloneContentParts(step.Content)
+	if len(assistantParts) == 0 {
+		assistantParts = make([]ContentPart, 0, len(step.ToolCalls)+2)
+	}
+	if step.Reasoning != "" && !containsContentType(assistantParts, ContentPartTypeReasoning) {
 		assistantParts = append(assistantParts, ReasoningPart(step.Reasoning))
 	}
-	if step.Text != "" {
+	if step.Text != "" && !containsContentType(assistantParts, ContentPartTypeText) {
 		assistantParts = append(assistantParts, TextPart(step.Text))
 	}
 	for _, tc := range step.ToolCalls {
-		assistantParts = append(assistantParts, ContentPart{
-			Type:                  ContentPartTypeToolCall,
-			ToolCallID:            tc.ID,
-			ToolCallName:          tc.Name,
-			ToolCallArgs:          tc.Args,
-			ThoughtSignature:      tc.ThoughtSignature,
-			ToolApprovalID:        tc.ApprovalID,
-			ToolApprovalSignature: tc.ApprovalSignature,
-		})
+		part := ContentPart{
+			Type: ContentPartTypeToolCall, ToolCallID: tc.ID, ToolCallName: tc.Name,
+			ToolCallArgs: append(json.RawMessage(nil), tc.Args...), ThoughtSignature: tc.ThoughtSignature,
+			ToolApprovalID: tc.ApprovalID, ToolApprovalSignature: tc.ApprovalSignature,
+		}
+		if index := toolCallContentIndex(assistantParts, tc.ID); index >= 0 {
+			assistantParts[index] = part
+		} else {
+			assistantParts = append(assistantParts, part)
+		}
 	}
 	if len(assistantParts) > 0 {
 		messages = append(messages, Message{
@@ -46,6 +52,37 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	}
 
 	return messages
+}
+
+func containsContentType(parts []ContentPart, contentType ContentPartType) bool {
+	for _, part := range parts {
+		if part.Type == contentType {
+			return true
+		}
+	}
+	return false
+}
+
+func toolCallContentIndex(parts []ContentPart, id string) int {
+	for i, part := range parts {
+		if part.Type == ContentPartTypeToolCall && part.ToolCallID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func cloneContentParts(parts []ContentPart) []ContentPart {
+	if parts == nil {
+		return nil
+	}
+	cloned := make([]ContentPart, len(parts))
+	for i, part := range parts {
+		cloned[i] = part
+		cloned[i].Data = append([]byte(nil), part.Data...)
+		cloned[i].ToolCallArgs = append(json.RawMessage(nil), part.ToolCallArgs...)
+	}
+	return cloned
 }
 
 // ResponseMessagesForSteps converts all completed steps into continuation

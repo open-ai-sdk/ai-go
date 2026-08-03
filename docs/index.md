@@ -10,8 +10,8 @@ hero:
       text: Get started
       link: /getting-started
     - theme: alt
-      text: View on GitHub
-      link: https://github.com/open-ai-sdk/ai-go
+      text: Read the docs
+      link: /docs/
 
 features:
   - icon: ⚡
@@ -36,4 +36,4 @@ Install the module, configure a provider, then call `ai.GenerateText`. The facad
 go get github.com/open-ai-sdk/ai-go
 ```
 
-[Read the quickstart →](/getting-started)
+[Read the quickstart →](/getting-started) · [Browse the documentation →](/docs/)

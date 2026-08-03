@@ -240,6 +240,51 @@ func TestEncodeRequest_InstructionsAndUserMessage(t *testing.T) {
 	}
 }
 
+func TestEncodeRequest_SystemMessageInHistory(t *testing.T) {
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{
+			ai.SystemMessage("You are helpful"),
+			ai.UserMessage("hello"),
+		},
+	}
+	r, _, err := encodeRequest("gpt-4o", req, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(r.Input) != 2 {
+		t.Fatalf("expected 2 input items (system + user), got %d", len(r.Input))
+	}
+	if r.Input[0].Role != "system" || len(r.Input[0].Content) != 1 ||
+		r.Input[0].Content[0].Type != "input_text" || r.Input[0].Content[0].Text != "You are helpful" {
+		t.Errorf("unexpected system input: %#v", r.Input[0])
+	}
+	if r.Input[1].Role != "user" {
+		t.Errorf("expected second item role=user, got %q", r.Input[1].Role)
+	}
+}
+
+func TestEncodeRequest_SystemMessageSkipsUnsupportedContent(t *testing.T) {
+	req := ai.LanguageModelRequest{Messages: []ai.Message{
+		{Role: ai.RoleSystem, Content: []ai.ContentPart{
+			ai.TextPart("You are helpful"),
+			{Type: ai.ContentPartTypeFile, Data: []byte("unsupported"), MediaType: "text/plain"},
+		}},
+		ai.UserMessage("hello"),
+	}}
+	r, warnings, err := encodeRequest("gpt-4o", req, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(r.Input) != 2 || len(r.Input[0].Content) != 1 ||
+		r.Input[0].Content[0].Text != "You are helpful" || r.Input[1].Role != "user" {
+		t.Fatalf("input = %#v", r.Input)
+	}
+	if len(warnings) != 1 || warnings[0].Setting != string(ai.ContentPartTypeFile) ||
+		!strings.Contains(warnings[0].Message, "unsupported system content") {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
 func TestEncodeRequest_PreviousResponseID(t *testing.T) {
 	req := ai.LanguageModelRequest{
 		Messages: []ai.Message{ai.UserMessage("continue")},

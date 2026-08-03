@@ -21,6 +21,13 @@ type fakeAgent struct {
 
 func (f *fakeAgent) ID() string      { return "fake" }
 func (f *fakeAgent) Tools() *ToolSet { return nil }
+func (f *fakeAgent) Prompt(context.Context, string) (string, error) {
+	return "", errors.New("fakeAgent.Prompt not implemented")
+}
+
+func (f *fakeAgent) Chat(context.Context, string, ...Message) (string, error) {
+	return "", errors.New("fakeAgent.Chat not implemented")
+}
 
 func (f *fakeAgent) Generate(context.Context, ...Option) (*GenerateTextResult, error) {
 	return nil, errors.New("fakeAgent.Generate not implemented")
@@ -197,6 +204,13 @@ type capturingAgent struct {
 
 func (c *capturingAgent) ID() string      { return "capturing" }
 func (c *capturingAgent) Tools() *ToolSet { return nil }
+func (c *capturingAgent) Prompt(context.Context, string) (string, error) {
+	return "", errors.New("capturingAgent.Prompt not implemented")
+}
+
+func (c *capturingAgent) Chat(context.Context, string, ...Message) (string, error) {
+	return "", errors.New("capturingAgent.Chat not implemented")
+}
 
 func (c *capturingAgent) Generate(context.Context, ...Option) (*GenerateTextResult, error) {
 	return nil, errors.New("capturingAgent.Generate not implemented")

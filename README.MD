@@ -47,9 +47,13 @@ import (
 )
 
 func main() {
-	model := openai.NewLanguageModel("gpt-5", openai.Config{
+	client, err := openai.NewClient(openai.Config{
 		APIKey: os.Getenv("OPENAI_API_KEY"),
 	})
+	if err != nil {
+		panic(err)
+	}
+	model := client.CompletionModel("gpt-5")
 
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:        model,
@@ -70,6 +74,32 @@ func main() {
 Typed provider option structs are the primary Go API. If provider options originate as decoded
 JSON, the map fallback is strict: unknown fields, wrong types, or an option struct that does not
 match the selected provider/model API returns `*llm.ProviderOptionsError` rather than being ignored.
+
+### Direct completions
+
+`GenerateText` is the application-level API: it can run a multi-step tool loop.
+Use `NewCompletion` when you need one direct model call and want to own any
+tool-call follow-up yourself. The response preserves the ordered assistant
+message, usage, sources, generated files, finish reason, and provider metadata
+from normalized provider events.
+
+```go
+completion, err := ai.NewCompletion(model, "Find the capital of Vietnam").
+	Instructions("Answer in one sentence.").
+	Temperature(0.2).
+	Send(ctx)
+if err != nil {
+	return err
+}
+fmt.Println(completion.Text)
+```
+
+Direct completions do not execute tools and do not expose opaque provider wire
+responses. Use the `Message` in the result to build an explicit continuation.
+
+`ToolLoopAgent` provides the corresponding high-level Completion capability:
+its `Prompt`, `Chat`, and `Completion(prompt)` builder retain the agent's
+tools, approvals, callbacks, and multi-step stop policy.
 
 `GenerateText` defaults to a single step. Set `StopWhen: ai.IsStepCount(n)` for an explicit
 multi-step tool loop, or use the direct `agent` runtime when the application needs event-level

@@ -57,20 +57,41 @@ type UploadFileRequest struct {
 	MediaType string
 }
 
-// UploadFile uploads data to the OpenAI /v1/files endpoint and returns the
-// resulting file metadata. It supports all FilePurpose values including
-// user_data for multimodal model inputs via file_id.
+// UploadFile uploads data to the OpenAI /v1/files endpoint. File operations
+// belong to the provider Client because they are not tied to a model ID.
+func (c *Client) UploadFile(ctx context.Context, req UploadFileRequest) (*UploadedFile, error) {
+	if err := validateUploadFileRequest(req); err != nil {
+		return nil, err
+	}
+	return c.uploadFile(ctx, req)
+}
+
+// UploadFile is retained for source compatibility. New code should call
+// Client.UploadFile.
 func (m *LanguageModel) UploadFile(ctx context.Context, req UploadFileRequest) (*UploadedFile, error) {
+	if err := validateUploadFileRequest(req); err != nil {
+		return nil, err
+	}
+	if m.clientErr != nil {
+		return nil, fmt.Errorf("openai: upload file: configure transport: %w", m.clientErr)
+	}
+	return m.client.uploadFile(ctx, req)
+}
+
+func validateUploadFileRequest(req UploadFileRequest) error {
 	if req.Filename == "" {
-		return nil, fmt.Errorf("openai: upload file: filename is required")
+		return fmt.Errorf("openai: upload file: filename is required")
 	}
 	if req.Purpose == "" {
-		return nil, fmt.Errorf("openai: upload file: purpose is required")
+		return fmt.Errorf("openai: upload file: purpose is required")
 	}
 	if len(req.Data) == 0 {
-		return nil, fmt.Errorf("openai: upload file: data is empty")
+		return fmt.Errorf("openai: upload file: data is empty")
 	}
+	return nil
+}
 
+func (c *Client) uploadFile(ctx context.Context, req UploadFileRequest) (*UploadedFile, error) {
 	mimeType := req.MediaType
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
@@ -81,16 +102,13 @@ func (m *LanguageModel) UploadFile(ctx context.Context, req UploadFileRequest) (
 		return nil, fmt.Errorf("openai: upload file: build multipart: %w", err)
 	}
 
-	if m.uploadErr != nil {
-		return nil, fmt.Errorf("openai: upload file: configure transport: %w", m.uploadErr)
-	}
-	httpReq, err := m.uploadClient.NewRequest(ctx, http.MethodPost, "files", body)
+	httpReq, err := c.uploads.NewRequest(ctx, http.MethodPost, "files", body)
 	if err != nil {
 		return nil, fmt.Errorf("openai: upload file: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", contentType)
 
-	resp, err := m.uploadClient.Do(httpReq)
+	resp, err := c.uploads.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("openai: upload file: http: %w", err)
 	}

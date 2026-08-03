@@ -3,6 +3,7 @@ package ai
 import (
 	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/agent/generate"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // The ai package is an ergonomic facade. Concrete API contracts are owned by
@@ -12,6 +13,7 @@ type (
 	AgentOption             = generate.AgentOption
 	ApprovalDecision        = generate.ApprovalDecision
 	CallSettings            = generate.CallSettings
+	Completion              = generate.Completion
 	ChunkDetector           = generate.ChunkDetector
 	ChunkEvent              = generate.ChunkEvent
 	ContentPart             = generate.ContentPart
@@ -91,6 +93,19 @@ type (
 	Usage                   = generate.Usage
 	Warning                 = generate.Warning
 )
+
+// Direct completion contracts are owned by llm because they use the model
+// boundary without entering the agent runtime.
+type (
+	CompletionRequest        = llm.CompletionRequest
+	CompletionRequestBuilder = llm.CompletionRequestBuilder
+	CompletionResponse       = llm.CompletionResponse
+	CompletionFile           = llm.GeneratedFile
+)
+
+// AgentCompletionRequestBuilder belongs to the agent runtime and runs its
+// full tool loop.
+type AgentCompletionRequestBuilder = generate.AgentCompletionRequestBuilder
 
 type ObjectResult[T any] = generate.ObjectResult[T]
 

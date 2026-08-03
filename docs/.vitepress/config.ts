@@ -1,8 +1,86 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
 const repository = 'https://github.com/open-ai-sdk/ai-go'
 
-export default defineConfig({
+const docsSidebar = [
+  {
+    text: 'Documentation',
+    items: [
+      { text: 'Overview', link: '/docs/' },
+      { text: 'Quickstart', link: '/getting-started' },
+      { text: 'Why ai-go', link: '/docs/why-ai-go' },
+      { text: 'Architecture', link: '/docs/architecture' },
+    ],
+  },
+  {
+    text: 'Concepts',
+    collapsed: false,
+    items: [
+      { text: 'Overview', link: '/core/' },
+      { text: 'Providers and clients', link: '/core/providers-and-clients' },
+      { text: 'Agents', link: '/core/agents' },
+      { text: 'Completions', link: '/core/completions' },
+      { text: 'Streaming', link: '/core/streaming' },
+      { text: 'Structured output', link: '/core/structured-output' },
+      { text: 'Tools', link: '/core/tools' },
+      { text: 'Embeddings', link: '/core/embeddings' },
+      { text: 'Media generation', link: '/core/media-generation' },
+      { text: 'Observability', link: '/core/observability' },
+    ],
+  },
+  {
+    text: 'Integrations',
+    collapsed: false,
+    items: [
+      { text: 'Overview', link: '/integrations/' },
+      {
+        text: 'Model providers',
+        collapsed: false,
+        items: [
+          { text: 'Overview', link: '/providers/' },
+          { text: 'OpenAI', link: '/providers/openai' },
+          { text: 'Other providers', link: '/providers/other-providers' },
+        ],
+      },
+      { text: 'Model Context Protocol', link: '/integrations/mcp' },
+      { text: 'AI SDK v7 UI streams', link: '/integrations/ui-streams' },
+    ],
+  },
+  {
+    text: 'Extensions',
+    items: [{ text: 'Extend ai-go', link: '/docs/extensions' }],
+  },
+]
+
+const guidesSidebar = [
+  {
+    text: 'Tutorials & Guides',
+    items: [
+      { text: 'Overview', link: '/guides/' },
+      { text: 'Build a chat server', link: '/guides/chat-server' },
+    ],
+  },
+]
+
+const examplesSidebar = [
+  {
+    text: 'Examples',
+    items: [{ text: 'Overview', link: '/examples/' }],
+  },
+]
+
+const referenceSidebar = [
+  {
+    text: 'Reference',
+    items: [
+      { text: 'Overview', link: '/reference/' },
+      { text: 'Package map', link: '/reference/package-map' },
+    ],
+  },
+]
+
+export default withMermaid(defineConfig({
   title: 'ai-go',
   description: 'A provider-neutral Go SDK for building AI applications.',
   base: process.env.GITHUB_ACTIONS ? '/ai-go/' : '/',
@@ -14,44 +92,17 @@ export default defineConfig({
   themeConfig: {
     logo: { light: '/logo-light.svg', dark: '/logo-dark.svg', alt: 'ai-go' },
     nav: [
-      { text: 'Get started', link: '/getting-started' },
-      { text: 'Core concepts', link: '/core/generate-text' },
-      { text: 'Integrations', link: '/integrations/ui-streams' },
-      { text: 'Reference', link: '/reference/package-map' },
+      { text: 'Get Started', link: '/getting-started' },
+      { text: 'Docs', link: '/docs/' },
+      { text: 'Tutorials & Guides', link: '/guides/' },
+      { text: 'Examples', link: '/examples/' },
+      { text: 'API Reference', link: 'https://pkg.go.dev/github.com/open-ai-sdk/ai-go' },
     ],
     sidebar: {
-      '/core/': [
-        { text: 'Core concepts', items: [
-          { text: 'Generate text', link: '/core/generate-text' },
-          { text: 'Stream responses', link: '/core/streaming' },
-          { text: 'Structured output', link: '/core/structured-output' },
-          { text: 'Typed tools', link: '/core/tools' },
-        ] },
-      ],
-      '/providers/': [
-        { text: 'Providers', items: [
-          { text: 'Overview', link: '/providers/' },
-          { text: 'OpenAI', link: '/providers/openai' },
-          { text: 'Other providers', link: '/providers/other-providers' },
-        ] },
-      ],
-      '/integrations/': [
-        { text: 'Integrations', items: [
-          { text: 'AI SDK v7 UI streams', link: '/integrations/ui-streams' },
-          { text: 'Model Context Protocol', link: '/integrations/mcp' },
-        ] },
-      ],
-      '/guides/': [
-        { text: 'Guides', items: [
-          { text: 'Chat server', link: '/guides/chat-server' },
-          { text: 'Observability', link: '/guides/observability' },
-        ] },
-      ],
-      '/reference/': [
-        { text: 'Reference', items: [
-          { text: 'Package map', link: '/reference/package-map' },
-        ] },
-      ],
+      '/guides/': guidesSidebar,
+      '/examples/': examplesSidebar,
+      '/reference/': referenceSidebar,
+      '/': docsSidebar,
     },
     socialLinks: [{ icon: 'github', link: repository }],
     editLink: { pattern: `${repository}/edit/main/docs/:path`, text: 'Edit this page on GitHub' },
@@ -62,4 +113,4 @@ export default defineConfig({
     search: { provider: 'local' },
     outline: { level: [2, 3], label: 'On this page' },
   },
-})
+}))

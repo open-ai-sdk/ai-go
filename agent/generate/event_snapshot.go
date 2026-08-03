@@ -43,6 +43,8 @@ func snapshotStepEvent(event StepEvent) StepEvent {
 
 func snapshotStepEndEvent(event StepEndEvent) StepEndEvent {
 	snapshot := event
+	snapshot.Content = cloneContentParts(event.Content)
+	snapshot.Files = cloneGeneratedFiles(event.Files)
 	snapshot.ToolCalls = snapshotToolCalls(event.ToolCalls)
 	snapshot.ToolResults = snapshotToolResults(event.ToolResults)
 	snapshot.Usage = snapshotUsage(event.Usage)
@@ -85,6 +87,7 @@ func snapshotChunkEvent(event ChunkEvent) ChunkEvent {
 
 func snapshotStepOutput(step StepOutput) StepOutput {
 	snapshot := step
+	snapshot.Content = cloneContentParts(step.Content)
 	snapshot.ToolCalls = snapshotToolCalls(step.ToolCalls)
 	snapshot.ToolResults = snapshotToolResults(step.ToolResults)
 	snapshot.Usage = *snapshotUsage(&step.Usage)
@@ -98,14 +101,22 @@ func snapshotStepOutput(step StepOutput) StepOutput {
 		}
 	}
 	if step.Files != nil {
-		snapshot.Files = make([]GeneratedFile, len(step.Files))
-		for i, file := range step.Files {
-			snapshot.Files[i] = file
-			snapshot.Files[i].Data = append([]byte(nil), file.Data...)
-		}
+		snapshot.Files = cloneGeneratedFiles(step.Files)
 	}
 	snapshot.Response = snapshotResponse(step.Response)
 	return snapshot
+}
+
+func cloneGeneratedFiles(files []GeneratedFile) []GeneratedFile {
+	if files == nil {
+		return nil
+	}
+	cloned := make([]GeneratedFile, len(files))
+	for i, file := range files {
+		cloned[i] = file
+		cloned[i].Data = append([]byte(nil), file.Data...)
+	}
+	return cloned
 }
 
 func snapshotToolCalls(calls []ToolCallOutput) []ToolCallOutput {

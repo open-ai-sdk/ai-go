@@ -54,6 +54,10 @@ The package table above records the earlier cross-package moves.
 
 ### Behavioral changes
 
+- `agent/generate.Agent` now includes the `Completion` capability:
+  custom Agent implementations must add `Prompt(context.Context, string)` and
+  `Chat(context.Context, string, ...Message)`. `ToolLoopAgent` supplies both
+  methods plus `Completion(prompt)` for an agent-bound request builder.
 - Removed `Writer.WriteSource` and `Writer.WriteSources`. Their `source` and `sources` chunk types
   are not members of the AI SDK v7 union. Emit `source-url` with `WriteSourceURL`, emit
   `source-document` with `WriteSourceDocument`, or let `ChunkProducer` convert `aikit.Source`
