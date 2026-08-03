@@ -304,10 +304,14 @@ func encodeToolParts(parts []aikit.ContentPart, supportsFunctionResponseParts bo
 				for _, responsePart := range responseParts {
 					out = append(out, nativePart{InlineData: responsePart.InlineData})
 					kind := "file"
-					if responsePart.InlineData != nil && strings.HasPrefix(responsePart.InlineData.MediaType, "image/") {
+					if responsePart.InlineData != nil &&
+						strings.HasPrefix(responsePart.InlineData.MediaType, "image/") {
 						kind = "image"
 					}
-					out = append(out, nativePart{Text: "Tool executed successfully and returned this " + kind + " as a response"})
+					out = append(
+						out,
+						nativePart{Text: "Tool executed successfully and returned this " + kind + " as a response"},
+					)
 				}
 			}
 		}

@@ -142,10 +142,7 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
-	if err := validatePDFDetail(opts.PDFDetail); err != nil {
-		return responsesRequest{}, nil, err
-	}
-	if err := validatePromptCacheOptions(req, opts); err != nil {
+	if err := validateProviderOptions(req, opts); err != nil {
 		return responsesRequest{}, nil, err
 	}
 	var warnings []aikit.Warning
@@ -161,7 +158,28 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 		Input:  input,
 		Stream: stream,
 	}
+	warnings = append(warnings, applyRequestOptions(&r, req, opts)...)
 
+	// Tools: function tools + optional built-in web search.
+	tools, toolWarnings := encodeTools(req.Tools, opts)
+	warnings = append(warnings, toolWarnings...)
+	r.Tools = tools
+
+	// Include list: add sources when web search + IncludeSources requested.
+	if opts.EnableWebSearch && opts.IncludeSources {
+		r.Include = append(r.Include, "web_search_call.action.sources")
+	}
+
+	// Structured output schema.
+	if req.Output != nil && req.Output.Type != "text" {
+		r.Text = encodeOutputSchema(req.Output)
+	}
+
+	return r, warnings, nil
+}
+
+func applyRequestOptions(r *responsesRequest, req llm.Request, opts ProviderOptions) []aikit.Warning {
+	var warnings []aikit.Warning
 	// Token limit: provider option takes precedence over settings.
 	if opts.MaxOutputTokens > 0 {
 		r.MaxOutputTokens = opts.MaxOutputTokens
@@ -211,23 +229,7 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	if opts.PromptCacheMode != "" {
 		r.PromptCacheOptions = &promptCacheOptions{Mode: opts.PromptCacheMode}
 	}
-
-	// Tools: function tools + optional built-in web search.
-	tools, toolWarnings := encodeTools(req.Tools, opts)
-	warnings = append(warnings, toolWarnings...)
-	r.Tools = tools
-
-	// Include list: add sources when web search + IncludeSources requested.
-	if opts.EnableWebSearch && opts.IncludeSources {
-		r.Include = append(r.Include, "web_search_call.action.sources")
-	}
-
-	// Structured output schema.
-	if req.Output != nil && req.Output.Type != "text" {
-		r.Text = encodeOutputSchema(req.Output)
-	}
-
-	return r, warnings, nil
+	return warnings
 }
 
 // encodeInput converts system prompt + messages to Responses API input items.
@@ -274,6 +276,13 @@ func validatePromptCacheOptions(req llm.Request, opts ProviderOptions) error {
 		return fmt.Errorf("openai: prompt cache instructions requires non-empty Instructions")
 	}
 	return nil
+}
+
+func validateProviderOptions(req llm.Request, opts ProviderOptions) error {
+	if err := validatePDFDetail(opts.PDFDetail); err != nil {
+		return err
+	}
+	return validatePromptCacheOptions(req, opts)
 }
 
 func encodeMessage(m aikit.Message, pdfDetail string) ([]inputItem, []aikit.Warning, error) {
