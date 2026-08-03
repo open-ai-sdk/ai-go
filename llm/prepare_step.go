@@ -15,6 +15,7 @@ type PrepareStepContext struct {
 // PrepareStepInfo describes one completed step.
 type PrepareStepInfo struct {
 	StepNumber       int
+	MessageID        string
 	HasToolCalls     bool
 	ToolNames        []string
 	Text             string

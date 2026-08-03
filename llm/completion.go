@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps direct completion request building, stream aggregation, and response normalization together.
 package llm
 
 import (
@@ -19,15 +18,29 @@ type CompletionRequest = Request
 // calls are returned as message parts but are never executed by this package.
 type CompletionResponse struct {
 	Message          aikit.Message
+	MessageID        string
 	Text             string
 	Reasoning        string
 	Usage            aikit.Usage
+	RawResponse      any
 	FinishReason     aikit.FinishReason
 	RawFinishReason  string
 	ProviderMetadata map[string]any
 	Warnings         []aikit.Warning
 	Sources          []aikit.Source
 	Files            []GeneratedFile
+}
+
+// RawResponseAs returns the provider-native successful response when it has
+// the requested type. Raw responses are diagnostic data and may contain
+// sensitive provider fields; ai-go never logs them automatically.
+func RawResponseAs[T any](response *CompletionResponse) (T, bool) {
+	var zero T
+	if response == nil || response.RawResponse == nil {
+		return zero, false
+	}
+	value, ok := response.RawResponse.(T)
+	return value, ok
 }
 
 // GeneratedFile is a file emitted by a provider during a completion.
@@ -160,20 +173,52 @@ func (b CompletionRequestBuilder) Build() CompletionRequest { return cloneReques
 // apply agent stop conditions.
 func (b CompletionRequestBuilder) Stream(ctx context.Context) (<-chan aikit.StreamEvent, error) {
 	if b.model == nil {
-		return nil, errors.New("llm: completion model is required")
+		return nil, &CompletionError{
+			Kind: CompletionErrorKindRequest, Operation: "stream",
+			Cause: errors.New("completion model is required"),
+		}
 	}
-	return b.model.Stream(ctx, b.Build())
+	stream, err := b.model.Stream(ctx, b.Build())
+	if err != nil {
+		return nil, wrapCompletionError(err, CompletionErrorKindProvider, "stream")
+	}
+	if stream == nil {
+		return nil, invalidCompletionResponse("stream", "model returned a nil stream")
+	}
+	return stream, nil
 }
 
 // Send runs exactly one provider model call and aggregates its normalized
 // events. If the provider emits an error event, the partial response and that
 // error are returned together.
 func (b CompletionRequestBuilder) Send(ctx context.Context) (*CompletionResponse, error) {
+	if b.model == nil {
+		return nil, NewCompletionError(
+			CompletionErrorKindRequest,
+			"send",
+			"",
+			errors.New("llm: completion model is required"),
+		)
+	}
+	if model, ok := b.model.(CompletionModel); ok {
+		response, err := model.Complete(ctx, b.Build())
+		if err != nil {
+			return response, wrapCompletionError(err, CompletionErrorKindProvider, "complete")
+		}
+		if response == nil {
+			return nil, invalidCompletionResponse("complete", "model returned a nil response")
+		}
+		return response, nil
+	}
 	stream, err := b.Stream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return collectCompletion(ctx, stream)
+	response, err := collectCompletion(ctx, stream)
+	if err != nil {
+		return response, wrapCompletionError(err, CompletionErrorKindProvider, "collect")
+	}
+	return response, nil
 }
 
 // Complete is the explicit function form of CompletionRequestBuilder.Send.
@@ -240,6 +285,8 @@ func collectCompletion(ctx context.Context, stream <-chan aikit.StreamEvent) (*C
 					})
 				}
 			case aikit.StreamEventFinish:
+				response.MessageID = event.MessageID
+				response.Message.ID = event.MessageID
 				response.FinishReason = event.FinishReason
 				response.RawFinishReason = event.RawFinishReason
 				response.ProviderMetadata = cloneMap(event.ProviderMetadata)
@@ -327,6 +374,7 @@ func mergeUsage(prior, incoming aikit.Usage) aikit.Usage {
 	merged.InputTokens = take(prior.InputTokens, incoming.InputTokens)
 	merged.OutputTokens = take(prior.OutputTokens, incoming.OutputTokens)
 	merged.TotalTokens = take(prior.TotalTokens, incoming.TotalTokens)
+	merged.ToolUsePromptTokens = take(prior.ToolUsePromptTokens, incoming.ToolUsePromptTokens)
 	merged.InputTokenDetails.NoCacheTokens = take(
 		prior.InputTokenDetails.NoCacheTokens,
 		incoming.InputTokenDetails.NoCacheTokens,

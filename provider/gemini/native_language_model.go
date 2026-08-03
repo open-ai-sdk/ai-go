@@ -43,6 +43,7 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
+	cfg.Timeout = timeout
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = nativeBaseURL
@@ -81,7 +82,7 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-ch
 		return nil, err
 	}
 	// Build native request body.
-	nr := encodeNativeRequest(req)
+	nr := encodeNativeRequestForModel(m.modelID, req)
 
 	// Encode tools + toolConfig.
 	opts := parseProviderOptions(req.ProviderOptions)

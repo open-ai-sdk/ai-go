@@ -11,7 +11,7 @@ func buildInitialHistory(req Request) []Message {
 	return msgs
 }
 
-func buildAssistantToolCallMessage(text, reasoning string, calls []toolCallState) Message {
+func buildAssistantToolCallMessage(messageID, text, reasoning string, calls []toolCallState) Message {
 	parts := make([]ContentPart, 0, 2+len(calls))
 	if reasoning != "" {
 		parts = append(parts, ContentPart{Type: "reasoning", ReasoningText: reasoning})
@@ -28,7 +28,7 @@ func buildAssistantToolCallMessage(text, reasoning string, calls []toolCallState
 			ThoughtSignature: tc.thoughtSignature,
 		})
 	}
-	return Message{Role: "assistant", Content: parts}
+	return Message{ID: messageID, Role: "assistant", Content: parts}
 }
 
 func buildToolResultMessage(toolCallID, toolName, output string) Message {
@@ -95,6 +95,7 @@ func emitOnStepEnd(
 	}
 	cb.OnStepEnd(StepEndEvent{
 		StepNumber:       step,
+		MessageID:        sr.messageID,
 		Text:             sr.text,
 		Reasoning:        sr.reasoning,
 		ToolCalls:        snapshotToolCallInfos(toolCalls),
@@ -113,23 +114,17 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 	var totalText, totalReasoning string
 	var totalUsage Usage
 	var lastFinish FinishReason
+	var lastMessageID string
 	var lastMeta map[string]any
 	for _, s := range steps {
 		totalText += s.Text
 		totalReasoning += s.Reasoning
 		lastFinish = s.FinishReason
+		if s.MessageID != "" {
+			lastMessageID = s.MessageID
+		}
 		if s.Usage != nil {
-			totalUsage.InputTokens += s.Usage.InputTokens
-			totalUsage.InputTokenDetails.NoCacheTokens += s.Usage.InputTokenDetails.NoCacheTokens
-			totalUsage.OutputTokens += s.Usage.OutputTokens
-			totalUsage.OutputTokenDetails.TextTokens += s.Usage.OutputTokenDetails.TextTokens
-			totalUsage.TotalTokens += s.Usage.TotalTokens
-			totalUsage.OutputTokenDetails.ReasoningTokens += s.Usage.OutputTokenDetails.ReasoningTokens
-			totalUsage.InputTokenDetails.CacheReadTokens += s.Usage.InputTokenDetails.CacheReadTokens
-			totalUsage.InputTokenDetails.CacheWriteTokens += s.Usage.InputTokenDetails.CacheWriteTokens
-			if s.Usage.Raw != nil {
-				totalUsage.Raw = s.Usage.Raw
-			}
+			totalUsage.Accumulate(*s.Usage)
 		}
 		if s.ProviderMetadata != nil {
 			lastMeta = s.ProviderMetadata
@@ -138,10 +133,14 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 	if sr.finish != "" {
 		lastFinish = sr.finish
 	}
+	if sr.messageID != "" {
+		lastMessageID = sr.messageID
+	}
 	if sr.providerMeta != nil {
 		lastMeta = sr.providerMeta
 	}
 	cb.OnEnd(EndEvent{
+		MessageID:        lastMessageID,
 		Text:             totalText,
 		Reasoning:        totalReasoning,
 		Steps:            snapshotPrepareStepInfos(steps),

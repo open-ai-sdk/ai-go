@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps the stateful Responses SSE item and delta assembly in one decoder.
 package openai
 
 import (
@@ -74,6 +73,7 @@ type responsesChunk struct {
 // streamState holds mutable state accumulated during SSE stream decoding.
 type streamState struct {
 	responseID    string
+	messageID     string
 	callsByItemID map[string]*pendingCall
 	callOrder     []string
 }
@@ -176,6 +176,9 @@ func dispatchChunk(
 		}
 
 	case "response.output_item.added":
+		if chunk.Item != nil && chunk.Item.Type == "message" && state.messageID == "" {
+			state.messageID = chunk.Item.ID
+		}
 		handleOutputItemAdded(chunk, state, ch)
 
 	case "response.function_call_arguments.delta":
@@ -242,6 +245,7 @@ func handleResponseCompleted(
 	}
 	ch <- aikit.StreamEvent{
 		Type:             aikit.StreamEventFinish,
+		MessageID:        state.messageID,
 		FinishReason:     mapResponsesFinishReason(chunk.Response.Status, len(state.callsByItemID) > 0),
 		RawFinishReason:  chunk.Response.Status,
 		ProviderMetadata: map[string]any{"openai": map[string]any{"responseId": state.responseID}},

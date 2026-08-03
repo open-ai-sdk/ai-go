@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps the native Gemini request grammar and its coupled validation in one encoder.
 package gemini
 
 import (
@@ -53,8 +52,13 @@ type nativeFuncCall struct {
 }
 
 type nativeFuncResp struct {
-	Name     string `json:"name"`
-	Response any    `json:"response"`
+	Name     string                       `json:"name"`
+	Response any                          `json:"response"`
+	Parts    []nativeFunctionResponsePart `json:"parts,omitempty"`
+}
+
+type nativeFunctionResponsePart struct {
+	InlineData *nativeInlineData `json:"inlineData,omitempty"`
 }
 
 type nativeSystemInstruction struct {
@@ -93,13 +97,17 @@ type nativeImageConfig struct {
 // encodeNativeRequest converts an aikit.LanguageModelRequest to the native Gemini
 // request body for the :streamGenerateContent endpoint.
 func encodeNativeRequest(req llm.Request) nativeRequest {
+	return encodeNativeRequestForModel("", req)
+}
+
+func encodeNativeRequestForModel(modelID string, req llm.Request) nativeRequest {
 	nr := nativeRequest{}
 
 	// System instruction: collect from req.Instructions and any leading system messages.
 	nr.SystemInstruction = buildSystemInstruction(req)
 
 	// Convert messages to native contents.
-	nr.Contents = buildContents(req.Messages)
+	nr.Contents = buildContents(req.Messages, usesGemini3Features(modelID))
 
 	// Generation config.
 	nr.GenerationConfig = buildGenerationConfig(req)
@@ -135,7 +143,7 @@ func buildSystemInstruction(req llm.Request) *nativeSystemInstruction {
 
 // buildContents converts the message list to native Gemini contents,
 // skipping leading system messages (already handled by buildSystemInstruction).
-func buildContents(messages []aikit.Message) []nativeContent {
+func buildContents(messages []aikit.Message, supportsFunctionResponseParts bool) []nativeContent {
 	var contents []nativeContent
 
 	// Skip leading system messages.
@@ -159,12 +167,35 @@ func buildContents(messages []aikit.Message) []nativeContent {
 		case aikit.RoleTool:
 			contents = append(contents, nativeContent{
 				Role:  "user",
-				Parts: encodeToolParts(msg.Content),
+				Parts: encodeToolParts(msg.Content, supportsFunctionResponseParts),
 			})
 		}
 	}
 
 	return contents
+}
+
+func usesGemini3Features(modelID string) bool {
+	id := strings.ToLower(modelID)
+	if slash := strings.LastIndexByte(id, '/'); slash >= 0 {
+		id = id[slash+1:]
+	}
+	if !strings.HasPrefix(id, "gemini-") {
+		return false
+	}
+	if id == "gemini-1" || id == "gemini-2" {
+		return false
+	}
+	legacyPrefix := []string{
+		"gemini-1.", "gemini-1-", "gemini-2.", "gemini-2-",
+		"gemini-pro", "gemini-robotics-er-1.5",
+	}
+	for _, prefix := range legacyPrefix {
+		if strings.HasPrefix(id, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // encodeUserParts converts user content parts to native parts.
@@ -174,12 +205,14 @@ func encodeUserParts(parts []aikit.ContentPart) []nativePart {
 		switch p.Type {
 		case aikit.ContentPartTypeText:
 			out = append(out, nativePart{Text: p.Text})
-		case aikit.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				out = append(out, encodeImagePart(p))
 			} else {
 				out = append(out, encodeFilePart(p))
 			}
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeDocument, aikit.ContentPartTypeVideo:
+			out = append(out, encodeFilePart(p))
 		}
 	}
 	return out
@@ -209,31 +242,78 @@ func encodeAssistantParts(parts []aikit.ContentPart) []nativePart {
 				np.ThoughtSignature = p.ThoughtSignature
 			}
 			out = append(out, np)
-		case aikit.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				out = append(out, encodeImagePart(p))
 			} else {
 				out = append(out, encodeFilePart(p))
 			}
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeDocument, aikit.ContentPartTypeVideo:
+			out = append(out, encodeFilePart(p))
 		}
 	}
 	return out
 }
 
 // encodeToolParts converts tool-result content parts to native functionResponse parts.
-func encodeToolParts(parts []aikit.ContentPart) []nativePart {
+func encodeToolParts(parts []aikit.ContentPart, supportsFunctionResponseParts bool) []nativePart {
 	var out []nativePart
 	for _, p := range parts {
 		if p.Type == aikit.ContentPartTypeToolResult {
-			out = append(out, nativePart{
-				FunctionResponse: &nativeFuncResp{
-					Name: p.ToolResultName,
-					Response: map[string]string{
-						"name":    p.ToolResultName,
-						"content": p.ToolResultOutput,
-					},
-				},
-			})
+			response := any(map[string]string{"name": p.ToolResultName, "content": p.ToolResultOutput})
+			var responseParts []nativeFunctionResponsePart
+			if len(p.ToolResultContent) > 0 {
+				items := make([]any, 0, len(p.ToolResultContent))
+				for _, item := range p.ToolResultContent {
+					switch item.Type {
+					case aikit.ToolResultContentTypeText:
+						items = append(items, item.Text)
+					case aikit.ToolResultContentTypeJSON:
+						var value any
+						if err := json.Unmarshal(item.JSON, &value); err != nil {
+							value = string(item.JSON)
+						}
+						items = append(items, value)
+					case aikit.ToolResultContentTypeImage:
+						responseParts = append(responseParts, nativeFunctionResponsePart{
+							InlineData: &nativeInlineData{
+								MediaType: item.MediaType,
+								Data:      base64.StdEncoding.EncodeToString(item.Data),
+							},
+						})
+					}
+				}
+				content := any(p.ToolResultOutput)
+				if len(items) == 1 {
+					content = items[0]
+				} else if len(items) > 1 {
+					content = items
+				} else if p.ToolResultOutput == "" && len(responseParts) > 0 {
+					content = "Tool executed successfully."
+				}
+				response = map[string]any{"name": p.ToolResultName, "content": content}
+			}
+			functionResponse := &nativeFuncResp{
+				Name: p.ToolResultName, Response: response,
+			}
+			if supportsFunctionResponseParts {
+				functionResponse.Parts = responseParts
+			}
+			out = append(out, nativePart{FunctionResponse: functionResponse})
+			if !supportsFunctionResponseParts {
+				for _, responsePart := range responseParts {
+					out = append(out, nativePart{InlineData: responsePart.InlineData})
+					kind := "file"
+					if responsePart.InlineData != nil &&
+						strings.HasPrefix(responsePart.InlineData.MediaType, "image/") {
+						kind = "image"
+					}
+					out = append(
+						out,
+						nativePart{Text: "Tool executed successfully and returned this " + kind + " as a response"},
+					)
+				}
+			}
 		}
 	}
 	return out

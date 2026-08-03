@@ -145,7 +145,13 @@ func (b RequestBuilder) Build() Request {
 }
 
 func cloneRequest(request Request) Request {
-	request.Messages = append([]aikit.Message(nil), request.Messages...)
+	if request.Messages != nil {
+		messages := make([]aikit.Message, len(request.Messages))
+		for i := range request.Messages {
+			messages[i] = request.Messages[i].Clone()
+		}
+		request.Messages = messages
+	}
 	request.Tools = append([]aikit.ToolDefinition(nil), request.Tools...)
 	request.Settings = cloneCallSettings(request.Settings)
 	request.ProviderOptions = cloneMap(request.ProviderOptions)

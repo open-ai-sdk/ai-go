@@ -4,6 +4,7 @@ package agent
 type streamResult struct {
 	text         string
 	reasoning    string
+	messageID    string
 	finish       FinishReason
 	rawFinish    string
 	providerMeta map[string]any
@@ -93,6 +94,7 @@ func applyStreamEvent(
 		})
 
 	case StreamEventFinish:
+		sr.messageID = ev.MessageID
 		sr.finish = ev.FinishReason
 		sr.rawFinish = ev.RawFinishReason
 		sr.providerMeta = ev.ProviderMetadata
@@ -171,6 +173,7 @@ func mergeUsage(prior, incoming *Usage) *Usage {
 	merged.InputTokens = takeInt(prior.InputTokens, incoming.InputTokens)
 	merged.OutputTokens = takeInt(prior.OutputTokens, incoming.OutputTokens)
 	merged.TotalTokens = takeInt(prior.TotalTokens, incoming.TotalTokens)
+	merged.ToolUsePromptTokens = takeInt(prior.ToolUsePromptTokens, incoming.ToolUsePromptTokens)
 	merged.InputTokenDetails.NoCacheTokens = takeInt(
 		prior.InputTokenDetails.NoCacheTokens,
 		incoming.InputTokenDetails.NoCacheTokens,

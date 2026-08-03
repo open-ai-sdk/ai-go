@@ -56,15 +56,7 @@ func snapshotToolResults(results []ToolResult) []ToolResult {
 }
 
 func snapshotToolResult(result ToolResult) ToolResult {
-	snapshot := result
-	if result.Content != nil {
-		snapshot.Content = make([]ToolResultContent, len(result.Content))
-		for i, content := range result.Content {
-			snapshot.Content[i] = content
-			snapshot.Content[i].Data = append([]byte(nil), content.Data...)
-		}
-	}
-	return snapshot
+	return result.Clone()
 }
 
 func snapshotMessages(messages []Message) []Message {
@@ -73,19 +65,7 @@ func snapshotMessages(messages []Message) []Message {
 	}
 	snapshot := make([]Message, len(messages))
 	for i, message := range messages {
-		snapshot[i] = message
-		if message.Content == nil {
-			continue
-		}
-		snapshot[i].Content = make([]ContentPart, len(message.Content))
-		for j, content := range message.Content {
-			snapshot[i].Content[j] = content
-			snapshot[i].Content[j].Data = append([]byte(nil), content.Data...)
-			snapshot[i].Content[j].ToolCallArgs = append(
-				json.RawMessage(nil),
-				content.ToolCallArgs...,
-			)
-		}
+		snapshot[i] = message.Clone()
 	}
 	return snapshot
 }

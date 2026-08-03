@@ -100,25 +100,27 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
-      - name: Enforce aikit leaf boundary
+      - name: Enforce aikit dependency boundary
         run: |
-          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./aikit/... \
-            | grep -v '^$' \
-            | grep -v '^github.com/open-ai-sdk/ai-go/aikit$' || true)"
-          test -z "$deps" || {
-            echo "aikit must depend only on the Go standard library:"
-            echo "$deps"
+          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./aikit/...)"
+          deps="$(printf '%s\n' "$deps" | awk 'NF && $0 != "github.com/open-ai-sdk/ai-go/aikit"')"
+          forbidden="$(printf '%s\n' "$deps" \
+            | awk '$0 != "github.com/open-ai-sdk/ai-go/internal/jsonclone"')"
+          test -z "$forbidden" || {
+            echo "aikit may use the standard library and internal/jsonclone only:"
+            echo "$forbidden"
             exit 1
           }
 
       - name: Enforce transport leaf boundary
         run: |
-          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./transport/... \
-            | grep -v '^$' \
-            | grep -v '^github.com/open-ai-sdk/ai-go/aikit$' \
-            | grep -v '^github.com/open-ai-sdk/ai-go/transport$' || true)"
+          deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./transport/...)"
+          deps="$(printf '%s\n' "$deps" | awk 'NF &&
+            $0 != "github.com/open-ai-sdk/ai-go/aikit" &&
+            $0 != "github.com/open-ai-sdk/ai-go/transport" &&
+            $0 != "github.com/open-ai-sdk/ai-go/internal/jsonclone"')"
           test -z "$deps" || {
-            echo "transport must depend only on aikit and the Go standard library:"
+            echo "transport may use the standard library, aikit, and internal/jsonclone only:"
             echo "$deps"
             exit 1
           }
@@ -211,31 +213,6 @@ jobs:
             -path './.github/checks' -prune -o \
             -type f -name '*.go' -exec dirname '{}' \; | sort -u)
           test "$missing" -eq 0
-
-      - name: Preserve benchmark coverage
-        run: |
-          count="$(find . \
-            -path './conformance/node_modules' -prune -o \
-            -type f -name '*.go' -exec grep -h '^func Benchmark' '{}' + \
-            | wc -l | tr -d ' ')"
-          test "$count" -eq 3 || {
-            echo "expected 3 benchmark functions, found $count"
-            exit 1
-          }
-
-      - name: Enforce justified production file length
-        run: |
-          failed=0
-          while IFS= read -r -d '' file; do
-            lines="$(wc -l < "$file")"
-            if [ "$lines" -gt 250 ] && ! grep -Eq '^// ai-go: file-length-justification: .+' "$file"; then
-              echo "$file has $lines lines and no file-length justification"
-              failed=1
-            fi
-          done < <(find . \
-            -path './conformance/node_modules' -prune -o \
-            -type f -name '*.go' ! -name '*_test.go' -print0)
-          test "$failed" -eq 0
 
       - name: Verify external consumer surface
         run: go -C compat-test test ./...

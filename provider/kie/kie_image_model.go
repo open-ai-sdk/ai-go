@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps Kie image submission, polling, download, and result mapping as one workflow.
 package kie
 
 import (

@@ -42,6 +42,7 @@ func chunkEvent(event StepEvent) ChunkEvent {
 	}
 	return ChunkEvent{
 		Type:              eventType,
+		MessageID:         event.MessageID,
 		TextDelta:         event.TextDelta,
 		ReasoningDelta:    event.ReasoningDelta,
 		ToolCallID:        event.ToolCallID,

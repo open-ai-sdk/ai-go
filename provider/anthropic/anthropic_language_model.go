@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps Anthropic model request preparation and response normalization at one API boundary.
 package anthropic
 
 import (
@@ -53,7 +52,7 @@ func (m *LanguageModel) ModelID() string { return m.modelID }
 
 // Stream sends a streaming request to the Anthropic Messages API.
 func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aikit.StreamEvent, error) {
-	body, encodeWarnings, err := m.encodeRequest(req)
+	body, encodeWarnings, err := m.encodeRequest(req, true)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: encode request: %w", err)
 	}
@@ -118,7 +117,7 @@ type contentBlock struct {
 	Name         string          `json:"name,omitempty"`
 	Input        json.RawMessage `json:"input,omitempty"`
 	ToolUseID    string          `json:"tool_use_id,omitempty"`
-	Content      string          `json:"content,omitempty"`
+	Content      any             `json:"content,omitempty"`
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 	Thinking     string          `json:"thinking,omitempty"`
 	Signature    string          `json:"signature,omitempty"`
@@ -148,7 +147,7 @@ type thinkingConfig struct {
 
 // encodeRequest builds the Messages API body. Returned warnings describe content
 // the API cannot carry; they are surfaced on the stream's finish event.
-func (m *LanguageModel) encodeRequest(req llm.Request) ([]byte, []aikit.Warning, error) {
+func (m *LanguageModel) encodeRequest(req llm.Request, streaming bool) ([]byte, []aikit.Warning, error) {
 	if req.Output != nil {
 		return nil, nil, fmt.Errorf("anthropic: output schema is not yet supported")
 	}
@@ -156,7 +155,7 @@ func (m *LanguageModel) encodeRequest(req llm.Request) ([]byte, []aikit.Warning,
 	ar := anthropicRequest{
 		Model:     m.modelID,
 		MaxTokens: req.Settings.MaxTokens,
-		Stream:    true,
+		Stream:    streaming,
 	}
 	if ar.MaxTokens == 0 {
 		ar.MaxTokens = 8192
@@ -241,8 +240,13 @@ func encodeContentPart(part aikit.ContentPart) (*contentBlock, []aikit.Warning) 
 	switch part.Type {
 	case aikit.ContentPartTypeText:
 		return &contentBlock{Type: "text", Text: part.Text}, nil
-	case aikit.ContentPartTypeFile:
+	case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage, aikit.ContentPartTypeDocument:
 		return encodeFilePart(part)
+	case aikit.ContentPartTypeAudio, aikit.ContentPartTypeVideo:
+		return nil, []aikit.Warning{{
+			Type: "unsupported-setting", Setting: string(part.Type),
+			Message: fmt.Sprintf("anthropic: content part type %q is not supported", part.Type),
+		}}
 	case aikit.ContentPartTypeToolCall:
 		return &contentBlock{
 			Type:  "tool_use",
@@ -251,11 +255,12 @@ func encodeContentPart(part aikit.ContentPart) (*contentBlock, []aikit.Warning) 
 			Input: part.ToolCallArgs,
 		}, nil
 	case aikit.ContentPartTypeToolResult:
+		content, warnings := encodeAnthropicToolResult(part)
 		return &contentBlock{
 			Type:      "tool_result",
 			ToolUseID: part.ToolResultID,
-			Content:   part.ToolResultOutput,
-		}, nil
+			Content:   content,
+		}, warnings
 	case aikit.ContentPartTypeReasoning:
 		return &contentBlock{
 			Type:      "thinking",
@@ -265,6 +270,40 @@ func encodeContentPart(part aikit.ContentPart) (*contentBlock, []aikit.Warning) 
 	default:
 		return nil, nil
 	}
+}
+
+func encodeAnthropicToolResult(part aikit.ContentPart) (any, []aikit.Warning) {
+	if len(part.ToolResultContent) == 0 {
+		return part.ToolResultOutput, nil
+	}
+	content := make([]map[string]any, 0, len(part.ToolResultContent))
+	var warnings []aikit.Warning
+	for _, item := range part.ToolResultContent {
+		switch item.Type {
+		case aikit.ToolResultContentTypeText:
+			content = append(content, map[string]any{"type": "text", "text": item.Text})
+		case aikit.ToolResultContentTypeJSON:
+			content = append(content, map[string]any{"type": "text", "text": string(item.JSON)})
+		case aikit.ToolResultContentTypeImage:
+			mediaType := item.MediaType
+			if mediaType == "" {
+				mediaType = "image/png"
+			}
+			content = append(content, map[string]any{"type": "image", "source": map[string]any{
+				"type": "base64", "media_type": mediaType,
+				"data": base64.StdEncoding.EncodeToString(item.Data),
+			}})
+		default:
+			warnings = append(warnings, aikit.Warning{
+				Type: "unsupported-setting", Setting: item.Type,
+				Message: fmt.Sprintf("anthropic: unsupported tool result content type %q", item.Type),
+			})
+		}
+	}
+	if len(content) == 0 && part.ToolResultOutput != "" {
+		return part.ToolResultOutput, warnings
+	}
+	return content, warnings
 }
 
 // encodeFilePart maps a file content part onto an Anthropic content block.

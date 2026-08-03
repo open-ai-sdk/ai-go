@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
@@ -56,7 +55,17 @@ func emitStructuredOutput(r *run, model Model, request Request, history []Messag
 	eventCh, err := model.Stream(modelCtx, req)
 	if err != nil {
 		span.RecordError(err)
-		r.emitError(fmt.Errorf("structured output call: %w", err))
+		r.emitError(&StructuredOutputError{
+			Kind: StructuredOutputErrorKindPrompt, Reason: "prompt failed", Cause: err,
+		})
+		return false
+	}
+	if eventCh == nil {
+		err := &StructuredOutputError{
+			Kind: StructuredOutputErrorKindEmpty, Reason: "model returned no response",
+		}
+		span.RecordError(err)
+		r.emitError(err)
 		return false
 	}
 
@@ -74,7 +83,9 @@ func emitStructuredOutput(r *run, model Model, request Request, history []Messag
 			}
 			if ev.Type == StreamEventError {
 				span.RecordError(ev.Error)
-				r.emitError(ev.Error)
+				r.emitError(&StructuredOutputError{
+					Kind: StructuredOutputErrorKindPrompt, Reason: "prompt failed", Cause: ev.Error,
+				})
 				return false
 			}
 		}
@@ -85,9 +96,18 @@ complete:
 		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: b.String()})
 	}
 
-	parsed := parseStructuredOutput(b.String())
+	raw := b.String()
+	if strings.TrimSpace(raw) == "" {
+		r.emitError(&StructuredOutputError{
+			Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty",
+		})
+		return false
+	}
+	parsed := parseStructuredOutput(raw)
 	if parsed == nil {
-		r.emitError(&StructuredOutputError{Path: "$", Reason: "is invalid JSON"})
+		r.emitError(&StructuredOutputError{
+			Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON",
+		})
 		return false
 	}
 	if err := validateStructuredOutput(parsed, request.Output); err != nil {

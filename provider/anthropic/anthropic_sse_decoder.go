@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps Anthropic's stateful content-block SSE grammar in one decoder.
 package anthropic
 
 import (
@@ -26,6 +25,7 @@ const (
 
 type sseMessageStart struct {
 	Message struct {
+		ID    string `json:"id"`
 		Usage struct {
 			InputTokens              int `json:"input_tokens"`
 			OutputTokens             int `json:"output_tokens"`
@@ -96,7 +96,9 @@ func decodeSSEStream(
 	}
 
 	var eventType string
+	var messageID string
 	blocks := make(map[int]*blockState)
+	warnings := append([]aikit.Warning(nil), encodeWarnings...)
 
 	for {
 		if ctx.Err() != nil {
@@ -119,8 +121,9 @@ func decodeSSEStream(
 			eventType,
 			frame.Data,
 			blocks,
+			&messageID,
 			send,
-			encodeWarnings,
+			&warnings,
 		) {
 			return ctx.Err()
 		}
@@ -132,18 +135,19 @@ func decodeSSEStream(
 func dispatchSSEEvent(
 	eventType, data string,
 	blocks map[int]*blockState,
+	messageID *string,
 	send func(aikit.StreamEvent) bool,
-	encodeWarnings []aikit.Warning,
+	warnings *[]aikit.Warning,
 ) bool {
 	switch eventType {
 	case eventMessageStart:
-		return handleMessageStart(data, send)
+		return handleMessageStart(data, messageID, send)
 	case eventContentBlockStart:
-		return handleContentBlockStart(data, blocks, send)
+		return handleContentBlockStart(data, blocks, send, warnings)
 	case eventContentBlockDelta:
 		return handleContentBlockDelta(data, blocks, send)
 	case eventMessageDelta:
-		return handleMessageDelta(data, send, encodeWarnings)
+		return handleMessageDelta(data, *messageID, send, *warnings)
 	case eventError:
 		return handleError(data, send)
 	}
@@ -152,10 +156,12 @@ func dispatchSSEEvent(
 
 func handleMessageStart(
 	data string,
+	messageID *string,
 	send func(aikit.StreamEvent) bool,
 ) bool {
 	var msg sseMessageStart
 	if json.Unmarshal([]byte(data), &msg) == nil {
+		*messageID = msg.Message.ID
 		u := msg.Message.Usage
 		// Anthropic reports input_tokens as the non-cached prompt tokens; cache
 		// reads and writes are counted separately. The v7 InputTokens total is
@@ -186,6 +192,7 @@ func handleContentBlockStart(
 	data string,
 	blocks map[int]*blockState,
 	send func(aikit.StreamEvent) bool,
+	warnings *[]aikit.Warning,
 ) bool {
 	var block sseContentBlockStart
 	if json.Unmarshal([]byte(data), &block) == nil {
@@ -202,6 +209,11 @@ func handleContentBlockStart(
 				ToolCallID:    block.ContentBlock.ID,
 				ToolCallName:  block.ContentBlock.Name,
 			})
+		}
+		switch block.ContentBlock.Type {
+		case "text", "tool_use", "thinking":
+		default:
+			*warnings = append(*warnings, unsupportedResponseBlockWarning(block.ContentBlock.Type))
 		}
 	}
 	return true
@@ -244,6 +256,7 @@ func handleContentBlockDelta(
 
 func handleMessageDelta(
 	data string,
+	messageID string,
 	send func(aikit.StreamEvent) bool,
 	encodeWarnings []aikit.Warning,
 ) bool {
@@ -262,6 +275,7 @@ func handleMessageDelta(
 	}
 	return send(aikit.StreamEvent{
 		Type:            aikit.StreamEventFinish,
+		MessageID:       messageID,
 		FinishReason:    mapStopReason(msg.Delta.StopReason),
 		RawFinishReason: msg.Delta.StopReason,
 		Warnings:        encodeWarnings,

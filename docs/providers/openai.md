@@ -41,6 +41,65 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
 Keep provider configuration at client creation and request-specific options on
 the request.
 
+## Responses payload
+
+`client.CompletionModel` implements the optional native completion capability.
+A direct `Send` therefore returns normalized assistant content and retains the
+successful OpenAI Responses payload for provider-specific diagnostics:
+
+```go
+response, err := ai.NewCompletion(model, "Explain Go interfaces").Send(ctx)
+if err != nil {
+  return err
+}
+
+native, ok := ai.RawResponseAs[*openai.ResponsesResponse](response)
+if ok {
+  fmt.Println(native.ID, native.Status)
+}
+```
+
+`ResponsesResponse.Raw` contains the exact response JSON, including fields the
+typed DTO does not yet represent. It can contain sensitive data; ai-go never
+logs it automatically, so redact it before application logging.
+
+Reasoning tokens count toward OpenAI's output-token budget. A response can
+therefore be successful but `incomplete`, with no visible text or assistant
+content, when `max_output_tokens` is exhausted during reasoning. In that case
+inspect `response.FinishReason`, usage, and `native.IncompleteDetails`; increase
+the output budget or reduce reasoning effort when visible output is required.
+
+## Prompt caching
+
+For GPT-5.6 and later Responses models, use `PromptCacheKey` with a stable,
+cacheable `Instructions` prefix. `PromptCacheInstructions` marks the end of
+that prefix; with explicit mode, changing user prompts after it do not replace
+the cache entry:
+
+```go
+options := openai.ProviderOptions{
+  PromptCacheKey:          "support-policy-v1",
+  PromptCacheMode:         openai.PromptCacheModeExplicit,
+  PromptCacheInstructions: true,
+}
+
+response, err := ai.NewCompletion(model, "What should this customer do next?").
+  Instructions(stablePolicyOver1024Tokens).
+  With(options).
+  Send(ctx)
+if err != nil {
+  return err
+}
+fmt.Println(response.Usage.InputTokenDetails.CacheReadTokens)
+fmt.Println(response.Usage.InputTokenDetails.CacheWriteTokens)
+```
+
+The marked prefix must contain at least 1,024 tokens and be identical across
+calls. Reuse the same cache key for matching prefixes. The first call normally
+writes cache data and later calls can read it; caching remains provider-managed,
+so a cache read is not guaranteed. See OpenAI's [prompt-caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
+for retention and billing details.
+
 ## Files and mixed output
 
 Upload files through the client because uploading is a provider operation, not
@@ -64,6 +123,49 @@ file/image events, direct completion aggregation exposes them through
 `CompletionResponse.Message.Content` in their original order with text and
 other assistant content. OpenAI does not yet expose a dedicated `ImageModel`
 factory in ai-go.
+
+## PDF inputs
+
+Responses models accept PDF input through inline data, an external URL, or an
+uploaded file ID. Inline bytes use `file_data` on the wire:
+
+```go
+pdf, err := os.ReadFile("report.pdf")
+if err != nil {
+  return err
+}
+
+message := ai.Message{
+  Role: ai.RoleUser,
+  Content: []ai.ContentPart{
+    ai.TextPart("Summarize the report and explain its charts."),
+    ai.DocumentDataPart(pdf, "application/pdf", "report.pdf"),
+  },
+}
+
+response, err := ai.NewCompletion(model, "").
+  Messages(message).
+  With(openai.ProviderOptions{PDFDetail: openai.PDFDetailHigh}).
+  Send(ctx)
+```
+
+`PDFDetail` accepts `auto`, `low`, or `high` and applies to PDF page-image
+processing. Leave it empty to use the API default. Extracted PDF text is always
+included; higher detail primarily benefits dense charts, diagrams, and small
+print while consuming more input tokens. Prefer `openai.PDFDetailAuto`,
+`openai.PDFDetailLow`, or `openai.PDFDetailHigh` over string literals.
+
+For files reused across requests, upload once with `Client.UploadFile` using
+`FilePurposeUserData`, then pass the returned ID with
+`ai.DocumentFileIDPart`. `ai.DocumentURLPart` sends an external URL directly.
+Each file or image content part must have exactly one source: inline data, an
+external URL, or an uploaded file ID. The provider rejects manually constructed
+parts with missing or conflicting sources before sending the request. A
+filename is sent only with inline file data; URL and uploaded-ID inputs use
+their source field without a filename.
+OpenAI currently limits each file and the combined files in one request to 50
+MB; see the [file-input guide](https://developers.openai.com/api/docs/guides/file-inputs)
+for current limits and processing details.
 
 ## Compatibility
 

@@ -12,10 +12,14 @@ import (
 // GenerateText runs a full tool loop and returns the aggregated result.
 func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextResult, error) {
 	if err := validateToolsContext(req); err != nil {
-		return nil, err
+		return nil, wrapPromptError(err, nil, initialTranscript(req))
 	}
 	req.SmoothStream = nil
-	return StreamText(ctx, req).Consume()
+	result, err := StreamText(ctx, req).Consume()
+	if err != nil {
+		return result, wrapPromptError(err, result, initialTranscript(req))
+	}
+	return result, nil
 }
 
 func validateToolsContext(req GenerateTextRequest) error {
@@ -59,7 +63,15 @@ func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
 	if req.SmoothStream != nil {
 		ch = req.SmoothStream.Transform(ctx, ch)
 	}
-	return NewStreamResultWithTools(ch, req.Tools)
+	return NewStreamResultWithTools(ch, req.Tools).withInitialMessages(initialTranscript(req))
+}
+
+func initialTranscript(req GenerateTextRequest) []Message {
+	initial := make([]Message, 0, len(req.Messages)+1)
+	if req.Instructions != "" {
+		initial = append(initial, SystemMessage(req.Instructions))
+	}
+	return append(initial, req.Messages...)
 }
 
 func erroredEventChannel(err error) <-chan StepEvent {

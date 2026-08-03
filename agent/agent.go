@@ -101,6 +101,7 @@ type LifecycleCallbacks struct {
 // StepEndEvent holds data passed to OnStepEnd after each step.
 type StepEndEvent struct {
 	StepNumber       int
+	MessageID        string
 	Text             string
 	Reasoning        string
 	ToolCalls        []ToolCallInfo
@@ -113,6 +114,7 @@ type StepEndEvent struct {
 
 // EndEvent holds data passed to OnEnd when the run completes.
 type EndEvent struct {
+	MessageID        string
 	Text             string
 	Reasoning        string
 	Steps            []StepResultInfo

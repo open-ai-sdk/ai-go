@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +13,43 @@ import (
 )
 
 // helpers
+
+type inputPartWire struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url"`
+	FileID   string `json:"file_id"`
+	FileData string `json:"file_data"`
+	FileURL  string `json:"file_url"`
+	Filename string `json:"filename"`
+	Detail   string `json:"detail"`
+}
+
+func decodeInputPart(t *testing.T, part inputPart) inputPartWire {
+	t.Helper()
+	raw, err := json.Marshal(part)
+	if err != nil {
+		t.Fatalf("json.Marshal(input part) error = %v", err)
+	}
+	var wire inputPartWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("json.Unmarshal(input part) error = %v", err)
+	}
+	return wire
+}
+
+func inputPartJSON(t *testing.T, part inputPart) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(part)
+	if err != nil {
+		t.Fatalf("json.Marshal(input part) error = %v", err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatalf("json.Unmarshal(input part) error = %v", err)
+	}
+	return object
+}
 
 func streamFromString(s string) io.ReadCloser {
 	return io.NopCloser(strings.NewReader(s))
@@ -254,8 +292,9 @@ func TestEncodeRequest_SystemMessageInHistory(t *testing.T) {
 	if len(r.Input) != 2 {
 		t.Fatalf("expected 2 input items (system + user), got %d", len(r.Input))
 	}
+	systemPart := decodeInputPart(t, r.Input[0].Content[0])
 	if r.Input[0].Role != "system" || len(r.Input[0].Content) != 1 ||
-		r.Input[0].Content[0].Type != "input_text" || r.Input[0].Content[0].Text != "You are helpful" {
+		systemPart.Type != "input_text" || systemPart.Text != "You are helpful" {
 		t.Errorf("unexpected system input: %#v", r.Input[0])
 	}
 	if r.Input[1].Role != "user" {
@@ -276,7 +315,7 @@ func TestEncodeRequest_SystemMessageSkipsUnsupportedContent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(r.Input) != 2 || len(r.Input[0].Content) != 1 ||
-		r.Input[0].Content[0].Text != "You are helpful" || r.Input[1].Role != "user" {
+		decodeInputPart(t, r.Input[0].Content[0]).Text != "You are helpful" || r.Input[1].Role != "user" {
 		t.Fatalf("input = %#v", r.Input)
 	}
 	if len(warnings) != 1 || warnings[0].Setting != string(ai.ContentPartTypeFile) ||
@@ -379,7 +418,7 @@ func TestEncodeRequest_FileIDInput(t *testing.T) {
 	if len(parts) != 2 {
 		t.Fatalf("expected 2 content parts, got %d", len(parts))
 	}
-	filePart := parts[1]
+	filePart := decodeInputPart(t, parts[1])
 	if filePart.FileID != "file-abc123" {
 		t.Errorf("expected file_id=file-abc123, got %q", filePart.FileID)
 	}
@@ -400,7 +439,7 @@ func TestEncodeRequest_ImageDataInput(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	parts := r.Input[0].Content
-	imgPart := parts[1]
+	imgPart := decodeInputPart(t, parts[1])
 	if imgPart.Type != "input_image" {
 		t.Errorf("expected type=input_image, got %q", imgPart.Type)
 	}
@@ -426,7 +465,7 @@ func TestEncodeRequest_ImageFileIDInput(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	parts := r.Input[0].Content
-	imgPart := parts[1]
+	imgPart := decodeInputPart(t, parts[1])
 	if imgPart.Type != "input_image" {
 		t.Errorf("expected type=input_image, got %q", imgPart.Type)
 	}
@@ -450,15 +489,266 @@ func TestEncodeRequest_FileDataInput(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	parts := r.Input[0].Content
-	filePart := parts[1]
+	filePart := decodeInputPart(t, parts[1])
 	if filePart.Type != "input_file" {
 		t.Errorf("expected type=input_file, got %q", filePart.Type)
 	}
-	if filePart.FileURL == "" {
-		t.Error("expected FileURL to be set with data URI")
+	if filePart.FileData != "data:application/pdf;base64,cGRmLWNvbnRlbnQ=" {
+		t.Errorf("FileData = %q, want PDF data URI", filePart.FileData)
+	}
+	if filePart.FileURL != "" {
+		t.Errorf("FileURL = %q, want empty for inline data", filePart.FileURL)
 	}
 	if filePart.Filename != "doc.pdf" {
 		t.Errorf("expected Filename=doc.pdf, got %q", filePart.Filename)
+	}
+}
+
+func TestEncodeRequest_PDFSourcesAndDetail(t *testing.T) {
+	tests := []struct {
+		name string
+		part ai.ContentPart
+		want func(t *testing.T, part inputPartWire)
+	}{
+		{
+			name: "inline data",
+			part: ai.DocumentDataPart([]byte("pdf"), "application/pdf", "report.pdf"),
+			want: func(t *testing.T, part inputPartWire) {
+				t.Helper()
+				if part.FileData != "data:application/pdf;base64,cGRm" {
+					t.Errorf("FileData = %q", part.FileData)
+				}
+			},
+		},
+		{
+			name: "external URL",
+			part: ai.DocumentURLPart("https://example.com/report.pdf", "application/pdf"),
+			want: func(t *testing.T, part inputPartWire) {
+				t.Helper()
+				if part.FileURL != "https://example.com/report.pdf" {
+					t.Errorf("FileURL = %q", part.FileURL)
+				}
+			},
+		},
+		{
+			name: "file ID",
+			part: ai.DocumentFileIDPart("file-pdf123", "application/pdf", "report.pdf"),
+			want: func(t *testing.T, part inputPartWire) {
+				t.Helper()
+				if part.FileID != "file-pdf123" {
+					t.Errorf("FileID = %q", part.FileID)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := ai.LanguageModelRequest{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+					ai.TextPart("summarize"), test.part,
+				}}},
+				ProviderOptions: map[string]any{
+					"openai": ProviderOptions{PDFDetail: "high"},
+				},
+			}
+			encoded, _, err := encodeRequest("gpt-test", req, false)
+			if err != nil {
+				t.Fatalf("encodeRequest() error = %v", err)
+			}
+			part := decodeInputPart(t, encoded.Input[0].Content[1])
+			if part.Type != "input_file" || part.Detail != "high" {
+				t.Fatalf("part = %#v, want input_file detail=high", part)
+			}
+			test.want(t, part)
+		})
+	}
+}
+
+func TestEncodeRequest_InlinePDFUsesFileDataJSONKey(t *testing.T) {
+	req := ai.LanguageModelRequest{Messages: []ai.Message{{
+		Role: ai.RoleUser,
+		Content: []ai.ContentPart{
+			ai.DocumentDataPart([]byte("pdf"), "application/pdf", "report.pdf"),
+		},
+	}}}
+	encoded, _, err := encodeRequest("gpt-test", req, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	raw, err := json.Marshal(encoded.Input[0].Content[0])
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	jsonText := string(raw)
+	if !strings.Contains(jsonText, `"file_data":"data:application/pdf;base64,cGRm"`) {
+		t.Fatalf("JSON = %s, want file_data", jsonText)
+	}
+	if strings.Contains(jsonText, `"file_url"`) {
+		t.Fatalf("JSON = %s, must not contain file_url for inline data", jsonText)
+	}
+}
+
+func TestEncodeRequest_InputFileSourcesAreMutuallyExclusive(t *testing.T) {
+	tests := []struct {
+		name      string
+		part      ai.ContentPart
+		wantField string
+		wantValue string
+		forbidden []string
+	}{
+		{
+			name:      "URL omits filename and other sources",
+			part:      ai.DocumentURLPart("https://example.com/report.pdf", "application/pdf", "report.pdf"),
+			wantField: "file_url",
+			wantValue: "https://example.com/report.pdf",
+			forbidden: []string{"file_id", "file_data", "filename"},
+		},
+		{
+			name:      "file ID omits filename and other sources",
+			part:      ai.DocumentFileIDPart("file-pdf123", "application/pdf", "report.pdf"),
+			wantField: "file_id",
+			wantValue: "file-pdf123",
+			forbidden: []string{"file_url", "file_data", "filename"},
+		},
+		{
+			name:      "inline data keeps filename",
+			part:      ai.DocumentDataPart([]byte("pdf"), "application/pdf", "report.pdf"),
+			wantField: "file_data",
+			wantValue: "data:application/pdf;base64,cGRm",
+			forbidden: []string{"file_url", "file_id"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{test.part}}},
+			}, false)
+			if err != nil {
+				t.Fatalf("encodeRequest() error = %v", err)
+			}
+			wire := inputPartJSON(t, encoded.Input[0].Content[0])
+			if got := wire[test.wantField]; got != test.wantValue {
+				t.Fatalf("%s = %v, want %q; wire = %#v", test.wantField, got, test.wantValue, wire)
+			}
+			for _, field := range test.forbidden {
+				if _, exists := wire[field]; exists {
+					t.Fatalf("wire contains mutually exclusive field %q: %#v", field, wire)
+				}
+			}
+		})
+	}
+}
+
+func TestEncodeRequest_RejectsInvalidMediaSourceCount(t *testing.T) {
+	tests := []struct {
+		name string
+		part ai.ContentPart
+		want string
+	}{
+		{
+			name: "document without source",
+			part: ai.ContentPart{Type: ai.ContentPartTypeDocument, MediaType: "application/pdf"},
+			want: "got 0",
+		},
+		{
+			name: "document with data and URL",
+			part: ai.ContentPart{
+				Type: ai.ContentPartTypeDocument, MediaType: "application/pdf",
+				Data: []byte("pdf"), FileURL: "https://example.com/report.pdf",
+			},
+			want: "got 2",
+		},
+		{
+			name: "image with file ID and URL",
+			part: ai.ContentPart{
+				Type: ai.ContentPartTypeImage, MediaType: "image/png",
+				FileID: "file-image", FileURL: "https://example.com/image.png",
+			},
+			want: "got 2",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{test.part}}},
+			}, false)
+			if err == nil || !strings.Contains(err.Error(), "exactly one source") ||
+				!strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want source-count error containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestEncodeRequest_RichToolResultWireJSON(t *testing.T) {
+	request := ai.LanguageModelRequest{Messages: []ai.Message{{
+		Role: ai.RoleTool,
+		Content: []ai.ContentPart{ai.RichToolResultPart(
+			"call-1",
+			"inspect",
+			ai.TextToolResultContent("plain text"),
+			ai.JSONToolResultContent(json.RawMessage(`{"ok":true}`)),
+			ai.ImageToolResultContent([]byte("img"), "image/png"),
+		)},
+	}}}
+
+	encoded, _, err := encodeRequest("gpt-test", request, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	if len(encoded.Input) != 1 {
+		t.Fatalf("input length = %d, want 1", len(encoded.Input))
+	}
+	raw, err := json.Marshal(encoded.Input[0])
+	if err != nil {
+		t.Fatalf("json.Marshal(input item) error = %v", err)
+	}
+	want := `{"type":"function_call_output","call_id":"call-1","output":[{"type":"input_text","text":"plain text"},{"type":"input_text","text":"{\"ok\":true}"},{"type":"input_image","image_url":"data:image/png;base64,aW1n"}]}`
+	if string(raw) != want {
+		t.Fatalf("wire JSON = %s, want %s", raw, want)
+	}
+}
+
+func TestEncodeRequest_PDFDetailIsOmittedForNonPDF(t *testing.T) {
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+			ai.DocumentDataPart([]byte("notes"), "text/plain", "notes.txt"),
+		}}},
+		ProviderOptions: map[string]any{
+			"openai": ProviderOptions{PDFDetail: "high"},
+		},
+	}
+	encoded, _, err := encodeRequest("gpt-test", req, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	if got := decodeInputPart(t, encoded.Input[0].Content[0]).Detail; got != "" {
+		t.Fatalf("Detail = %q, want empty for non-PDF input", got)
+	}
+}
+
+func TestEncodeRequest_RejectsAudioAndVideoInput(t *testing.T) {
+	tests := []struct {
+		name string
+		part ai.ContentPart
+	}{
+		{name: "audio", part: ai.AudioDataPart([]byte("wav"), "audio/wav")},
+		{name: "video", part: ai.VideoDataPart([]byte("mp4"), "video/mp4")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+					test.part,
+				}}},
+			}, false)
+			if err == nil || !strings.Contains(err.Error(), "does not support "+test.name+" input") {
+				t.Fatalf("error = %v, want unsupported %s input", err, test.name)
+			}
+		})
 	}
 }
 
@@ -498,7 +788,7 @@ func TestEncodeRequest_ImageURLInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	imgPart := r.Input[0].Content[1]
+	imgPart := decodeInputPart(t, r.Input[0].Content[1])
 	if imgPart.Type != "input_image" {
 		t.Errorf("expected type=input_image, got %q", imgPart.Type)
 	}

@@ -54,8 +54,16 @@ stop condition or a natural model finish in control.
 
 The result aggregates text, reasoning, usage, tool results, warnings, sources,
 generated files, and provider metadata across the run. `Steps` retains each
-individual model call, while `Response` contains messages suitable for
-conversation continuation.
+individual model call. `Response.Messages` remains the continuation-only view;
+`Transcript` contains an independently owned full conversation made from the
+initial messages followed by every generated assistant and tool message.
+`MessageID`, each step's `MessageID`, and assistant `Message.ID` preserve the
+provider-issued message identity across a tool loop.
+
+Agent usage is aggregated across completed model calls. Use `Usage.HasValues`
+to distinguish reported counters from an empty value, `Add` for a field-wise
+sum, or `Accumulate` to update an aggregate. Cache, reasoning, and tool-use
+prompt counters are retained when providers report them.
 
 ## Reusable agents
 

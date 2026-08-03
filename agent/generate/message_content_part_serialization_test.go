@@ -6,9 +6,15 @@ import (
 )
 
 func sharedContentPartRoundTrip(parts []ContentPart) []ContentPart {
-	engineParts := parts
-	publicParts := engineParts
-	return publicParts
+	encoded, err := json.Marshal(parts)
+	if err != nil {
+		panic(err)
+	}
+	var decoded []ContentPart
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		panic(err)
+	}
+	return decoded
 }
 
 // --- ContentPart constructors ---
@@ -25,8 +31,8 @@ func TestTextPart(t *testing.T) {
 
 func TestImageURLPart(t *testing.T) {
 	p := ImageURLPart("https://example.com/img.png")
-	if p.Type != ContentPartTypeFile {
-		t.Errorf("expected file type, got %s", p.Type)
+	if p.Type != ContentPartTypeImage {
+		t.Errorf("expected image type, got %s", p.Type)
 	}
 	if p.FileURL != "https://example.com/img.png" {
 		t.Errorf("unexpected FileURL: %s", p.FileURL)
@@ -96,8 +102,8 @@ func TestToolResultPart(t *testing.T) {
 func TestImageDataPart(t *testing.T) {
 	data := []byte{0x89, 0x50, 0x4e, 0x47}
 	p := ImageDataPart(data, "image/png")
-	if p.Type != ContentPartTypeFile {
-		t.Errorf("expected file type, got %s", p.Type)
+	if p.Type != ContentPartTypeImage {
+		t.Errorf("expected image type, got %s", p.Type)
 	}
 	if string(p.Data) != string(data) {
 		t.Errorf("unexpected Data: %v", p.Data)
@@ -109,8 +115,8 @@ func TestImageDataPart(t *testing.T) {
 
 func TestImageFileIDPart(t *testing.T) {
 	p := ImageFileIDPart("file-abc123")
-	if p.Type != ContentPartTypeFile {
-		t.Errorf("expected file type, got %s", p.Type)
+	if p.Type != ContentPartTypeImage {
+		t.Errorf("expected image type, got %s", p.Type)
 	}
 	if p.FileID != "file-abc123" {
 		t.Errorf("unexpected FileID: %s", p.FileID)
@@ -153,8 +159,8 @@ func TestContentPartRoundTrip_ImageData(t *testing.T) {
 	data := []byte{0x89, 0x50, 0x4e, 0x47}
 	parts := []ContentPart{ImageDataPart(data, "image/png")}
 	rt := sharedContentPartRoundTrip(parts)
-	if rt[0].Type != ContentPartTypeFile {
-		t.Errorf("expected file type, got %s", rt[0].Type)
+	if rt[0].Type != ContentPartTypeImage {
+		t.Errorf("expected image type, got %s", rt[0].Type)
 	}
 	if string(rt[0].Data) != string(data) {
 		t.Errorf("unexpected Data after round-trip: %v", rt[0].Data)
@@ -167,8 +173,8 @@ func TestContentPartRoundTrip_ImageData(t *testing.T) {
 func TestContentPartRoundTrip_ImageFileID(t *testing.T) {
 	parts := []ContentPart{ImageFileIDPart("file-abc123")}
 	rt := sharedContentPartRoundTrip(parts)
-	if rt[0].Type != ContentPartTypeFile {
-		t.Errorf("expected file type, got %s", rt[0].Type)
+	if rt[0].Type != ContentPartTypeImage {
+		t.Errorf("expected image type, got %s", rt[0].Type)
 	}
 	if rt[0].FileID != "file-abc123" {
 		t.Errorf("unexpected FileID: %s", rt[0].FileID)
@@ -246,7 +252,7 @@ func TestContentPartRoundTrip_Text(t *testing.T) {
 func TestContentPartRoundTrip_ImageURL(t *testing.T) {
 	parts := []ContentPart{ImageURLPart("data:image/png;base64,abc")}
 	rt := sharedContentPartRoundTrip(parts)
-	if rt[0].Type != ContentPartTypeFile || rt[0].FileURL != "data:image/png;base64,abc" {
+	if rt[0].Type != ContentPartTypeImage || rt[0].FileURL != "data:image/png;base64,abc" {
 		t.Errorf("imageURL part round-trip failed: %+v", rt[0])
 	}
 }

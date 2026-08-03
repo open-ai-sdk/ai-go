@@ -32,6 +32,11 @@ func TestRunAgent(t *testing.T) {
 }
 
 func TestPublicFacade(t *testing.T) {
+	messageID, typedRaw, err := NativeCompletion(t.Context())
+	if err != nil || messageID != "msg_external" || !typedRaw {
+		t.Fatalf("NativeCompletion = %q, %t, %v", messageID, typedRaw, err)
+	}
+
 	text, err := GenerateText(t.Context())
 	if err != nil || text != "hello" {
 		t.Fatalf("GenerateText = %q, %v", text, err)

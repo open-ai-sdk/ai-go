@@ -37,6 +37,9 @@ returns an error before the first model request. The SDK accepts configuration
 explicitly and does not load environment variables or `.env` files; applications
 remain responsible for obtaining secrets and passing them in.
 
+Provider model handles are cheap values over the reusable client. Construct
+the client and model handles once, then reuse them across requests.
+
 ## Model handles and capabilities
 
 A factory method represents an operation supported by that concrete provider
@@ -60,6 +63,13 @@ model-operation pair.
 OpenAI does not currently expose an `ImageModel` factory in ai-go. A dedicated
 image-generation implementation would add that method to the concrete client;
 it should not be inferred merely because a completion can contain an image.
+
+The base `llm.Model` remains stream-first. Providers with a native
+single-response endpoint may also implement `llm.CompletionModel`. Native
+completion keeps the provider's successful DTO in
+`CompletionResponse.RawResponse` while still filling all normalized fields.
+Provider authors should wrap failures with `llm.WrapCompletionError` and retain
+the underlying transport, JSON, or `aikit.APIError` cause.
 
 ## Mixed completion output
 

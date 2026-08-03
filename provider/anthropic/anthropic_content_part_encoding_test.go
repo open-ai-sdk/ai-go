@@ -92,3 +92,19 @@ func TestEncodeMessages_UnreferenceableFilePartsWarn(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeAnthropicToolResultFallsBackWhenTypedContentIsUnsupported(t *testing.T) {
+	content, warnings := encodeAnthropicToolResult(ai.ContentPart{
+		Type:             ai.ContentPartTypeToolResult,
+		ToolResultOutput: "fallback output",
+		ToolResultContent: []ai.ToolResultContent{{
+			Type: "unsupported",
+		}},
+	})
+	if content != "fallback output" {
+		t.Fatalf("content = %#v, want fallback output", content)
+	}
+	if len(warnings) != 1 || warnings[0].Setting != "unsupported" {
+		t.Fatalf("warnings = %#v, want one unsupported-content warning", warnings)
+	}
+}

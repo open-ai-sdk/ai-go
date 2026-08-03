@@ -30,6 +30,9 @@ const (
 // StepEvent is a single event emitted by the engine's Run goroutine.
 type StepEvent struct {
 	Type StepEventType
+	// MessageID is the provider's assistant-message ID on terminal events. It
+	// is never a tool-call ID.
+	MessageID string
 
 	// Text/reasoning fields.
 	TextDelta      string

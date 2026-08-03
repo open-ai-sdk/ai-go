@@ -29,8 +29,10 @@ func ToolChoiceSpecific(toolName string) ToolChoice {
 // Tool-result content kinds and the ToolResult/ToolResultContent types are
 // aliases of the shared aikit package (see ai/types.go).
 const (
-	ToolResultContentTypeText = aikit.ToolResultContentTypeText
-	ToolResultContentTypeFile = aikit.ToolResultContentTypeFile
+	ToolResultContentTypeText  = aikit.ToolResultContentTypeText
+	ToolResultContentTypeFile  = aikit.ToolResultContentTypeFile
+	ToolResultContentTypeJSON  = aikit.ToolResultContentTypeJSON
+	ToolResultContentTypeImage = aikit.ToolResultContentTypeImage
 )
 
 type (

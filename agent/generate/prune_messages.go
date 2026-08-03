@@ -1,5 +1,7 @@
 package generate
 
+import "github.com/open-ai-sdk/ai-go/aikit"
+
 // PruneMode controls how message content is pruned.
 type PruneMode string
 
@@ -60,7 +62,9 @@ func PruneMessages(messages []Message, opts PruneOptions) []Message {
 	// Fast path: nothing to prune.
 	if reasoning == PruneModeNone && toolCalls == PruneModeNone {
 		out := make([]Message, len(messages))
-		copy(out, messages)
+		for i := range messages {
+			out[i] = messages[i].Clone()
+		}
 		return out
 	}
 
@@ -84,11 +88,11 @@ func pruneMessage(msg Message, pruneReasoning, pruneToolCalls bool, emptyMsgs Pr
 		if emptyMsgs == PruneModeRemove {
 			return Message{}, false
 		}
-		return Message{Role: msg.Role}, true
+		return Message{ID: msg.ID, Role: msg.Role}, true
 	}
 
 	if !pruneReasoning && !pruneToolCalls {
-		return msg, true
+		return msg.Clone(), true
 	}
 
 	var filtered []ContentPart
@@ -107,7 +111,7 @@ func pruneMessage(msg Message, pruneReasoning, pruneToolCalls bool, emptyMsgs Pr
 		return Message{}, false
 	}
 
-	return Message{Role: msg.Role, Content: filtered}, true
+	return Message{ID: msg.ID, Role: msg.Role, Content: aikit.CloneContentParts(filtered)}, true
 }
 
 // shouldPrune returns true if content at index i should be pruned given the mode.

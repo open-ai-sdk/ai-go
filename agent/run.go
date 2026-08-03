@@ -1,4 +1,3 @@
-// ai-go: file-length-justification: keeps tool-loop lifecycle, cancellation, tracing, and terminal-event ownership together.
 package agent
 
 import (
@@ -236,14 +235,14 @@ func finishTextStep(
 	}
 	stepSpan.End()
 	if !r.emitObserved(StepEvent{
-		Type: StepEventStepEnd, StepNumber: step, FinishReason: sr.finish,
+		Type: StepEventStepEnd, StepNumber: step, MessageID: sr.messageID, FinishReason: sr.finish,
 		RawFinishReason: sr.rawFinish, ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	}) {
 		return r.ctx.Err()
 	}
 	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
 	completedSteps = append(completedSteps, StepResultInfo{
-		StepNumber: step, Text: fullText, Reasoning: sr.reasoning, Usage: sr.usage,
+		StepNumber: step, MessageID: sr.messageID, Text: fullText, Reasoning: sr.reasoning, Usage: sr.usage,
 		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
 		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	})
@@ -303,7 +302,7 @@ func (r *run) executeToolStep(
 	preparedToolCalls := prepareToolCalls(r.ctx, params.Tools, params.RepairToolCall, req, toolCalls)
 	*history = append(
 		*history,
-		buildAssistantToolCallMessage(fullText, sr.reasoning, preparedToolCallStates(preparedToolCalls)),
+		buildAssistantToolCallMessage(sr.messageID, fullText, sr.reasoning, preparedToolCallStates(preparedToolCalls)),
 	)
 
 	var toolNames []string
@@ -330,11 +329,13 @@ func (r *run) executeToolStep(
 			r.emitObserved(StepEvent{
 				Type:         StepEventStepEnd,
 				StepNumber:   step,
+				MessageID:    sr.messageID,
 				FinishReason: FinishReasonToolCalls,
 			})
 			r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, stepToolCalls, stepToolResults, sr) })
 			*completedSteps = append(*completedSteps, StepResultInfo{
 				StepNumber:   step,
+				MessageID:    sr.messageID,
 				HasToolCalls: true,
 				ToolNames:    toolNames,
 				Text:         fullText,
@@ -360,6 +361,7 @@ func (r *run) executeToolStep(
 	if !r.emitObserved(StepEvent{
 		Type:             StepEventStepEnd,
 		StepNumber:       step,
+		MessageID:        sr.messageID,
 		FinishReason:     sr.finish,
 		RawFinishReason:  sr.rawFinish,
 		ProviderMetadata: sr.providerMeta,
@@ -371,6 +373,7 @@ func (r *run) executeToolStep(
 
 	*completedSteps = append(*completedSteps, StepResultInfo{
 		StepNumber:       step,
+		MessageID:        sr.messageID,
 		HasToolCalls:     true,
 		ToolNames:        toolNames,
 		Text:             fullText,

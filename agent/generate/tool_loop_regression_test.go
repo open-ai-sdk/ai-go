@@ -2,6 +2,7 @@ package generate
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -103,6 +104,61 @@ func TestStreamResult_CumulativeUsageReplacesCurrentStepContribution(t *testing.
 	}
 	if got, want := result.FinalStep.Usage.TotalTokens, 7; got != want {
 		t.Fatalf("FinalStep.Usage.TotalTokens = %d, want %d", got, want)
+	}
+}
+
+func TestStreamResult_AggregatesEveryUsageCounterAcrossSteps(t *testing.T) {
+	step0 := Usage{
+		InputTokens: 10,
+		InputTokenDetails: InputTokenDetails{
+			NoCacheTokens: 7, CacheReadTokens: 2, CacheWriteTokens: 1,
+		},
+		OutputTokens: 5,
+		OutputTokenDetails: OutputTokenDetails{
+			TextTokens: 3, ReasoningTokens: 2,
+		},
+		TotalTokens: 19, ToolUsePromptTokens: 4,
+		Raw: map[string]any{"step": float64(0)},
+	}
+	step1Partial := Usage{InputTokens: 3, OutputTokens: 1, TotalTokens: 4}
+	step1 := Usage{
+		InputTokens: 6,
+		InputTokenDetails: InputTokenDetails{
+			NoCacheTokens: 4, CacheReadTokens: 1, CacheWriteTokens: 1,
+		},
+		OutputTokens: 4,
+		OutputTokenDetails: OutputTokenDetails{
+			TextTokens: 1, ReasoningTokens: 3,
+		},
+		TotalTokens: 13, ToolUsePromptTokens: 3,
+		Raw: map[string]any{"step": float64(1)},
+	}
+
+	channel := make(chan StepEvent, 10)
+	channel <- StepEvent{Type: StepEventStepStart, StepNumber: 0}
+	channel <- StepEvent{Type: StepEventUsage, Usage: &step0}
+	channel <- StepEvent{Type: StepEventStepEnd, StepNumber: 0}
+	channel <- StepEvent{Type: StepEventStepStart, StepNumber: 1}
+	channel <- StepEvent{Type: StepEventUsage, Usage: &step1Partial}
+	channel <- StepEvent{Type: StepEventUsage, Usage: &step1}
+	channel <- StepEvent{Type: StepEventStepEnd, StepNumber: 1}
+	channel <- StepEvent{Type: StepEventDone}
+	close(channel)
+
+	result, err := NewStreamResult(channel).Consume()
+	if err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	want := step0.Add(step1)
+	if !reflect.DeepEqual(result.Usage, want) {
+		t.Fatalf("Usage = %+v, want %+v", result.Usage, want)
+	}
+	if !reflect.DeepEqual(result.FinalStep.Usage, step1) {
+		t.Fatalf("FinalStep.Usage = %+v, want %+v", result.FinalStep.Usage, step1)
+	}
+	result.Usage.Raw["step"] = float64(99)
+	if got := result.FinalStep.Usage.Raw["step"]; got != float64(1) {
+		t.Fatalf("aggregate Raw aliases final step Raw: %v", got)
 	}
 }
 

@@ -13,6 +13,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 	captureResults := req.OnStepEnd != nil || req.OnEnd != nil
 	if captureResults {
 		callbacks.OnStepEnd = func(event agent.StepEndEvent) {
+			current.MessageID = event.MessageID
 			current.Text = event.Text
 			current.Reasoning = event.Reasoning
 			current.ToolCalls = event.ToolCalls
@@ -31,6 +32,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 			}
 			publicEvent := StepEndEvent{
 				StepNumber:       event.StepNumber,
+				MessageID:        event.MessageID,
 				Text:             event.Text,
 				Reasoning:        event.Reasoning,
 				Content:          cloneContentParts(completed.Content),
@@ -52,6 +54,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 			steps := make([]StepOutput, len(event.Steps))
 			for i, step := range event.Steps {
 				steps[i] = StepOutput{
+					MessageID:        step.MessageID,
 					Text:             step.Text,
 					Reasoning:        step.Reasoning,
 					ToolCalls:        step.ToolCalls,
@@ -72,6 +75,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 				steps[i].Response = Response{Messages: ResponseMessagesForStep(steps[i], req.Tools)}
 			}
 			req.OnEnd(EndEvent{
+				MessageID:        event.MessageID,
 				Text:             event.Text,
 				Reasoning:        event.Reasoning,
 				Steps:            steps,
