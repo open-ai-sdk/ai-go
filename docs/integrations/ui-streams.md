@@ -1,18 +1,44 @@
 # AI SDK v7 UI streams
 
-The `aisdk` package owns the frozen AI SDK v7 chunk union, SSE framing, UI-message conversion, and approval signatures. `aisdkhttp` is the small `net/http` boundary: it decodes a v7 chat request, calls your event runner, and promptly flushes the response stream.
+The `aisdk` package owns the frozen AI SDK v7 chunk union, SSE framing,
+UI-message conversion, and approval signatures. `aisdkhttp` is the small
+`net/http` boundary: it decodes a v7 chat request, passes the complete ordered
+message history to an Agent Runner, and flushes the resulting event stream.
+
+Build the Agent once and create a fresh Runner for every request:
 
 ```go
-func chatRun(model llm.Model) aisdkhttp.RunFunc {
-  return func(ctx context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
-    return agent.Stream(ctx, agent.RunParams{
-      Model: model,
-      Request: llm.Request{Messages: messages},
-    }), nil
-  }
+func chatRun(assistant *agent.Agent) aisdkhttp.RunFunc {
+	return func(
+		ctx context.Context,
+		messages []aikit.Message,
+	) (iter.Seq2[aikit.StepEvent, error], error) {
+		return assistant.Runner().
+			Messages(messages...).
+			Stream(ctx)
+	}
 }
 
-http.Handle("/chat", aisdkhttp.Handler(chatRun(model)))
+http.Handle("/chat", aisdkhttp.Handler(chatRun(assistant)))
 ```
 
-The included `examples/chat-server` is a runnable reference implementation with `/chat` and `/healthz`. It is also used by the browser conformance suite. Gin users can use the separately versioned `aisdkgin` module, which wraps this same HTTP handler without adding Gin to the core dependency graph.
+`Messages` replaces the Runner's complete ordered input sequence. That
+preserves multipart user content, previous assistant/tool messages, and
+approval-response history posted by `useChat`; reducing the request to a text
+prompt would lose that state.
+
+The Runner sequence remains single-owner. `aisdkhttp` ranges it once and maps
+its leaf `aikit.StepEvent` values into v7 chunks. Client disconnects and an
+early consumer stop cancel the child run. Synchronous Runner validation errors
+remain pre-stream HTTP failures; terminal iterator errors become redacted v7
+error chunks followed by `[DONE]`.
+
+The Go Agent rewrite does not change the v7 wire contract: chunk fields,
+finish-reason translation, response headers, approval signatures, and SSE
+termination stay compatible. `aisdk` continues to depend only on the leaf
+`aikit` vocabulary and does not import `agent`.
+
+The included `examples/chat-server` is the runnable reference implementation
+with `/chat` and `/healthz`, and is exercised by the browser conformance suite.
+Gin users can use the separately versioned `aisdkgin` module, which wraps the
+same HTTP handler without adding Gin to the core dependency graph.

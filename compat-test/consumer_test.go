@@ -2,8 +2,6 @@ package compattest
 
 import (
 	"testing"
-
-	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // TestConsumeFakeStream exercises the hand-built StepEvent stream through
@@ -20,14 +18,12 @@ func TestConsumeFakeStream(t *testing.T) {
 }
 
 func TestRunAgent(t *testing.T) {
-	var sawDone bool
-	for event := range RunAgent(t.Context()) {
-		if event.Type == aikit.StepEventDone {
-			sawDone = true
-		}
+	result, err := RunAgent(t.Context())
+	if err != nil {
+		t.Fatalf("RunAgent: %v", err)
 	}
-	if !sawDone {
-		t.Fatal("public agent run did not complete")
+	if result.Text != "hello" {
+		t.Fatalf("RunAgent text = %q, want hello", result.Text)
 	}
 }
 

@@ -2,6 +2,7 @@ package aisdkhttp
 
 import (
 	"context"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,12 +64,11 @@ func TestHandlerStartsNewMessagesAndReusesExplicitRegenerationID(t *testing.T) {
 	}
 }
 
-func successfulRun(context.Context, []aikit.Message) (<-chan aikit.StepEvent, error) {
-	events := make(chan aikit.StepEvent, 4)
-	events <- aikit.StepEvent{Type: aikit.StepEventStepStart}
-	events <- aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"}
-	events <- aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop}
-	events <- aikit.StepEvent{Type: aikit.StepEventDone}
-	close(events)
-	return events, nil
+func successfulRun(context.Context, []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
+	return eventSequence(
+		aikit.StepEvent{Type: aikit.StepEventStepStart},
+		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"},
+		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
+		aikit.StepEvent{Type: aikit.StepEventDone},
+	), nil
 }

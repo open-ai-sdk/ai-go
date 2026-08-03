@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,7 +27,7 @@ func (w *brokenResponseWriter) Write([]byte) (int, error) {
 func TestClientDisconnectCancelsRun(t *testing.T) {
 	started := make(chan struct{})
 	stopped := make(chan struct{})
-	run := func(ctx context.Context, _ []aikit.Message) (<-chan aikit.StepEvent, error) {
+	run := func(ctx context.Context, _ []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
 		events := make(chan aikit.StepEvent)
 		go func() {
 			defer close(events)
@@ -35,7 +36,7 @@ func TestClientDisconnectCancelsRun(t *testing.T) {
 			close(started)
 			<-ctx.Done()
 		}()
-		return events, nil
+		return sequenceFromChannel(events), nil
 	}
 
 	server := httptest.NewServer(Handler(run))
@@ -74,14 +75,14 @@ func TestClientDisconnectCancelsRun(t *testing.T) {
 
 func TestWriteFailureCancelsRunBeforeDraining(t *testing.T) {
 	stopped := make(chan struct{})
-	run := func(ctx context.Context, _ []aikit.Message) (<-chan aikit.StepEvent, error) {
+	run := func(ctx context.Context, _ []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
 		events := make(chan aikit.StepEvent)
 		go func() {
 			defer close(events)
 			defer close(stopped)
 			<-ctx.Done()
 		}()
-		return events, nil
+		return sequenceFromChannel(events), nil
 	}
 
 	Handler(run).ServeHTTP(

@@ -13,6 +13,9 @@ type preparedToolCall struct {
 	tc         toolCallState
 	def        ToolDefinition // resolved once here; execute steps reuse it, no re-scan
 	invalidErr error
+	skip       bool
+	skipReason string
+	controlErr error
 }
 
 func preparedToolCallStates(prepared []preparedToolCall) []toolCallState {
@@ -27,7 +30,7 @@ func preparedToolCallStates(prepared []preparedToolCall) []toolCallState {
 }
 
 func prepareToolCalls(
-	ctx context.Context,
+	r *run,
 	tools *ToolSet,
 	repair ToolCallRepairFunc,
 	req Request,
@@ -36,11 +39,38 @@ func prepareToolCalls(
 	stepTools := toolSetForStep(tools, req.Tools)
 	prepared := make([]preparedToolCall, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		fixed, def, err := validateAndRepairToolCall(ctx, stepTools, repair, req, tc)
+		fixed, def, err := validateAndRepairToolCall(r.ctx, stepTools, repair, req, tc)
+		preparedCall := preparedToolCall{tc: fixed, def: def, invalidErr: err}
+		if err != nil {
+			input := ToolCallRepairContext{
+				Instructions: req.Instructions,
+				Messages:     snapshotMessages(req.Messages),
+				ToolCall: ToolCallInfo{
+					ID: fixed.id, Name: fixed.name,
+					Args: append(json.RawMessage(nil), fixed.args...), ArgsSet: true,
+					ThoughtSignature: fixed.thoughtSignature,
+				},
+				Tools: snapshotToolDefinitionsForCallback(stepTools), Error: err,
+			}
+			action, hookErr := r.recoverInvalidToolCall(input)
+			if hookErr != nil {
+				preparedCall.controlErr = hookErr
+			} else {
+				switch action.Kind {
+				case InvalidToolCallRepair:
+					preparedCall.tc = applyToolCallRepair(fixed, action.Repaired)
+					preparedCall.def, preparedCall.invalidErr = validateToolCall(stepTools, preparedCall.tc)
+				case InvalidToolCallSkip:
+					preparedCall.invalidErr = nil
+					preparedCall.skip = true
+					preparedCall.skipReason = action.Reason
+				}
+			}
+		}
 		prepared = append(prepared, preparedToolCall{
-			tc:         fixed,
-			def:        def,
-			invalidErr: err,
+			tc: preparedCall.tc, def: preparedCall.def,
+			invalidErr: preparedCall.invalidErr, skip: preparedCall.skip,
+			skipReason: preparedCall.skipReason, controlErr: preparedCall.controlErr,
 		})
 	}
 	return prepared
@@ -78,6 +108,16 @@ func validateAndRepairToolCall(
 		return tc, def, err
 	}
 
+	tc = applyToolCallRepair(tc, repaired)
+
+	def, err = validateToolCall(tools, tc)
+	return tc, def, err
+}
+
+func applyToolCallRepair(tc toolCallState, repaired *ToolCallInfo) toolCallState {
+	if repaired == nil {
+		return tc
+	}
 	if repaired.ID != "" {
 		tc.id = repaired.ID
 	}
@@ -93,8 +133,7 @@ func validateAndRepairToolCall(
 		tc.thoughtSignature = repaired.ThoughtSignature
 	}
 
-	def, err = validateToolCall(tools, tc)
-	return tc, def, err
+	return tc
 }
 
 // validateToolCall checks tc against tools and, on success, returns the

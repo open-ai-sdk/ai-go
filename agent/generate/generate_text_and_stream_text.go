@@ -26,7 +26,10 @@ func validateToolsContext(req GenerateTextRequest) error {
 	if req.Tools == nil {
 		return nil
 	}
-	for _, tool := range req.Tools.Definitions {
+	if err := req.Tools.Validate(); err != nil {
+		return err
+	}
+	for _, tool := range req.Tools.DefinitionsSnapshot() {
 		if tool.ContextSchema == nil {
 			continue
 		}
@@ -99,17 +102,28 @@ func runParams(req GenerateTextRequest) agent.RunParams {
 
 	var tools *ToolSet
 	if req.Tools != nil {
-		modelRequest.Tools = req.Tools.Definitions
+		definitions := req.Tools.DefinitionsSnapshot()
+		modelRequest.Tools = definitions
+		var allowed map[string]struct{}
 		if req.ActiveTools != nil {
 			modelRequest.Tools = filterActiveTools(modelRequest.Tools, req.ActiveTools)
+			allowed = make(map[string]struct{}, len(modelRequest.Tools))
+			for _, definition := range modelRequest.Tools {
+				allowed[definition.Name] = struct{}{}
+			}
 		}
-		tools = &ToolSet{
-			Definitions: req.Tools.Definitions,
-			Executor: contextualExecutor{
-				executor:       req.Tools,
-				toolsContext:   req.ToolsContext,
-				runtimeContext: req.RuntimeContext,
-			},
+		if req.ActiveTools == nil || len(modelRequest.Tools) > 0 {
+			// validateToolsContext has already validated the source registry, so
+			// rebuilding the same ordered definitions cannot fail.
+			tools, _ = toolpkg.NewSetFromExecutor(
+				modelRequest.Tools,
+				contextualExecutor{
+					executor:       req.Tools,
+					toolsContext:   req.ToolsContext,
+					runtimeContext: req.RuntimeContext,
+					allowed:        allowed,
+				},
+			)
 		}
 	}
 
@@ -163,9 +177,19 @@ type contextualExecutor struct {
 	executor       ToolExecutor
 	toolsContext   ToolsContext
 	runtimeContext RuntimeContext
+	allowed        map[string]struct{}
 }
 
 func (e contextualExecutor) Execute(ctx context.Context, name, args string) (string, error) {
+	if e.allowed != nil {
+		if _, ok := e.allowed[name]; !ok {
+			available := make([]string, 0, len(e.allowed))
+			for candidate := range e.allowed {
+				available = append(available, candidate)
+			}
+			return "", &toolpkg.NoSuchToolError{ToolName: name, AvailableTools: available}
+		}
+	}
 	ctx = toolpkg.WithToolContext(ctx, e.toolsContext[name])
 	ctx = toolpkg.WithRuntimeContext(ctx, e.runtimeContext)
 	return e.executor.Execute(ctx, name, args)

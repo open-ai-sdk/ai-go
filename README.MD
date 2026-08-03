@@ -1,10 +1,11 @@
 # ai-go
 
-`ai-go` is a standalone Go SDK for provider-neutral generation, typed tools, multi-step agents, and
-AI SDK v7 UI-message streams.
+`ai-go` is a standalone Go SDK for provider-neutral completions, typed tools, reusable multi-step
+agents, and AI SDK v7 UI-message streams.
 
-The top-level `ai` package is a thin ergonomic facade. It keeps common operations and aliases in one
-place while their implementations and canonical contracts live in focused lower packages.
+Canonical contracts live in focused packages: `llm` owns direct model calls, `agent` owns the
+Builder/Agent/Runner lifecycle, `aikit` owns messages and events, and `tool` owns typed tools.
+The top-level `ai` package contains only non-Agent convenience operations.
 
 ## Features
 
@@ -32,7 +33,7 @@ Install the module:
 go get github.com/open-ai-sdk/ai-go
 ```
 
-Use the facade for the common path:
+Use the canonical direct-completion builder for the common one-call path:
 
 ```go
 package main
@@ -42,7 +43,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/open-ai-sdk/ai-go/ai"
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/openai"
 )
 
@@ -55,14 +56,10 @@ func main() {
 	}
 	model := client.CompletionModel("gpt-5")
 
-	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-		Model:        model,
-		Instructions: "Answer concisely.",
-		Messages:     []ai.Message{ai.UserMessage("Why is the sky blue?")},
-		ProviderOptions: map[string]any{
-			"openai": openai.ProviderOptions{ReasoningEffort: "low"},
-		},
-	})
+	result, err := llm.NewCompletion(model, "Why is the sky blue?").
+		Instructions("Answer concisely.").
+		With(openai.ProviderOptions{ReasoningEffort: "low"}).
+		Send(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -77,15 +74,14 @@ match the selected provider/model API returns `*llm.ProviderOptionsError` rather
 
 ### Direct completions
 
-`GenerateText` is the application-level API: it can run a multi-step tool loop.
-Use `NewCompletion` when you need one direct model call and want to own any
-tool-call follow-up yourself. The response preserves the ordered assistant
+Use `llm.NewCompletion` for one direct model call when the application owns any
+tool-call follow-up. The response preserves the ordered assistant
 message and ID, usage, sources, generated files, finish reason, provider
 metadata, and—when the provider has a native completion path—its untranslated
 successful payload.
 
 ```go
-completion, err := ai.NewCompletion(model, "Find the capital of Vietnam").
+completion, err := llm.NewCompletion(model, "Find the capital of Vietnam").
 	Instructions("Answer in one sentence.").
 	Temperature(0.2).
 	Send(ctx)
@@ -111,40 +107,35 @@ for the complete field mapping. Inspect a native payload only when diagnosing
 provider-specific behavior:
 
 ```go
-raw, ok := ai.RawResponseAs[*openai.ResponsesResponse](completion)
+raw, ok := llm.RawResponseAs[*openai.ResponsesResponse](completion)
 ```
 
 Raw responses may contain sensitive provider data and are never logged by
 ai-go automatically.
 
-`ToolLoopAgent` provides the corresponding high-level Completion capability:
-its `Prompt`, `Chat`, and `Completion(prompt)` builder retain the agent's
-tools, approvals, callbacks, and multi-step stop policy.
-
-`GenerateText` defaults to a single step. Set `StopWhen: ai.IsStepCount(n)` for an explicit
-multi-step tool loop, or use the direct `agent` runtime when the application needs event-level
-control.
+For tool execution and model continuations, build a reusable Agent and run it
+through `Agent.Runner`; the Agent surface is owned only by package `agent`.
 
 ### Streaming
 
 ```go
-stream := ai.StreamText(ctx, ai.GenerateTextRequest{
-	Model:    model,
-	Messages: []ai.Message{ai.UserMessage("Explain Go channels")},
-})
+stream, err := llm.NewCompletion(model, "Explain Go channels").Stream(ctx)
+if err != nil {
+	return err
+}
 
-for event, err := range stream.Events() {
-	if err != nil {
-		return err
+for event := range stream {
+	if event.Type == aikit.StreamEventError {
+		return event.Error
 	}
-	if event.Type == ai.StepEventTextDelta {
+	if event.Type == aikit.StreamEventTextDelta {
 		fmt.Print(event.TextDelta)
 	}
 }
 ```
 
-Cancel the context passed to `StreamText` to stop the underlying run. Leaving an iterator view does
-not cancel the run because another stream view or `Consume` call may still be active.
+Cancel the supplied context to stop the direct provider call. Agent streaming has a different,
+single-owner iterator contract described below.
 
 ### Typed tools
 
@@ -175,6 +166,68 @@ if err != nil { // duplicate names are rejected
 Native and MCP-discovered tools use the same `tool.Set` path. Tool input, execution, missing-tool,
 and policy-denial failures are typed and support `errors.Is`/`errors.As`.
 
+### Reusable Agents
+
+Package `agent` has one canonical lifecycle: a value-style Builder validates long-lived defaults,
+the resulting Agent is immutable, and each value-style Runner owns one invocation and its
+overrides.
+
+```go
+assistant, err := agent.New(model).
+	ID("travel-assistant").
+	Instructions("Answer carefully and state uncertainty.").
+	Tools(tools).
+	MaxTurns(4).
+	Build()
+if err != nil {
+	return err
+}
+
+result, err := assistant.Runner().
+	Prompt("Find the weather in Hanoi").
+	Temperature(0.2).
+	ActiveTools("get_weather").
+	Run(ctx)
+if err != nil {
+	var exhausted *agent.MaxTurnsError
+	if errors.As(err, &exhausted) {
+		return savePartial(exhausted.Result)
+	}
+	return err
+}
+
+fmt.Println(result.Text)
+```
+
+`MaxTurns` defaults to `1`, must be positive, and counts every model call, including tool
+continuations and retries. Exhaustion is a typed terminal error carrying the partial Result and its
+full Transcript; it is not a successful stop. `StopWhen` may stop earlier but cannot exceed the
+budget.
+
+For existing chat or multimodal history, `Messages(...)` replaces the Runner input, while
+`Message(...)` and `Prompt(...)` append. All input and configuration are snapshotted so creating or
+overriding one Runner never mutates the reusable Agent.
+
+```go
+events, err := assistant.Runner().Messages(history...).Stream(ctx)
+if err != nil {
+	return err
+}
+for event, err := range events {
+	if err != nil {
+		return err
+	}
+	if event.Type == aikit.StepEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
+}
+```
+
+The `iter.Seq2[aikit.StepEvent, error]` is single-use and single-owner. Breaking iteration cancels
+and releases work owned by the run. Use `Runner.Run` for aggregation; there are no fan-out or late
+stream views. See [the Agent guide](docs/core/agents.md) for ordered message validation, hooks,
+approvals, and complete result semantics.
+
 ## Chat server quickstart
 
 The checked-in server is a runnable conformance fixture for text, tool, error, approval, and denial
@@ -188,18 +241,18 @@ curl -i http://127.0.0.1:8787/healthz
 For an application endpoint, compose the lower packages directly:
 
 ```go
-func chatRun(model llm.Model) aisdkhttp.RunFunc {
-	return func(ctx context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
-		return agent.Stream(ctx, agent.RunParams{
-			Model: model,
-			Request: llm.Request{
-				Messages: messages,
-			},
-		}), nil
+func chatRun(assistant *agent.Agent) aisdkhttp.RunFunc {
+	return func(
+		ctx context.Context,
+		messages []aikit.Message,
+	) (iter.Seq2[aikit.StepEvent, error], error) {
+		return assistant.Runner().
+			Messages(messages...).
+			Stream(ctx)
 	}
 }
 
-http.Handle("/chat", aisdkhttp.Handler(chatRun(model)))
+http.Handle("/chat", aisdkhttp.Handler(chatRun(assistant)))
 ```
 
 `aisdkhttp` parses the v7 request, streams all five required response headers, flushes every chunk,
@@ -238,12 +291,11 @@ v7 chunk types, fields, finish-reason spellings, and `data: [DONE]` framing are 
 
 | Package | Owns |
 |---|---|
-| `ai` | Thin facade: `GenerateText`, `StreamText`, `GenerateObject`, `Embed`, and aliases |
-| `agent/generate` | High-level generation, aggregation, request options, and stream results behind the facade |
-| `agent` | Low-level multi-step loop, approval, stop conditions, callbacks, and `aikit.StepEvent` production |
+| `ai` | Non-Agent convenience operations such as objects, embeddings, images, and cost helpers |
+| `agent` | Agent Builder, immutable Agent, per-run Runner, results, hooks, approvals, and multi-turn execution |
 | `aikit` | Messages, events, usage, finish reasons, warnings, and error vocabulary; standard library plus approved internal JSON cloning |
 | `llm` | Model contracts, request builder, typed provider options, embeddings, and images |
-| `tool` | Typed/dynamic tools, schema derivation, registry, typed errors, and tool context |
+| `tool` | Typed/dynamic tools, schema derivation, immutable ordered registry, typed errors, and tool context |
 | `transport` | Provider HTTP policy, retry, SSE reading, cancellation, and API error mapping |
 | `provider/*` | Provider-specific constructors and wire codecs |
 | `aisdk` | Frozen AI SDK v7 chunks, SSE framing, UI-message conversion, invariants, and approval signatures |
@@ -258,7 +310,7 @@ do not import the UI protocol, and `aisdk` does not import agents or providers.
 
 The SDK is silent by default. A caller-provided `*slog.Logger` receives structured diagnostics;
 the library does not write to `slog.Default()` on its own. Tracing defaults to a true no-op and uses
-the small `agent.Tracer` interface (`ai.WithTracer` on facade calls).
+the small `agent.Tracer` interface (`Builder.Tracer` or a per-run `Runner.Tracer`).
 
 OpenTelemetry support lives in the optional `otelagent` package. The core runtime and provider
 package dependency closures do not import OTel, so applications compile the adapter only when they

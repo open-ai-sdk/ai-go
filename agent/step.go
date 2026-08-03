@@ -22,6 +22,12 @@ func executeToolCalls(
 	toolNames = make([]string, 0, len(prepared))
 	for _, preparedCall := range prepared {
 		tc := preparedCall.tc
+		if preparedCall.controlErr != nil {
+			if controlErr == nil {
+				controlErr = preparedCall.controlErr
+			}
+			break
+		}
 		if preparedCall.invalidErr != nil {
 			r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
@@ -33,6 +39,19 @@ func executeToolCalls(
 			*history = append(*history, buildToolResultMessage(tc.id, tc.name, errOutput))
 			toolNames = append(toolNames, tc.name)
 			continue
+		}
+
+		skip := preparedCall.skip
+		skipReason := preparedCall.skipReason
+		if !skip {
+			var hookErr error
+			tc, skip, skipReason, hookErr = r.beforeTool(tc)
+			if hookErr != nil {
+				if controlErr == nil {
+					controlErr = hookErr
+				}
+				break
+			}
 		}
 
 		r.emitObserved(StepEvent{
@@ -51,20 +70,28 @@ func executeToolCalls(
 			ThoughtSignature: tc.thoughtSignature,
 		})
 
-		result, approvalResolved, approvalErr := approvedToolCall(
-			r,
-			r.ctx,
-			tools,
-			tc,
-			preparedCall.def,
-			approval,
-			approver,
-		)
+		var result *ToolResult
+		approvalResolved := false
+		var approvalErr error
+		if skip {
+			result = skippedToolResult(tc, skipReason)
+		} else {
+			result, approvalResolved, approvalErr = approvedToolCall(
+				r, r.ctx, tools, tc, preparedCall.def, approval, approver,
+			)
+		}
 		if approvalErr != nil {
 			if controlErr == nil {
 				controlErr = approvalErr
 			}
 			continue
+		}
+		result, hookErr := r.afterTool(result)
+		if hookErr != nil {
+			if controlErr == nil {
+				controlErr = hookErr
+			}
+			break
 		}
 		// Apply ToModelOutput transform for history; event keeps original output.
 		// def was resolved once during validation (prepareToolCalls), so no
@@ -99,6 +126,13 @@ func executeToolCalls(
 		stepToolResults = append(stepToolResults, *result)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
+}
+
+func skippedToolResult(tc toolCallState, reason string) *ToolResult {
+	if reason == "" {
+		reason = "tool call skipped by hook"
+	}
+	return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: reason}
 }
 
 // executeToolCallsParallel processes tool calls concurrently, bounded by
@@ -141,6 +175,10 @@ func executeToolCallsParallel(
 	for i, preparedCall := range prepared {
 		tc := preparedCall.tc
 		def := preparedCall.def
+		if preparedCall.controlErr != nil {
+			results[i] = indexedResult{tc: tc, valid: true, controlErr: preparedCall.controlErr}
+			continue
+		}
 		if preparedCall.invalidErr != nil {
 			results[i] = indexedResult{
 				tc: tc, valid: false,
@@ -150,6 +188,16 @@ func executeToolCallsParallel(
 				},
 			}
 			continue
+		}
+		skip := preparedCall.skip
+		skipReason := preparedCall.skipReason
+		if !skip {
+			var hookErr error
+			tc, skip, skipReason, hookErr = r.beforeTool(tc)
+			if hookErr != nil {
+				results[i] = indexedResult{tc: tc, valid: true, controlErr: hookErr}
+				continue
+			}
 		}
 
 		// Emit ToolCallReady before execution starts (matches sequential contract).
@@ -201,9 +249,21 @@ func executeToolCallsParallel(
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			result, approvalResolved, approvalErr := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			var result *ToolResult
+			approvalResolved := false
+			var approvalErr error
+			if skip {
+				result = skippedToolResult(tc, skipReason)
+			} else {
+				result, approvalResolved, approvalErr = approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			}
 			if approvalErr != nil {
 				results[idx].controlErr = approvalErr
+				return nil
+			}
+			result, hookErr := r.afterTool(result)
+			if hookErr != nil {
+				results[idx].controlErr = hookErr
 				return nil
 			}
 			results[idx].result = result

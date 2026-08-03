@@ -2,6 +2,7 @@ package aisdkhttp
 
 import (
 	"context"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,8 +33,8 @@ func (r *flushRecorder) Flush() {
 
 func TestHandlerFlushesBeforeStreamCompletion(t *testing.T) {
 	events := make(chan aikit.StepEvent)
-	run := func(context.Context, []aikit.Message) (<-chan aikit.StepEvent, error) {
-		return events, nil
+	run := func(context.Context, []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
+		return sequenceFromChannel(events), nil
 	}
 	recorder := &flushRecorder{
 		ResponseRecorder: httptest.NewRecorder(),

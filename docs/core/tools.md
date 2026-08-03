@@ -20,22 +20,43 @@ tools, err := tool.NewSet(weather)
 if err != nil { return err }
 ```
 
-Attach `tools` to `GenerateTextRequest.Tools` and set `StopWhen: ai.IsStepCount(n)` when the model needs a follow-up turn after a tool result. `tool.NewSet` rejects duplicate names. Dynamic tools and MCP-discovered tools use the same shared `tool.Set` runtime, so tool execution failures remain typed across sources.
+Attach the immutable registry to an Agent Builder. `MaxTurns` is the positive
+total model-call budget and must allow any follow-up model call after a tool
+result:
+
+```go
+assistant, err := agent.New(model).
+  Tools(tools).
+  MaxTurns(4).
+  Build()
+if err != nil { return err }
+
+result, err := assistant.Runner().
+  Prompt("What is the weather in Hanoi?").
+  ActiveTools("get_weather").
+  Run(ctx)
+```
+
+`tool.NewSet` rejects duplicate names and snapshots definitions and invokers
+together in registration order. Agent construction and per-run snapshots do
+not expose mutable registry fields. Dynamic tools and MCP-discovered tools use
+the same `tool.Set` runtime, so tool execution failures remain typed across
+sources.
 
 Tool output is literal text by default. When a provider can consume richer
 results, construct ordered typed content explicitly:
 
 ```go
-part := ai.RichToolResultPart(
+part := aikit.RichToolResultPart(
   call.ID,
   call.Name,
-  ai.TextToolResultContent("chart generated"),
-  ai.JSONToolResultContent(json.RawMessage(`{"rows": 12}`)),
-  ai.ImageToolResultContent(png, "image/png"),
+  aikit.TextToolResultContent("chart generated"),
+  aikit.JSONToolResultContent(json.RawMessage(`{"rows": 12}`)),
+  aikit.ImageToolResultContent(png, "image/png"),
 )
 ```
 
-JSON-looking strings remain text. Use `JSONToolResultContent` or
-`ParseToolResultJSON` when JSON semantics are intended. Rich content is cloned
+JSON-looking strings remain text. Use `aikit.JSONToolResultContent` or
+`aikit.ParseToolResultJSON` when JSON semantics are intended. Rich content is cloned
 when messages and result snapshots are built, so caller mutation cannot alter
 stored history.

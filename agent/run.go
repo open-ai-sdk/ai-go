@@ -97,6 +97,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		approvalKey:         append([]byte(nil), params.ApprovalKey...),
 		approvalReplayGuard: params.ApprovalReplayGuard,
 		tracer:              tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
+		maxTurns: params.MaxSteps, enforceTurns: params.ErrorOnMaxTurns,
+		hooks: append([]Hook(nil), params.Hooks...), hookContext: params.HookContext,
 	}
 	history, proceed, err := prepareRunHistory(r, params)
 	if err != nil {
@@ -111,21 +113,30 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// gate. A caller that sets neither now gets exactly as many steps as
 	// StopWhen allows, not an implicit cap.
 	for step := 0; params.MaxSteps <= 0 || step < params.MaxSteps; step++ {
+		r.hookContext.Turn = step + 1
 		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
 		// cancelled context makes the StepStart send return false and unwinds.
 		if !r.emitObserved(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
-			return ctx.Err()
+			return r.stopError()
 		}
 
 		model := params.Model
-		req := params.Request
+		req := cloneRequest(params.Request)
 		req.Instructions = "" // already prepended as system message in history
 		req.Messages = history
-		if req.Tools == nil && params.Tools != nil && len(params.Tools.Definitions) > 0 {
-			req.Tools = params.Tools.Definitions
+		if req.Tools == nil && params.Tools != nil && params.Tools.Len() > 0 {
+			req.Tools = params.Tools.DefinitionsSnapshot()
 		}
 
 		applyPrepareStep(params, step, completedSteps, &model, &req)
+		var err error
+		req, err = r.beforeCompletion(req)
+		if err != nil {
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
 		lastModel = model
 		lastRequest = req
 
@@ -163,6 +174,17 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 			)
 		}
 
+		if err := r.reserveModelCall(); err != nil {
+			cancelStep()
+			modelSpan.RecordError(err)
+			modelSpan.End()
+			stepSpan.RecordError(err)
+			stepSpan.End()
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
 		eventCh, err := model.Stream(modelCtx, req)
 		if err != nil {
 			// Stream startup failed before there is a channel to consume.
@@ -171,8 +193,10 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 			modelSpan.End()
 			stepSpan.RecordError(err)
 			stepSpan.End()
-			r.emitError(fmt.Errorf("step %d: start stream: %w", step, err))
-			return ctx.Err()
+			if r.emitError(fmt.Errorf("step %d: start stream: %w", step, err)) {
+				return nil
+			}
+			return r.stopError()
 		}
 
 		acc := newToolCallAccumulator()
@@ -190,7 +214,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		modelSpan.End()
 		if interrupted {
 			stepSpan.End()
-			return ctx.Err()
+			return r.stopError()
 		}
 		lastSR = sr
 		fullText := sr.text
@@ -200,8 +224,15 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		}
 
 		if r.executeToolStep(params, step, sr, fullText, acc, model, req, &history, &completedSteps, stepSpan) {
-			return ctx.Err()
+			return r.stopError()
 		}
+	}
+
+	if params.ErrorOnMaxTurns {
+		if r.emitError(&MaxTurnsError{MaxTurns: params.MaxSteps}) {
+			return nil
+		}
+		return r.stopError()
 	}
 
 	// maxSteps exhausted with pending tool_calls — exit honestly using the
@@ -211,10 +242,12 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
 	if !emitStructuredOutput(r, lastModel, lastRequest, history) {
-		return ctx.Err()
+		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
-	r.emitObserved(StepEvent{Type: StepEventDone})
+	if !r.emitObserved(StepEvent{Type: StepEventDone}) {
+		return r.stopError()
+	}
 	return nil
 }
 
@@ -238,7 +271,7 @@ func finishTextStep(
 		Type: StepEventStepEnd, StepNumber: step, MessageID: sr.messageID, FinishReason: sr.finish,
 		RawFinishReason: sr.rawFinish, ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	}) {
-		return r.ctx.Err()
+		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
 	completedSteps = append(completedSteps, StepResultInfo{
@@ -247,10 +280,12 @@ func finishTextStep(
 		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	})
 	if !emitStructuredOutput(r, model, req, history) {
-		return r.ctx.Err()
+		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
-	r.emitObserved(StepEvent{Type: StepEventDone})
+	if !r.emitObserved(StepEvent{Type: StepEventDone}) {
+		return r.stopError()
+	}
 	return nil
 }
 
@@ -299,7 +334,7 @@ func (r *run) executeToolStep(
 	stepSpan tracing.Span,
 ) bool {
 	toolCalls := acc.completed()
-	preparedToolCalls := prepareToolCalls(r.ctx, params.Tools, params.RepairToolCall, req, toolCalls)
+	preparedToolCalls := prepareToolCalls(r, params.Tools, params.RepairToolCall, req, toolCalls)
 	*history = append(
 		*history,
 		buildAssistantToolCallMessage(sr.messageID, fullText, sr.reasoning, preparedToolCallStates(preparedToolCalls)),

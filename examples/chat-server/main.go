@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"iter"
 	"log"
 	"net"
 	"net/http"
@@ -95,17 +96,16 @@ func scenarioHandler() http.Handler {
 }
 
 func agentRun(model llm.Model) aisdkhttp.RunFunc {
-	return func(ctx context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
-		return agent.Stream(ctx, agent.RunParams{
-			Model: model,
-			Request: llm.Request{
-				Messages: messages,
-			},
-		}), nil
+	configured, err := agent.New(model).Build()
+	if err != nil {
+		panic(err)
+	}
+	return func(ctx context.Context, messages []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
+		return configured.Runner().Messages(messages...).Stream(ctx)
 	}
 }
 
-func toolRun(_ context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
+func toolRun(_ context.Context, messages []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
 	if hasToolResult(messages, "tool-ok") {
 		return eventStream(textEvents("Tool round-trip complete")...), nil
 	}
@@ -124,7 +124,7 @@ func toolRun(_ context.Context, messages []aikit.Message) (<-chan aikit.StepEven
 	), nil
 }
 
-func approvalRun(_ context.Context, messages []aikit.Message) (<-chan aikit.StepEvent, error) {
+func approvalRun(_ context.Context, messages []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
 	if approved, ok := approvalResponse(messages); ok {
 		text := "Approval denied"
 		resultEvents := []aikit.StepEvent{
@@ -175,13 +175,14 @@ func textEvents(text string) []aikit.StepEvent {
 	}
 }
 
-func eventStream(events ...aikit.StepEvent) <-chan aikit.StepEvent {
-	stream := make(chan aikit.StepEvent, len(events))
-	for _, event := range events {
-		stream <- event
+func eventStream(events ...aikit.StepEvent) iter.Seq2[aikit.StepEvent, error] {
+	return func(yield func(aikit.StepEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
 	}
-	close(stream)
-	return stream
 }
 
 func hasToolResult(messages []aikit.Message, expected string) bool {

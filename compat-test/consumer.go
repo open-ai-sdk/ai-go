@@ -53,8 +53,7 @@ func (nativeFake) Complete(_ context.Context, _ llm.Request) (*llm.CompletionRes
 }
 
 var (
-	_ ai.CompletionModel           = nativeFake{}
-	_ ai.CompletionBuilderProvider = ai.NewToolLoopAgent(fakeModel{})
+	_ ai.CompletionModel = nativeFake{}
 )
 
 // NativeCompletion exercises native payload access through public APIs only.
@@ -131,13 +130,14 @@ func Embed(ctx context.Context) ([]float32, error) {
 	return result.Embedding, err
 }
 
-// RunAgent proves an external module can configure and execute the public
-// runtime directly without importing the ai facade or any internal package.
-func RunAgent(ctx context.Context) <-chan aikit.StepEvent {
-	return agent.Run(ctx, agent.RunParams{
-		Model:   fakeModel{},
-		Request: llm.NewRequest("hello").Build(),
-	})
+// RunAgent proves an external module can build and execute the canonical
+// Agent/Runner API without importing the facade or any internal package.
+func RunAgent(ctx context.Context) (*agent.Result, error) {
+	configured, err := agent.New(fakeModel{}).Build()
+	if err != nil {
+		return nil, err
+	}
+	return configured.Runner().Prompt("hello").Run(ctx)
 }
 
 type externalCompat struct{}

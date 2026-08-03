@@ -15,8 +15,8 @@ hero:
 
 features:
   - icon: ⚡
-    title: One ergonomic facade
-    details: Generate text and objects, stream responses, and embed content through the top-level ai package.
+    title: Focused Go APIs
+    details: Use llm for direct model calls and agent for the Builder, immutable Agent, and per-run Runner lifecycle.
   - icon: 🧰
     title: Typed tools and agents
     details: Build schema-validated Go tools and let the runtime execute multi-step tool loops.
@@ -30,7 +30,10 @@ features:
 
 ## Start with a model
 
-Install the module, configure a provider, then call `ai.GenerateText`. The facade keeps the common path small while lower packages retain explicit ownership of contracts and protocols.
+Install the module, configure a provider, then use `llm.NewCompletion` for one
+model call or `agent.New(...).Build()` for reusable multi-turn execution.
+Canonical packages keep contract ownership explicit without Agent aliases or
+compatibility shims.
 
 ```sh
 go get github.com/open-ai-sdk/ai-go

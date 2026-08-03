@@ -125,14 +125,18 @@ type EndEvent struct {
 
 // RunParams configures a single agent run.
 type RunParams struct {
-	Model          Model
-	Request        Request
-	Tools          *ToolSet
-	StopWhen       StopCondition
-	MaxSteps       int
-	PrepareStep    PrepareStepFunc
-	RepairToolCall ToolCallRepairFunc
-	ToolApproval   map[string]func(string, string) bool
+	Model    Model
+	Request  Request
+	Tools    *ToolSet
+	StopWhen StopCondition
+	MaxSteps int
+	// ErrorOnMaxTurns makes exhaustion a typed terminal error instead of a
+	// successful Done with pending tool calls. It is the canonical Runner
+	// behavior; the field exists only while legacy callers are cut over.
+	ErrorOnMaxTurns bool
+	PrepareStep     PrepareStepFunc
+	RepairToolCall  ToolCallRepairFunc
+	ToolApproval    map[string]func(string, string) bool
 	// ApprovalKey authenticates stateless approval requests and responses.
 	// It must contain at least 32 bytes when an approval can suspend.
 	ApprovalKey           []byte
@@ -143,6 +147,10 @@ type RunParams struct {
 	MaxParallelTools      int
 	Logger                *slog.Logger
 	TraceContent          bool
+	// Hooks and HookContext are snapshots owned by the canonical Runner.
+	// Legacy low-level callers leave both empty.
+	Hooks       []Hook
+	HookContext HookContext
 	// Tracer enables span instrumentation for this run. Nil is a true no-op
 	// default; use an optional adapter or implement the small interface.
 	Tracer Tracer

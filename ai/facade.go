@@ -32,10 +32,7 @@ func NewRequest(model LanguageModel, prompt string) RequestBuilder {
 func FromRequest(defaults GenerateTextRequest) RequestBuilder { return generate.FromRequest(defaults) }
 
 func NewRuntime(opts ...RuntimeOption) *Runtime { return generate.NewRuntime(opts...) }
-func NewToolLoopAgent(model LanguageModel, opts ...AgentOption) *ToolLoopAgent {
-	return generate.NewToolLoopAgent(model, opts...)
-}
-func NewRegistry() *Registry { return generate.NewRegistry() }
+func NewRegistry() *Registry                    { return generate.NewRegistry() }
 
 func NewCostTracker() *CostTracker { return generate.NewCostTracker() }
 func CalculateCost(model string, usage Usage, price ModelPrice) StepCost {
@@ -215,40 +212,3 @@ func WithDefaultModel(model LanguageModel) RuntimeOption { return generate.WithD
 func WithModelResolver(fn func(string) LanguageModel) RuntimeOption {
 	return generate.WithModelResolver(fn)
 }
-
-func WithAgentID(value string) AgentOption              { return generate.WithAgentID(value) }
-func WithAgentTools(value *ToolSet) AgentOption         { return generate.WithAgentTools(value) }
-func WithAgentInstructions(value string) AgentOption    { return generate.WithAgentInstructions(value) }
-func WithAgentToolChoice(value ToolChoice) AgentOption  { return generate.WithAgentToolChoice(value) }
-func WithAgentStopWhen(value StopCondition) AgentOption { return generate.WithAgentStopWhen(value) }
-func WithAgentPrepareStep(value PrepareStepFunc) AgentOption {
-	return generate.WithAgentPrepareStep(value)
-}
-func WithAgentOutput(value *OutputSchema) AgentOption { return generate.WithAgentOutput(value) }
-func WithAgentProviderOptions(value map[string]any) AgentOption {
-	return generate.WithAgentProviderOptions(value)
-}
-
-func WithAgentRepairToolCall(value RepairToolCallFunc) AgentOption {
-	return generate.WithAgentRepairToolCall(value)
-}
-
-func WithAgentToolApproval(value map[string]ToolApprovalFunc) AgentOption {
-	return generate.WithAgentToolApproval(value)
-}
-func WithAgentToolApprovalKey(key []byte) AgentOption { return generate.WithAgentToolApprovalKey(key) }
-func WithAgentToolApprovalReplayGuard(guard ToolApprovalReplayGuard) AgentOption {
-	return generate.WithAgentToolApprovalReplayGuard(guard)
-}
-
-func WithAgentToolApprovalResponder(value ToolApprovalResponder) AgentOption {
-	return generate.WithAgentToolApprovalResponder(value)
-}
-
-func WithAgentParallelToolExecution(enabled bool) AgentOption {
-	return generate.WithAgentParallelToolExecution(enabled)
-}
-func WithAgentOnStepEnd(fn func(StepEndEvent)) AgentOption { return generate.WithAgentOnStepEnd(fn) }
-func WithAgentOnEnd(fn func(EndEvent)) AgentOption         { return generate.WithAgentOnEnd(fn) }
-func WithAgentOnChunk(fn func(ChunkEvent)) AgentOption     { return generate.WithAgentOnChunk(fn) }
-func WithAgentOnError(fn func(error)) AgentOption          { return generate.WithAgentOnError(fn) }

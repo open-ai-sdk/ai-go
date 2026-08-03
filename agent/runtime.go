@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
@@ -34,6 +35,21 @@ type run struct {
 	// traceContent mirrors RunParams.TraceContent — whether spans may carry
 	// prompt/completion/tool-argument content.
 	traceContent bool
+	maxTurns     int
+	modelCalls   int
+	enforceTurns bool
+	hooks        []Hook
+	hookContext  HookContext
+	hookMu       sync.Mutex
+	hookErr      error
+}
+
+func (r *run) reserveModelCall() error {
+	if r.enforceTurns && r.modelCalls >= r.maxTurns {
+		return &MaxTurnsError{MaxTurns: r.maxTurns}
+	}
+	r.modelCalls++
+	return nil
 }
 
 // safeObserver invokes an observer callback (one whose return value does not
@@ -66,6 +82,50 @@ func (r *run) emitError(err error) bool {
 	return true
 }
 
+func (r *run) stopError() error {
+	r.hookMu.Lock()
+	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return r.hookErr
+	}
+	return r.ctx.Err()
+}
+
+func (r *run) setHookError(err error) {
+	if err != nil && r.hookErr == nil {
+		r.hookErr = err
+	}
+}
+
+// observeEvent invokes event hooks in registration order. The stack is
+// serialized so parallel tool paths cannot interleave two event callbacks.
+func (r *run) observeEvent(ev StepEvent) bool {
+	r.hookMu.Lock()
+	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return false
+	}
+	for _, hook := range r.hooks {
+		capability, ok := hook.(StreamEventHook)
+		if !ok {
+			continue
+		}
+		var err error
+		r.safeObserver(func() {
+			err = capability.OnStreamEvent(
+				r.ctx,
+				r.hookContext,
+				snapshotStepEvent(ev),
+			)
+		})
+		if err != nil {
+			r.setHookError(hookFailure(hook, "stream_event", err))
+			return false
+		}
+	}
+	return true
+}
+
 // emit delivers ev to the consumer unless the context is cancelled first. A
 // false return means the consumer is gone (ctx cancelled); the caller must
 // unwind without attempting further sends. Because cancellation means "stop",
@@ -73,6 +133,9 @@ func (r *run) emitError(err error) bool {
 // bug — the consumer asked to stop receiving.
 func (r *run) emit(ev StepEvent) bool {
 	if r.ctx.Err() != nil {
+		return false
+	}
+	if !r.observeEvent(ev) {
 		return false
 	}
 	select {

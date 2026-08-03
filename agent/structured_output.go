@@ -15,6 +15,10 @@ func emitStructuredOutput(r *run, model Model, request Request, history []Messag
 	if request.Output == nil || request.Output.Type == "text" {
 		return true
 	}
+	if err := r.reserveModelCall(); err != nil {
+		r.emitError(err)
+		return false
+	}
 
 	msgs := make([]Message, len(history)+1)
 	copy(msgs, history)

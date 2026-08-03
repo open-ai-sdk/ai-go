@@ -129,7 +129,7 @@ func responseMessageToolOutput(result ToolResult, tools *ToolSet) string {
 	if tools == nil {
 		return result.Output
 	}
-	for _, def := range tools.Definitions {
+	for _, def := range tools.DefinitionsSnapshot() {
 		if def.Name == result.Name {
 			if def.ToModelOutput != nil {
 				return def.ToModelOutput(result.Output)
