@@ -2,6 +2,11 @@ package aikit
 
 import "testing"
 
+type (
+	namedUsageMap   map[string]any
+	namedUsageSlice []any
+)
+
 func TestUsageHasValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -81,5 +86,57 @@ func TestUsageAccumulateMatchesAddAndClonesRaw(t *testing.T) {
 	base.Raw["nested"].(map[string]any)["value"] = "changed"
 	if other.Raw["nested"].(map[string]any)["value"] != "other" {
 		t.Fatal("Accumulate aliased the incoming Raw map")
+	}
+}
+
+func TestUsageAddPreservesRawAliasesWithinClone(t *testing.T) {
+	shared := map[string]any{"value": "original"}
+	bytes := []byte("original")
+	usage := Usage{Raw: map[string]any{
+		"null":         nil,
+		"first":        shared,
+		"second":       shared,
+		"bytes-first":  bytes,
+		"bytes-second": bytes,
+	}}
+
+	cloned := (Usage{}).Add(usage).Raw
+	if cloned["null"] != nil {
+		t.Fatalf("null value = %#v, want nil", cloned["null"])
+	}
+	cloned["first"].(map[string]any)["value"] = "changed"
+	cloned["bytes-first"].([]byte)[0] = 'X'
+	if got := cloned["second"].(map[string]any)["value"]; got != "changed" {
+		t.Fatalf("map alias value = %q, want changed", got)
+	}
+	if got := cloned["bytes-second"].([]byte)[0]; got != 'X' {
+		t.Fatalf("byte alias value = %q, want X", got)
+	}
+	if shared["value"] != "original" || bytes[0] != 'o' {
+		t.Fatal("clone mutation leaked to raw usage source")
+	}
+}
+
+func TestUsageAddClonesNamedFallbackContainersAndCycles(t *testing.T) {
+	named := namedUsageMap{"value": "original"}
+	named["self"] = named
+	var nilSlice namedUsageSlice
+	usage := Usage{Raw: map[string]any{
+		"named":     named,
+		"nil-slice": nilSlice,
+	}}
+
+	cloned := (Usage{}).Add(usage).Raw
+	clonedNamed := cloned["named"].(namedUsageMap)
+	clonedNamed["value"] = "changed"
+	self := clonedNamed["self"].(namedUsageMap)
+	if self["value"] != "changed" {
+		t.Fatalf("named cycle value = %q, want changed", self["value"])
+	}
+	if named["value"] != "original" {
+		t.Fatal("named fallback clone mutation leaked to source")
+	}
+	if cloned["nil-slice"].(namedUsageSlice) != nil {
+		t.Fatal("named typed nil slice became non-nil")
 	}
 }

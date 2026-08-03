@@ -297,6 +297,14 @@ Usage fields are zero when a provider does not report them. `RawFinishReason`,
 raw usage, and provider metadata are useful for diagnostics, but application
 control flow should prefer normalized fields when possible.
 
+When usage values are accumulated, the selected `Usage.Raw` snapshot is
+defensively cloned. Common JSON-like maps, slices, byte data, raw JSON, and
+string collections are independently owned; named container types, aliases,
+and cycles are preserved through the generic fallback. Scalar values and
+pointers that are not JSON containers retain normal Go copy semantics. The SDK
+does not clone metadata through a JSON encode/decode round trip because that
+would reject cycles and erase concrete Go types.
+
 Use `ai.RawResponseAs[T](response)` to access a provider's native success DTO
 without an unchecked type assertion. Raw responses may include sensitive or
 provider-specific fields; ai-go never logs them automatically. The normalized

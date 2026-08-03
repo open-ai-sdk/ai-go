@@ -2,7 +2,10 @@
 // container types. It supports typed and named maps, slices, arrays, and cycles.
 package jsonclone
 
-import "reflect"
+import (
+	"encoding/json"
+	"reflect"
+)
 
 type visit struct {
 	kind     reflect.Kind
@@ -18,12 +21,7 @@ func Map(values map[string]any) map[string]any {
 	if values == nil {
 		return nil
 	}
-	cloned, ok := cloneValue(reflect.ValueOf(values), make(map[visit]reflect.Value)).
-		Interface().(map[string]any)
-	if !ok {
-		panic("jsonclone: cloned map changed type")
-	}
-	return cloned
+	return cloneStringAnyMap(values, make(map[visit]reflect.Value))
 }
 
 // Value clones JSON-like map, slice, array, and interface containers while
@@ -32,7 +30,146 @@ func Value(value any) any {
 	if value == nil {
 		return nil
 	}
-	return cloneValue(reflect.ValueOf(value), make(map[visit]reflect.Value)).Interface()
+	return cloneAny(value, make(map[visit]reflect.Value))
+}
+
+func cloneAny(value any, seen map[visit]reflect.Value) any {
+	if value == nil {
+		return nil
+	}
+	switch input := value.(type) {
+	case map[string]any:
+		return cloneStringAnyMap(input, seen)
+	case []any:
+		return cloneAnySlice(input, seen)
+	case json.RawMessage:
+		return cloneRawMessage(input, seen)
+	case []byte:
+		return cloneBytes(input, seen)
+	case []string:
+		return cloneStrings(input, seen)
+	case map[string]string:
+		return cloneStringMap(input, seen)
+	default:
+		return cloneValue(reflect.ValueOf(value), seen).Interface()
+	}
+}
+
+func cloneStringAnyMap(
+	input map[string]any,
+	seen map[visit]reflect.Value,
+) map[string]any {
+	if input == nil {
+		return nil
+	}
+	key := identity(reflect.ValueOf(input))
+	if cloned, ok := seen[key]; ok {
+		result, valid := cloned.Interface().(map[string]any)
+		if !valid {
+			panic("jsonclone: cached map changed type")
+		}
+		return result
+	}
+	result := make(map[string]any, len(input))
+	seen[key] = reflect.ValueOf(result)
+	for name, value := range input {
+		result[name] = cloneAny(value, seen)
+	}
+	return result
+}
+
+func cloneAnySlice(input []any, seen map[visit]reflect.Value) []any {
+	if input == nil {
+		return nil
+	}
+	key := identity(reflect.ValueOf(input))
+	if cloned, ok := seen[key]; ok {
+		result, valid := cloned.Interface().([]any)
+		if !valid {
+			panic("jsonclone: cached slice changed type")
+		}
+		return result
+	}
+	result := make([]any, len(input))
+	seen[key] = reflect.ValueOf(result)
+	for index, value := range input {
+		result[index] = cloneAny(value, seen)
+	}
+	return result
+}
+
+func cloneRawMessage(input json.RawMessage, seen map[visit]reflect.Value) json.RawMessage {
+	if input == nil {
+		return nil
+	}
+	key := identity(reflect.ValueOf(input))
+	if cloned, ok := seen[key]; ok {
+		result, valid := cloned.Interface().(json.RawMessage)
+		if !valid {
+			panic("jsonclone: cached raw message changed type")
+		}
+		return result
+	}
+	result := make(json.RawMessage, len(input))
+	seen[key] = reflect.ValueOf(result)
+	copy(result, input)
+	return result
+}
+
+func cloneBytes(input []byte, seen map[visit]reflect.Value) []byte {
+	if input == nil {
+		return nil
+	}
+	key := identity(reflect.ValueOf(input))
+	if cloned, ok := seen[key]; ok {
+		result, valid := cloned.Interface().([]byte)
+		if !valid {
+			panic("jsonclone: cached bytes changed type")
+		}
+		return result
+	}
+	result := make([]byte, len(input))
+	seen[key] = reflect.ValueOf(result)
+	copy(result, input)
+	return result
+}
+
+func cloneStrings(input []string, seen map[visit]reflect.Value) []string {
+	if input == nil {
+		return nil
+	}
+	key := identity(reflect.ValueOf(input))
+	if cloned, ok := seen[key]; ok {
+		result, valid := cloned.Interface().([]string)
+		if !valid {
+			panic("jsonclone: cached strings changed type")
+		}
+		return result
+	}
+	result := make([]string, len(input))
+	seen[key] = reflect.ValueOf(result)
+	copy(result, input)
+	return result
+}
+
+func cloneStringMap(input map[string]string, seen map[visit]reflect.Value) map[string]string {
+	if input == nil {
+		return nil
+	}
+	key := identity(reflect.ValueOf(input))
+	if cloned, ok := seen[key]; ok {
+		result, valid := cloned.Interface().(map[string]string)
+		if !valid {
+			panic("jsonclone: cached string map changed type")
+		}
+		return result
+	}
+	result := make(map[string]string, len(input))
+	seen[key] = reflect.ValueOf(result)
+	for name, value := range input {
+		result[name] = value
+	}
+	return result
 }
 
 func cloneValue(value reflect.Value, seen map[visit]reflect.Value) reflect.Value {
@@ -45,7 +182,7 @@ func cloneValue(value reflect.Value, seen map[visit]reflect.Value) reflect.Value
 		if value.IsNil() {
 			return reflect.Zero(value.Type())
 		}
-		cloned := cloneValue(value.Elem(), seen)
+		cloned := reflect.ValueOf(cloneAny(value.Interface(), seen))
 		result := reflect.New(value.Type()).Elem()
 		result.Set(cloned)
 		return result
