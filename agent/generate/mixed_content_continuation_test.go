@@ -98,7 +98,8 @@ func TestLifecycleCallbacksPreserveSources(t *testing.T) {
 	if len(stepEvent.Sources) != 1 || stepEvent.Sources[0].ID != "source-1" {
 		t.Fatalf("step sources = %#v", stepEvent.Sources)
 	}
-	if len(endEvent.Steps) != 1 || len(endEvent.Steps[0].Sources) != 1 || endEvent.Steps[0].Sources[0].ID != "source-1" {
+	if len(endEvent.Steps) != 1 || len(endEvent.Steps[0].Sources) != 1 ||
+		endEvent.Steps[0].Sources[0].ID != "source-1" {
 		t.Fatalf("end steps = %#v", endEvent.Steps)
 	}
 }

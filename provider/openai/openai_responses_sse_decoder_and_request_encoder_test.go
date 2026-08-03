@@ -254,7 +254,8 @@ func TestEncodeRequest_SystemMessageInHistory(t *testing.T) {
 	if len(r.Input) != 2 {
 		t.Fatalf("expected 2 input items (system + user), got %d", len(r.Input))
 	}
-	if r.Input[0].Role != "system" || len(r.Input[0].Content) != 1 || r.Input[0].Content[0].Type != "input_text" || r.Input[0].Content[0].Text != "You are helpful" {
+	if r.Input[0].Role != "system" || len(r.Input[0].Content) != 1 ||
+		r.Input[0].Content[0].Type != "input_text" || r.Input[0].Content[0].Text != "You are helpful" {
 		t.Errorf("unexpected system input: %#v", r.Input[0])
 	}
 	if r.Input[1].Role != "user" {
@@ -274,10 +275,12 @@ func TestEncodeRequest_SystemMessageSkipsUnsupportedContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(r.Input) != 2 || len(r.Input[0].Content) != 1 || r.Input[0].Content[0].Text != "You are helpful" || r.Input[1].Role != "user" {
+	if len(r.Input) != 2 || len(r.Input[0].Content) != 1 ||
+		r.Input[0].Content[0].Text != "You are helpful" || r.Input[1].Role != "user" {
 		t.Fatalf("input = %#v", r.Input)
 	}
-	if len(warnings) != 1 || warnings[0].Setting != string(ai.ContentPartTypeFile) || !strings.Contains(warnings[0].Message, "unsupported system content") {
+	if len(warnings) != 1 || warnings[0].Setting != string(ai.ContentPartTypeFile) ||
+		!strings.Contains(warnings[0].Message, "unsupported system content") {
 		t.Fatalf("warnings = %#v", warnings)
 	}
 }

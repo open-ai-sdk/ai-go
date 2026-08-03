@@ -67,7 +67,10 @@ func TestClientRejectsInvalidEndpoint(t *testing.T) {
 }
 
 func TestClientPreservesConfiguredProviderName(t *testing.T) {
-	client, err := provider.NewClient(testPolicy{baseURL: "https://example.com/v1"}, provider.ClientConfig{ProviderName: "openai-file-upload"})
+	client, err := provider.NewClient(
+		testPolicy{baseURL: "https://example.com/v1"},
+		provider.ClientConfig{ProviderName: "openai-file-upload"},
+	)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -75,7 +78,10 @@ func TestClientPreservesConfiguredProviderName(t *testing.T) {
 		t.Fatalf("ProviderName() = %q", got)
 	}
 
-	_, err = provider.NewClient(testPolicy{baseURL: "://bad"}, provider.ClientConfig{ProviderName: "openai-file-upload"})
+	_, err = provider.NewClient(
+		testPolicy{baseURL: "://bad"},
+		provider.ClientConfig{ProviderName: "openai-file-upload"},
+	)
 	if err == nil || !strings.Contains(err.Error(), "provider openai-file-upload") {
 		t.Fatalf("configured provider error = %v", err)
 	}
