@@ -41,6 +41,34 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
 Keep provider configuration at client creation and request-specific options on
 the request.
 
+## Responses payload
+
+`client.CompletionModel` implements the optional native completion capability.
+A direct `Send` therefore returns normalized assistant content and retains the
+successful OpenAI Responses payload for provider-specific diagnostics:
+
+```go
+response, err := ai.NewCompletion(model, "Explain Go interfaces").Send(ctx)
+if err != nil {
+  return err
+}
+
+native, ok := ai.RawResponseAs[*openai.ResponsesResponse](response)
+if ok {
+  fmt.Println(native.ID, native.Status)
+}
+```
+
+`ResponsesResponse.Raw` contains the exact response JSON, including fields the
+typed DTO does not yet represent. It can contain sensitive data; ai-go never
+logs it automatically, so redact it before application logging.
+
+Reasoning tokens count toward OpenAI's output-token budget. A response can
+therefore be successful but `incomplete`, with no visible text or assistant
+content, when `max_output_tokens` is exhausted during reasoning. In that case
+inspect `response.FinishReason`, usage, and `native.IncompleteDetails`; increase
+the output budget or reduce reasoning effort when visible output is required.
+
 ## Files and mixed output
 
 Upload files through the client because uploading is a provider operation, not

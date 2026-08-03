@@ -1,8 +1,8 @@
 # Completions
 
 Completion is ai-go's provider-neutral layer for asking a language model to
-produce an assistant message. It exposes four API levels: convenient one-shot
-text APIs, a direct response builder, and typed direct completion, using
+produce an assistant message. It exposes three API levels: convenient one-shot
+text helpers, a direct response builder, and typed direct completion, using
 ordinary interfaces, functions, value builders, and channels.
 
 The completion APIs cover one provider model call:
@@ -26,9 +26,12 @@ flowchart TD
     Convenience --> OneCall[One llm.Model call]
     Direct --> OneCall
 
-    OneCall --> Events[Normalized StreamEvent channel]
-    Events --> Text[Text result]
+    OneCall --> Capability{Native CompletionModel?}
+    Capability -->|Yes| Native[Native provider response]
+    Capability -->|No| Events[Normalized StreamEvent channel]
+    Native --> Response[CompletionResponse]
     Events --> Response[CompletionResponse]
+    Response --> Text[Text helper result]
 ```
 
 ## Core contracts
@@ -44,8 +47,8 @@ type Model interface {
 
 This interface lives in `llm` and is re-exported by the `ai` facade as
 `ai.LanguageModel`. A provider translates `llm.Request` into its native API and
-normalizes the response into stream events. Aggregation and agent behavior stay
-outside the provider.
+normalizes streaming output into events. Response aggregation and agent
+behavior stay outside the provider.
 
 Providers may additionally implement `llm.CompletionModel`, whose `Complete`
 method returns a native non-streaming response. `Send` detects this optional
@@ -55,6 +58,17 @@ interface therefore has two useful consequences:
 - A provider only needs to implement one stream-first operation.
 - Direct completion, text generation, middleware, fallback models, and agents
   can all consume the same model value.
+
+```go
+type CompletionModel interface {
+  Model
+  Complete(context.Context, llm.Request) (*llm.CompletionResponse, error)
+}
+```
+
+Native completion implementations retain the untranslated successful payload
+in `CompletionResponse.RawResponse`. Stream-only models remain fully supported,
+but their aggregated response normally has no raw provider payload.
 
 Most applications should import `github.com/open-ai-sdk/ai-go/ai`. Import
 `llm` and `aikit` directly when implementing a provider or building lower-level
@@ -98,7 +112,7 @@ and continuation. Use a direct completion for those cases.
 
 `ai.NewCompletion` binds a prompt to a model and returns a
 `CompletionRequestBuilder`. Calling `Send` performs exactly one provider call
-and aggregates all normalized events:
+and returns one normalized response:
 
 ```go
 response, err := ai.NewCompletion(model, "Explain Go interfaces").
@@ -124,12 +138,15 @@ A direct completion follows a predictable path:
 
 1. The builder creates a normalized `ai.CompletionRequest`.
 2. The model translates that request into its provider-specific wire format.
-3. The provider emits normalized `ai.StreamEvent` values.
-4. `Send` folds the events into `ai.CompletionResponse`.
+3. `Send` uses native `Complete` when the model implements
+   `llm.CompletionModel`; otherwise it calls `Stream`.
+4. The native path returns a normalized response plus its raw payload. The
+   fallback path folds normalized `ai.StreamEvent` values into the response.
 5. Tool calls are returned to the caller and are never executed automatically.
 
-`Build` stops after step 1. `Stream` exposes step 3. `Send` performs steps 1–4
-and returns any tool calls described in step 5 to the application.
+`Build` stops after step 1. Calling `Stream` explicitly always exposes the
+normalized event channel. `Send` performs the native-or-stream selection and
+returns any tool calls described in step 5 to the application.
 
 ### Request builder
 
@@ -293,9 +310,66 @@ the ordering or individual part metadata matters. In particular, preserve tool
 call IDs, JSON arguments, and thought signatures when continuing a
 conversation.
 
-Usage fields are zero when a provider does not report them. `RawFinishReason`,
-raw usage, and provider metadata are useful for diagnostics, but application
-control flow should prefer normalized fields when possible.
+### Assistant content
+
+`CompletionResponse.Message.Content` is an ordered `[]ContentPart`. Each part's
+`Type` identifies how to read it:
+
+| Content type | Meaning |
+| --- | --- |
+| `ContentPartTypeText` | Visible assistant text, also aggregated into `response.Text` |
+| `ContentPartTypeToolCall` | Tool call ID, function name, and JSON arguments |
+| `ContentPartTypeReasoning` | Reasoning content, also aggregated into `response.Reasoning` |
+| `ContentPartTypeImage` | Generated image data or provider reference |
+| `ContentPartTypeFile` | Generated file data or provider reference |
+
+Assistant responses can additionally contain normalized image and file parts.
+The same `Message` and `ContentPart` types represent conversation input and
+output, so a returned assistant message can be appended to later history
+without translating it into another content enum.
+
+Inspect ordered response content when a result may contain more than text:
+
+```go
+for _, part := range response.Message.Content {
+  switch part.Type {
+  case ai.ContentPartTypeText:
+    fmt.Print(part.Text)
+  case ai.ContentPartTypeReasoning:
+    fmt.Printf("reasoning: %s\n", part.ReasoningText)
+  case ai.ContentPartTypeToolCall:
+    fmt.Printf("call %s: %s(%s)\n",
+      part.ToolCallID, part.ToolCallName, part.ToolCallArgs)
+  case ai.ContentPartTypeImage, ai.ContentPartTypeFile:
+    fmt.Printf("generated %s (%s)\n", part.Type, part.MediaType)
+  }
+}
+```
+
+### Token usage
+
+`response.Usage` normalizes the counters providers commonly expose:
+
+| Field | Meaning |
+| --- | --- |
+| `InputTokens` | Total request/input tokens |
+| `InputTokenDetails.NoCacheTokens` | Input tokens not served from cache |
+| `InputTokenDetails.CacheReadTokens` | Tokens read from a provider-managed cache |
+| `InputTokenDetails.CacheWriteTokens` | Tokens written to a provider-managed cache |
+| `OutputTokens` | Total generated/output tokens |
+| `OutputTokenDetails.TextTokens` | Output tokens attributed to visible text |
+| `OutputTokenDetails.ReasoningTokens` | Output tokens attributed to internal reasoning |
+| `TotalTokens` | Provider-reported total; ai-go does not infer it |
+| `ToolUsePromptTokens` | Tokens attributed to tool-use prompting |
+| `Raw` | Provider-native usage metadata |
+
+Providers do not always report every counter, so absent values remain zero.
+One direct completion reports one model call's usage. Agent runs aggregate usage
+across turns; lower-level orchestration can use `Usage.Add` or
+`Usage.Accumulate` to do the same.
+
+`RawFinishReason`, raw usage, and provider metadata are useful for diagnostics,
+but application control flow should prefer normalized fields when possible.
 
 A reasoning model can exhaust its output-token budget before producing visible
 text. In that case a successful provider response may have empty `Text` and an
@@ -315,6 +389,16 @@ Use `ai.RawResponseAs[T](response)` to access a provider's native success DTO
 without an unchecked type assertion. Raw responses may include sensitive or
 provider-specific fields; ai-go never logs them automatically. The normalized
 fields remain the stable application contract.
+
+For example, an OpenAI Responses model exposes its native DTO and exact JSON:
+
+```go
+native, ok := ai.RawResponseAs[*openai.ResponsesResponse](response)
+if ok {
+  fmt.Println(native.ID, native.Status)
+  debugLog(native.Raw) // Apply your application's redaction policy first.
+}
+```
 
 ## Tool calls and manual continuation
 
