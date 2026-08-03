@@ -241,7 +241,7 @@ v7 chunk types, fields, finish-reason spellings, and `data: [DONE]` framing are 
 | `ai` | Thin facade: `GenerateText`, `StreamText`, `GenerateObject`, `Embed`, and aliases |
 | `agent/generate` | High-level generation, aggregation, request options, and stream results behind the facade |
 | `agent` | Low-level multi-step loop, approval, stop conditions, callbacks, and `aikit.StepEvent` production |
-| `aikit` | Dependency-free messages, events, usage, finish reasons, warnings, and error vocabulary |
+| `aikit` | Messages, events, usage, finish reasons, warnings, and error vocabulary; standard library plus approved internal JSON cloning |
 | `llm` | Model contracts, request builder, typed provider options, embeddings, and images |
 | `tool` | Typed/dynamic tools, schema derivation, registry, typed errors, and tool context |
 | `transport` | Provider HTTP policy, retry, SSE reading, cancellation, and API error mapping |
@@ -250,8 +250,9 @@ v7 chunk types, fields, finish-reason spellings, and `data: [DONE]` framing are 
 | `aisdkhttp` | AI SDK v7 `net/http` request/SSE boundary |
 | `mcp` | MCP clients and dynamic tool integration |
 
-The dependency graph points downward: `aikit` is the leaf, no package imports `ai`, providers do not
-import the UI protocol, and `aisdk` does not import agents or providers.
+The dependency graph points downward: `aikit` remains the foundation package and may use only the
+standard library plus its approved internal JSON-cloning utility; no package imports `ai`, providers
+do not import the UI protocol, and `aisdk` does not import agents or providers.
 
 ## Observability
 
