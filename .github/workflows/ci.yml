@@ -218,8 +218,8 @@ jobs:
             -path './conformance/node_modules' -prune -o \
             -type f -name '*.go' -exec grep -h '^func Benchmark' '{}' + \
             | wc -l | tr -d ' ')"
-          test "$count" -eq 3 || {
-            echo "expected 3 benchmark functions, found $count"
+          test "$count" -eq 5 || {
+            echo "expected 5 benchmark functions, found $count"
             exit 1
           }
 
