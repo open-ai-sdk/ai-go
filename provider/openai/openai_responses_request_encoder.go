@@ -64,17 +64,58 @@ type inputItem struct {
 	Output any `json:"output,omitempty"`
 }
 
-// inputPart is a single part inside a user or assistant message.
-type inputPart struct {
+// inputPart is implemented by the valid Responses API content-part shapes.
+// Keeping each wire variant separate prevents unrelated or mutually exclusive
+// fields from being serialized together.
+type inputPart interface{ isInputPart() }
+
+type inputTextPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func (inputTextPart) isInputPart() {}
+
+type inputImageURLPart struct {
 	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
-	FileID   string `json:"file_id,omitempty"`
-	FileData string `json:"file_data,omitempty"`
-	FileURL  string `json:"file_url,omitempty"`
-	Filename string `json:"filename,omitempty"`
+	ImageURL string `json:"image_url"`
 	Detail   string `json:"detail,omitempty"`
 }
+
+func (inputImageURLPart) isInputPart() {}
+
+type inputImageFileIDPart struct {
+	Type   string `json:"type"`
+	FileID string `json:"file_id"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func (inputImageFileIDPart) isInputPart() {}
+
+type inputFileIDPart struct {
+	Type   string    `json:"type"`
+	FileID string    `json:"file_id"`
+	Detail PDFDetail `json:"detail,omitempty"`
+}
+
+func (inputFileIDPart) isInputPart() {}
+
+type inputFileURLPart struct {
+	Type    string    `json:"type"`
+	FileURL string    `json:"file_url"`
+	Detail  PDFDetail `json:"detail,omitempty"`
+}
+
+func (inputFileURLPart) isInputPart() {}
+
+type inputFileDataPart struct {
+	Type     string    `json:"type"`
+	FileData string    `json:"file_data"`
+	Filename string    `json:"filename,omitempty"`
+	Detail   PDFDetail `json:"detail,omitempty"`
+}
+
+func (inputFileDataPart) isInputPart() {}
 
 // responsesTool describes a tool available to the model.
 type responsesTool struct {
@@ -177,7 +218,7 @@ func encodeInput(req llm.Request, pdfDetail string) ([]inputItem, []aikit.Warnin
 	if req.Instructions != "" {
 		items = append(items, inputItem{
 			Role:    "system",
-			Content: []inputPart{{Type: "input_text", Text: req.Instructions}},
+			Content: []inputPart{inputTextPart{Type: "input_text", Text: req.Instructions}},
 		})
 	}
 
@@ -216,7 +257,7 @@ func encodeSystemMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) 
 
 	for _, p := range m.Content {
 		if p.Type == aikit.ContentPartTypeText {
-			parts = append(parts, inputPart{Type: "input_text", Text: p.Text})
+			parts = append(parts, inputTextPart{Type: "input_text", Text: p.Text})
 			continue
 		}
 		warnings = append(warnings, aikit.Warning{
@@ -239,36 +280,46 @@ func encodeUserMessage(m aikit.Message, pdfDetail string) ([]inputItem, []aikit.
 	for _, p := range m.Content {
 		switch p.Type {
 		case aikit.ContentPartTypeText:
-			parts = append(parts, inputPart{Type: "input_text", Text: p.Text})
+			parts = append(parts, inputTextPart{Type: "input_text", Text: p.Text})
 
 		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
-			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
-				switch {
-				case p.FileID != "":
-					parts = append(parts, inputPart{Type: "input_image", FileID: p.FileID})
-				case len(p.Data) > 0:
+			if p.Type == aikit.ContentPartTypeImage ||
+				strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
+				source, err := resolveMediaSource(p)
+				if err != nil {
+					return nil, warnings, err
+				}
+				switch source.kind {
+				case mediaSourceFileID:
+					parts = append(parts, inputImageFileIDPart{Type: "input_image", FileID: source.value})
+				case mediaSourceData:
 					mediaType := p.MediaType
 					if mediaType == "" {
 						mediaType = "image/png"
 					}
 					parts = append(
 						parts,
-						inputPart{
+						inputImageURLPart{
 							Type:     "input_image",
-							ImageURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data),
+							ImageURL: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(source.data),
 						},
 					)
-				default:
-					parts = append(parts, inputPart{Type: "input_image", ImageURL: p.FileURL})
+				case mediaSourceURL:
+					parts = append(parts, inputImageURLPart{Type: "input_image", ImageURL: source.value})
 				}
 			} else {
-				parts = append(parts, encodeInputFilePart(p, pdfDetail))
+				part, err := encodeInputFilePart(p, pdfDetail)
+				if err != nil {
+					return nil, warnings, err
+				}
+				parts = append(parts, part)
 			}
 		case aikit.ContentPartTypeDocument:
-			if p.FileID == "" && p.FileURL == "" && len(p.Data) == 0 {
-				return nil, warnings, fmt.Errorf("openai: document part has no source")
+			part, err := encodeInputFilePart(p, pdfDetail)
+			if err != nil {
+				return nil, warnings, err
 			}
-			parts = append(parts, encodeInputFilePart(p, pdfDetail))
+			parts = append(parts, part)
 		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeVideo:
 			return nil, warnings, fmt.Errorf("openai: Responses API does not support %s input", p.Type)
 
@@ -287,28 +338,75 @@ func encodeUserMessage(m aikit.Message, pdfDetail string) ([]inputItem, []aikit.
 	return []inputItem{{Role: "user", Content: parts}}, warnings, nil
 }
 
-func encodeInputFilePart(p aikit.ContentPart, pdfDetail string) inputPart {
-	part := inputPart{
-		Type: "input_file", Filename: p.Filename,
-		Detail: pdfDetailForPart(p, pdfDetail),
+type mediaSourceKind uint8
+
+const (
+	mediaSourceFileID mediaSourceKind = iota + 1
+	mediaSourceData
+	mediaSourceURL
+)
+
+type mediaSource struct {
+	kind  mediaSourceKind
+	value string
+	data  []byte
+}
+
+func resolveMediaSource(p aikit.ContentPart) (mediaSource, error) {
+	sources := 0
+	if p.FileID != "" {
+		sources++
 	}
-	switch {
-	case p.FileID != "":
-		part.FileID = p.FileID
-	case len(p.Data) > 0:
+	if len(p.Data) > 0 {
+		sources++
+	}
+	if p.FileURL != "" {
+		sources++
+	}
+	if sources != 1 {
+		return mediaSource{}, fmt.Errorf(
+			"openai: %s content part must have exactly one source (file ID, data, or URL); got %d",
+			p.Type,
+			sources,
+		)
+	}
+	if p.FileID != "" {
+		return mediaSource{kind: mediaSourceFileID, value: p.FileID}, nil
+	}
+	if len(p.Data) > 0 {
+		return mediaSource{kind: mediaSourceData, data: p.Data}, nil
+	}
+	return mediaSource{kind: mediaSourceURL, value: p.FileURL}, nil
+}
+
+func encodeInputFilePart(p aikit.ContentPart, pdfDetail PDFDetail) (inputPart, error) {
+	source, err := resolveMediaSource(p)
+	if err != nil {
+		return nil, err
+	}
+	detail := pdfDetailForPart(p, pdfDetail)
+	switch source.kind {
+	case mediaSourceFileID:
+		return inputFileIDPart{Type: "input_file", FileID: source.value, Detail: detail}, nil
+	case mediaSourceData:
 		mediaType := p.MediaType
 		if mediaType == "" {
 			mediaType = "application/octet-stream"
 		}
-		part.FileData = "data:" + mediaType + ";base64," +
-			base64.StdEncoding.EncodeToString(p.Data)
+		return inputFileDataPart{
+			Type:     "input_file",
+			FileData: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(source.data),
+			Filename: p.Filename,
+			Detail:   detail,
+		}, nil
+	case mediaSourceURL:
+		return inputFileURLPart{Type: "input_file", FileURL: source.value, Detail: detail}, nil
 	default:
-		part.FileURL = p.FileURL
+		return nil, fmt.Errorf("openai: unsupported media source")
 	}
-	return part
 }
 
-func pdfDetailForPart(p aikit.ContentPart, detail string) string {
+func pdfDetailForPart(p aikit.ContentPart, detail PDFDetail) PDFDetail {
 	mediaType, _, _ := strings.Cut(p.MediaType, ";")
 	if strings.EqualFold(strings.TrimSpace(mediaType), "application/pdf") {
 		return detail
@@ -316,7 +414,7 @@ func pdfDetailForPart(p aikit.ContentPart, detail string) string {
 	return ""
 }
 
-func validatePDFDetail(detail string) error {
+func validatePDFDetail(detail PDFDetail) error {
 	switch detail {
 	case "", "auto", "low", "high":
 		return nil
@@ -335,7 +433,7 @@ func encodeAssistantMessage(m aikit.Message) ([]inputItem, []aikit.Warning, erro
 	for _, p := range m.Content {
 		switch p.Type {
 		case aikit.ContentPartTypeText:
-			textParts = append(textParts, inputPart{Type: "output_text", Text: p.Text})
+			textParts = append(textParts, inputTextPart{Type: "output_text", Text: p.Text})
 		case aikit.ContentPartTypeToolCall:
 			// Flush any accumulated text first.
 			if len(textParts) > 0 {
@@ -386,12 +484,12 @@ func encodeResponsesToolResultOutput(part aikit.ContentPart) (any, error) {
 	for _, content := range part.ToolResultContent {
 		switch content.Type {
 		case aikit.ToolResultContentTypeText:
-			output = append(output, inputPart{Type: "input_text", Text: content.Text})
+			output = append(output, inputTextPart{Type: "input_text", Text: content.Text})
 		case aikit.ToolResultContentTypeJSON:
 			if !json.Valid(content.JSON) {
 				return nil, fmt.Errorf("openai: tool result contains invalid JSON")
 			}
-			output = append(output, inputPart{Type: "input_text", Text: string(content.JSON)})
+			output = append(output, inputTextPart{Type: "input_text", Text: string(content.JSON)})
 		case aikit.ToolResultContentTypeImage:
 			if len(content.Data) == 0 {
 				return nil, fmt.Errorf("openai: image tool result has no data")
@@ -400,7 +498,7 @@ func encodeResponsesToolResultOutput(part aikit.ContentPart) (any, error) {
 			if mediaType == "" {
 				mediaType = "image/png"
 			}
-			output = append(output, inputPart{Type: "input_image", ImageURL: "data:" + mediaType +
+			output = append(output, inputImageURLPart{Type: "input_image", ImageURL: "data:" + mediaType +
 				";base64," + base64.StdEncoding.EncodeToString(content.Data)})
 		default:
 			return nil, fmt.Errorf("openai: unsupported tool result content type %q", content.Type)

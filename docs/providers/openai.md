@@ -114,18 +114,24 @@ message := ai.Message{
 
 response, err := ai.NewCompletion(model, "").
   Messages(message).
-  With(openai.ProviderOptions{PDFDetail: "high"}).
+  With(openai.ProviderOptions{PDFDetail: openai.PDFDetailHigh}).
   Send(ctx)
 ```
 
 `PDFDetail` accepts `auto`, `low`, or `high` and applies to PDF page-image
 processing. Leave it empty to use the API default. Extracted PDF text is always
 included; higher detail primarily benefits dense charts, diagrams, and small
-print while consuming more input tokens.
+print while consuming more input tokens. Prefer `openai.PDFDetailAuto`,
+`openai.PDFDetailLow`, or `openai.PDFDetailHigh` over string literals.
 
 For files reused across requests, upload once with `Client.UploadFile` using
 `FilePurposeUserData`, then pass the returned ID with
 `ai.DocumentFileIDPart`. `ai.DocumentURLPart` sends an external URL directly.
+Each file or image content part must have exactly one source: inline data, an
+external URL, or an uploaded file ID. The provider rejects manually constructed
+parts with missing or conflicting sources before sending the request. A
+filename is sent only with inline file data; URL and uploaded-ID inputs use
+their source field without a filename.
 OpenAI currently limits each file and the combined files in one request to 50
 MB; see the [file-input guide](https://developers.openai.com/api/docs/guides/file-inputs)
 for current limits and processing details.

@@ -35,7 +35,7 @@ func TestResponsesProviderOptionsAcceptPDFDetail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encodeRequest() error = %v", err)
 	}
-	if got := request.Input[0].Content[0].Detail; got != "low" {
+	if got := decodeInputPart(t, request.Input[0].Content[0]).Detail; got != "low" {
 		t.Fatalf("Detail = %q, want low", got)
 	}
 }

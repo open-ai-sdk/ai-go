@@ -5,6 +5,17 @@ package openai
 
 import "github.com/open-ai-sdk/ai-go/llm"
 
+// PDFDetail controls how much visual detail is extracted from PDF pages.
+// It is an alias of string to preserve assignment compatibility for existing
+// callers while providing discoverable constants for common values.
+type PDFDetail = string
+
+const (
+	PDFDetailAuto PDFDetail = "auto"
+	PDFDetailLow  PDFDetail = "low"
+	PDFDetailHigh PDFDetail = "high"
+)
+
 // ProviderOptions holds OpenAI-specific options passed via
 // GenerateTextRequest.ProviderOptions["openai"].
 //
@@ -45,7 +56,7 @@ type ProviderOptions struct {
 
 	// PDFDetail controls page-image processing for PDF input files.
 	// Valid values are "auto", "low", and "high". Empty uses the API default.
-	PDFDetail string `json:"pdfDetail"`
+	PDFDetail PDFDetail `json:"pdfDetail"`
 
 	// Store controls whether the response is stored server-side.
 	// Defaults to true (OpenAI default). Set to false to opt out.

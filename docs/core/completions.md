@@ -223,6 +223,11 @@ Helper constructors cover common content:
 - `ai.FilePart`, `ai.FileDataPart`, `ai.FileIDPart`
 - `ai.ReasoningPart`, `ai.ToolCallPart`, `ai.ToolResultPart`
 
+Media constructors create parts backed by one source: URL, inline data, or a
+provider-hosted file ID. When constructing `ai.ContentPart` manually, set
+exactly one of `FileURL`, `Data`, and `FileID`; providers may reject missing or
+ambiguous sources before making a network request.
+
 For example, a multimodal user message can combine instructions and an inline
 image without introducing a provider-specific request type:
 
