@@ -58,9 +58,8 @@ implementations must still be safe for however the application invokes them.
 
 `Build` rejects invalid static configuration before provider I/O, including a
 nil model, duplicate tools, invalid turn or concurrency limits, impossible
-active-tool/tool-choice combinations, invalid structured-output schemas, and
-incomplete approval configuration. `MaxTurns` defaults to `1` and must be
-positive.
+active-tool/tool-choice combinations, and incomplete approval configuration.
+`MaxTurns` defaults to `1` and must be positive.
 
 ## Run with overrides
 
@@ -142,9 +141,12 @@ result, err := assistant.Runner().
 
 var exhausted *agent.MaxTurnsError
 if errors.As(err, &exhausted) {
-	// result and exhausted.Result contain committed steps and the full
-	// transcript. The last step keeps its real finish reason.
-	return savePartial(exhausted.Result)
+	partial := result
+	if exhausted.Result != nil {
+		partial = exhausted.Result
+	}
+	// The last committed step keeps its real finish reason.
+	return savePartial(partial)
 }
 if err != nil {
 	return err

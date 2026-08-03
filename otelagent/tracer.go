@@ -12,7 +12,7 @@ import (
 
 const instrumentationName = "github.com/open-ai-sdk/ai-go"
 
-// New adapts tracer for [agent.RunParams.Tracer].
+// New adapts tracer for [agent.Builder.Tracer] and [agent.Runner.Tracer].
 func New(tracer trace.Tracer) agent.Tracer { return adapter{tracer: tracer} }
 
 // Global adapts the process-global OpenTelemetry provider.

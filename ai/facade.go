@@ -1,214 +1,114 @@
 package ai
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
 
-	"github.com/open-ai-sdk/ai-go/agent"
-	"github.com/open-ai-sdk/ai-go/agent/generate"
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
-func GenerateText(ctx context.Context, req GenerateTextRequest) (*GenerateTextResult, error) {
-	return generate.GenerateText(ctx, req)
-}
-
-func StreamText(ctx context.Context, req GenerateTextRequest) *StreamResult {
-	return generate.StreamText(ctx, req)
-}
-
-func GenerateObject[T any](ctx context.Context, req GenerateObjectRequest) (ObjectResult[T], error) {
-	return generate.GenerateObject[T](ctx, req)
-}
-
-func NewStreamResult(ch <-chan StepEvent) *StreamResult { return generate.NewStreamResult(ch) }
-func NewStreamResultWithTools(ch <-chan StepEvent, tools *ToolSet) *StreamResult {
-	return generate.NewStreamResultWithTools(ch, tools)
-}
-
-func NewRequest(model LanguageModel, prompt string) RequestBuilder {
-	return generate.NewRequest(model, prompt)
-}
-func FromRequest(defaults GenerateTextRequest) RequestBuilder { return generate.FromRequest(defaults) }
-
-func NewRuntime(opts ...RuntimeOption) *Runtime { return generate.NewRuntime(opts...) }
-func NewRegistry() *Registry                    { return generate.NewRegistry() }
-
-func NewCostTracker() *CostTracker { return generate.NewCostTracker() }
-func CalculateCost(model string, usage Usage, price ModelPrice) StepCost {
-	return generate.CalculateCost(model, usage, price)
-}
-func GetModelPrice(modelID string) (ModelPrice, bool) { return generate.GetModelPrice(modelID) }
-func SetModelPrice(modelID string, price ModelPrice)  { generate.SetModelPrice(modelID, price) }
-
-func WithFallback(models ...LanguageModel) LanguageModel { return generate.WithFallback(models...) }
-func WrapLanguageModel(model LanguageModel, middlewares ...LanguageModelMiddleware) LanguageModel {
-	return generate.WrapLanguageModel(model, middlewares...)
-}
-
-func PruneMessages(messages []Message, opts PruneOptions) []Message {
-	return generate.PruneMessages(messages, opts)
-}
-
-func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
-	return generate.ResponseMessagesForStep(step, tools)
-}
-
-func ResponseMessagesForSteps(steps []StepOutput, tools *ToolSet) []Message {
-	return generate.ResponseMessagesForSteps(steps, tools)
-}
-
-func TextPart(text string) ContentPart           { return generate.TextPart(text) }
-func ImageURLPart(url string) ContentPart        { return generate.ImageURLPart(url) }
-func FilePart(url, mediaType string) ContentPart { return generate.FilePart(url, mediaType) }
+func TextPart(text string) ContentPart           { return aikit.TextPart(text) }
+func ImageURLPart(url string) ContentPart        { return aikit.ImageURLPart(url) }
+func FilePart(url, mediaType string) ContentPart { return aikit.FilePart(url, mediaType) }
 func ImageDataPart(data []byte, mediaType string) ContentPart {
-	return generate.ImageDataPart(data, mediaType)
+	return aikit.ImageDataPart(data, mediaType)
 }
-func ImageFileIDPart(fileID string) ContentPart { return generate.ImageFileIDPart(fileID) }
+func ImageFileIDPart(fileID string) ContentPart { return aikit.ImageFileIDPart(fileID) }
 func AudioURLPart(url string, mediaType ...string) ContentPart {
-	return generate.AudioURLPart(url, mediaType...)
+	return aikit.AudioURLPart(url, mediaType...)
 }
 
 func AudioDataPart(data []byte, mediaType string) ContentPart {
-	return generate.AudioDataPart(data, mediaType)
+	return aikit.AudioDataPart(data, mediaType)
 }
 
 func AudioFileIDPart(fileID string, mediaType ...string) ContentPart {
-	return generate.AudioFileIDPart(fileID, mediaType...)
+	return aikit.AudioFileIDPart(fileID, mediaType...)
 }
 
 func DocumentURLPart(url, mediaType string, filename ...string) ContentPart {
-	return generate.DocumentURLPart(url, mediaType, filename...)
+	return aikit.DocumentURLPart(url, mediaType, filename...)
 }
 
 func DocumentDataPart(data []byte, mediaType string, filename ...string) ContentPart {
-	return generate.DocumentDataPart(data, mediaType, filename...)
+	return aikit.DocumentDataPart(data, mediaType, filename...)
 }
 
 func DocumentFileIDPart(fileID, mediaType string, filename ...string) ContentPart {
-	return generate.DocumentFileIDPart(fileID, mediaType, filename...)
+	return aikit.DocumentFileIDPart(fileID, mediaType, filename...)
 }
 
 func VideoURLPart(url string, mediaType ...string) ContentPart {
-	return generate.VideoURLPart(url, mediaType...)
+	return aikit.VideoURLPart(url, mediaType...)
 }
 
 func VideoDataPart(data []byte, mediaType string) ContentPart {
-	return generate.VideoDataPart(data, mediaType)
+	return aikit.VideoDataPart(data, mediaType)
 }
 
 func VideoFileIDPart(fileID string, mediaType ...string) ContentPart {
-	return generate.VideoFileIDPart(fileID, mediaType...)
+	return aikit.VideoFileIDPart(fileID, mediaType...)
 }
 
 func FileDataPart(data []byte, mediaType, filename string) ContentPart {
-	return generate.FileDataPart(data, mediaType, filename)
+	return aikit.FileDataPart(data, mediaType, filename)
 }
-func FileIDPart(fileID, mediaType string) ContentPart { return generate.FileIDPart(fileID, mediaType) }
-func ReasoningPart(text string) ContentPart           { return generate.ReasoningPart(text) }
+func FileIDPart(fileID, mediaType string) ContentPart { return aikit.FileIDPart(fileID, mediaType) }
+func ReasoningPart(text string) ContentPart           { return aikit.ReasoningPart(text) }
 func ToolCallPart(id, name string, args json.RawMessage) ContentPart {
-	return generate.ToolCallPart(id, name, args)
+	return aikit.ToolCallPart(id, name, args)
 }
 
 func ToolResultPart(id, name, output string) ContentPart {
-	return generate.ToolResultPart(id, name, output)
+	return aikit.ToolResultPart(id, name, output)
 }
 
 func RichToolResultPart(id, name string, content ...ToolResultContent) ContentPart {
-	return generate.RichToolResultPart(id, name, content...)
+	return aikit.RichToolResultPart(id, name, content...)
 }
 
 func TextToolResultContent(text string) ToolResultContent {
-	return generate.TextToolResultContent(text)
+	return aikit.TextToolResultContent(text)
 }
 
 func JSONToolResultContent(raw json.RawMessage) ToolResultContent {
-	return generate.JSONToolResultContent(raw)
+	return aikit.JSONToolResultContent(raw)
 }
 
 func ImageToolResultContent(data []byte, mediaType string) ToolResultContent {
-	return generate.ImageToolResultContent(data, mediaType)
+	return aikit.ImageToolResultContent(data, mediaType)
 }
 
 func ParseToolResultJSON(output string) (ToolResultContent, error) {
-	return generate.ParseToolResultJSON(output)
+	return aikit.ParseToolResultJSON(output)
 }
 
 func ToolApprovalResponsePart(id, signature string, approved bool, reason string) ContentPart {
-	return generate.ToolApprovalResponsePart(id, signature, approved, reason)
+	return aikit.ToolApprovalResponsePart(id, signature, approved, reason)
 }
-func UserMessage(text string) Message      { return generate.UserMessage(text) }
-func AssistantMessage(text string) Message { return generate.AssistantMessage(text) }
-func SystemMessage(text string) Message    { return generate.SystemMessage(text) }
+func UserMessage(text string) Message      { return aikit.UserMessage(text) }
+func AssistantMessage(text string) Message { return aikit.AssistantMessage(text) }
+func SystemMessage(text string) Message    { return aikit.SystemMessage(text) }
 
-func IsStepCount(n int) StopCondition                  { return generate.IsStepCount(n) }
-func Never() StopCondition                             { return generate.Never() }
-func HasToolCall(name string) StopCondition            { return generate.HasToolCall(name) }
-func OutputText() *OutputSchema                        { return generate.OutputText() }
-func OutputJSONObject() *OutputSchema                  { return generate.OutputJSONObject() }
-func OutputObject(schema map[string]any) *OutputSchema { return generate.OutputObject(schema) }
-func OutputArray(schema map[string]any) *OutputSchema  { return generate.OutputArray(schema) }
-func ToolChoiceSpecific(name string) ToolChoice        { return generate.ToolChoiceSpecific(name) }
-
-func NewMemoryToolApprovalReplayGuard() *agent.MemoryApprovalReplayGuard {
-	return generate.NewMemoryToolApprovalReplayGuard()
+func OutputText() *OutputSchema { return &llm.OutputSchema{Type: "text"} }
+func OutputJSONObject() *OutputSchema {
+	return &llm.OutputSchema{Type: "json_object"}
 }
 
-func NewSmoothStream(opts ...SmoothStreamOption) *SmoothStream {
-	return generate.NewSmoothStream(opts...)
+func OutputObject(schema map[string]any) *OutputSchema {
+	return &llm.OutputSchema{Type: "object", Schema: schema}
 }
-func WithDelayMs(ms int) SmoothStreamOption                 { return generate.WithDelayMs(ms) }
-func WithWordChunking() SmoothStreamOption                  { return generate.WithWordChunking() }
-func WithLineChunking() SmoothStreamOption                  { return generate.WithLineChunking() }
-func WithRegexChunking(pattern string) SmoothStreamOption   { return generate.WithRegexChunking(pattern) }
-func WithChunkDetector(fn ChunkDetector) SmoothStreamOption { return generate.WithChunkDetector(fn) }
 
-func WithInstructions(value string) Option              { return generate.WithInstructions(value) }
-func WithMessages(messages ...Message) Option           { return generate.WithMessages(messages...) }
-func WithTools(tools *ToolSet) Option                   { return generate.WithTools(tools) }
-func WithToolChoice(choice ToolChoice) Option           { return generate.WithToolChoice(choice) }
-func WithMaxSteps(value int) Option                     { return generate.WithMaxSteps(value) }
-func WithTemperature(value float32) Option              { return generate.WithTemperature(value) }
-func WithMaxTokens(value int) Option                    { return generate.WithMaxTokens(value) }
-func WithTopP(value float32) Option                     { return generate.WithTopP(value) }
-func WithTopK(value int) Option                         { return generate.WithTopK(value) }
-func WithSeed(value int) Option                         { return generate.WithSeed(value) }
-func WithStopSequences(values ...string) Option         { return generate.WithStopSequences(values...) }
-func WithOutput(output *OutputSchema) Option            { return generate.WithOutput(output) }
-func WithStopWhen(stop StopCondition) Option            { return generate.WithStopWhen(stop) }
-func WithProviderOptions(options map[string]any) Option { return generate.WithProviderOptions(options) }
-func WithToolsContext(value ToolsContext) Option        { return generate.WithToolsContext(value) }
-func WithRuntimeContext(value RuntimeContext) Option    { return generate.WithRuntimeContext(value) }
-func WithToolApproval(value map[string]ToolApprovalFunc) Option {
-	return generate.WithToolApproval(value)
+func OutputArray(itemSchema map[string]any) *OutputSchema {
+	return &llm.OutputSchema{
+		Type: "array",
+		Schema: map[string]any{
+			"type":  "array",
+			"items": itemSchema,
+		},
+	}
 }
-func WithToolApprovalKey(key []byte) Option { return generate.WithToolApprovalKey(key) }
-func WithToolApprovalReplayGuard(guard ToolApprovalReplayGuard) Option {
-	return generate.WithToolApprovalReplayGuard(guard)
-}
-func WithModel(model LanguageModel) Option            { return generate.WithModel(model) }
-func WithSmoothStream(stream *SmoothStream) Option    { return generate.WithSmoothStream(stream) }
-func WithRepairToolCall(fn RepairToolCallFunc) Option { return generate.WithRepairToolCall(fn) }
-func WithParallelToolExecution(enabled bool) Option {
-	return generate.WithParallelToolExecution(enabled)
-}
-func WithMaxParallelTools(value int) Option      { return generate.WithMaxParallelTools(value) }
-func WithPrepareStep(fn PrepareStepFunc) Option  { return generate.WithPrepareStep(fn) }
-func WithActiveTools(names ...string) Option     { return generate.WithActiveTools(names...) }
-func WithOnChunk(fn func(ChunkEvent)) Option     { return generate.WithOnChunk(fn) }
-func WithOnStepEnd(fn func(StepEndEvent)) Option { return generate.WithOnStepEnd(fn) }
-func WithOnEnd(fn func(EndEvent)) Option         { return generate.WithOnEnd(fn) }
-func WithOnError(fn func(error)) Option          { return generate.WithOnError(fn) }
-func WithLogger(logger *slog.Logger) Option      { return generate.WithLogger(logger) }
-func WithTracer(tracer agent.Tracer) Option      { return generate.WithTracer(tracer) }
-func WithTraceContent(enabled bool) Option       { return generate.WithTraceContent(enabled) }
-func WithMiddleware(values ...LanguageModelMiddleware) Option {
-	return generate.WithMiddleware(values...)
-}
-func WithMaxRetries(value int) Option     { return generate.WithMaxRetries(value) }
-func WithRetry(config RetryConfig) Option { return generate.WithRetry(config) }
 
-func WithDefaultModel(model LanguageModel) RuntimeOption { return generate.WithDefaultModel(model) }
-func WithModelResolver(fn func(string) LanguageModel) RuntimeOption {
-	return generate.WithModelResolver(fn)
+func ToolChoiceSpecific(name string) ToolChoice {
+	return aikit.ToolChoice{Type: "tool", ToolName: name}
 }

@@ -8,9 +8,9 @@ import (
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// TestMergeStreamResult_BasicText verifies model stream events are written to the Writer.
-func TestMergeStreamResult_BasicText(t *testing.T) {
-	sr := makeStreamResult(
+// TestWriterMerge_BasicText verifies model stream events are written to the Writer.
+func TestWriterMerge_BasicText(t *testing.T) {
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -19,7 +19,7 @@ func TestMergeStreamResult_BasicText(t *testing.T) {
 
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
-	text := wr.MergeStreamResult(sr)
+	text := wr.Merge(events)
 
 	output := buf.String()
 	if text != "hi" {
@@ -27,14 +27,14 @@ func TestMergeStreamResult_BasicText(t *testing.T) {
 	}
 	assertContains(t, output, `"type":"text-delta"`)
 	assertContains(t, output, `"delta":"hi"`)
-	// MergeStreamResult does NOT emit start or finish; caller manages lifecycle.
+	// Merge does NOT emit start or finish; caller manages lifecycle.
 	assertNotContains(t, output, `"type":"finish"`)
 }
 
-// TestMergeStreamResult_CustomDataInterleaving verifies the full custom data + model
+// TestWriterMerge_CustomDataInterleaving verifies the full custom data + model
 // stream interleaving pattern works correctly.
-func TestMergeStreamResult_CustomDataInterleaving(t *testing.T) {
-	sr := makeStreamResult(
+func TestWriterMerge_CustomDataInterleaving(t *testing.T) {
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -46,7 +46,7 @@ func TestMergeStreamResult_CustomDataInterleaving(t *testing.T) {
 
 	wr.WriteStart("msg-merge")
 	wr.WriteData("plan", map[string]string{"step": "1"})
-	text := wr.MergeStreamResult(sr)
+	text := wr.Merge(events)
 	wr.WriteData("sources", []string{"https://example.com"})
 	wr.WriteFinish()
 
@@ -93,9 +93,9 @@ func TestMergeStreamResult_CustomDataInterleaving(t *testing.T) {
 	}
 }
 
-// TestMergeStreamResult_ToolResultHook verifies the hook fires during merge.
-func TestMergeStreamResult_ToolResultHook(t *testing.T) {
-	sr := makeStreamResult(
+// TestWriterMerge_ToolResultHook verifies the hook fires during merge.
+func TestWriterMerge_ToolResultHook(t *testing.T) {
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{
 			Type:              aikit.StepEventToolCallStart,
@@ -128,7 +128,7 @@ func TestMergeStreamResult_ToolResultHook(t *testing.T) {
 
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
-	wr.MergeStreamResult(sr, MergeWithToolResultHook(hook))
+	wr.Merge(events, MergeWithToolResultHook(hook))
 
 	if !hookFired {
 		t.Error("expected tool result hook to fire")
@@ -138,9 +138,9 @@ func TestMergeStreamResult_ToolResultHook(t *testing.T) {
 	}
 }
 
-// TestMergeStreamResult_OnEnd verifies the on-end callback fires.
-func TestMergeStreamResult_OnEnd(t *testing.T) {
-	sr := makeStreamResult(
+// TestWriterMerge_OnEnd verifies the on-end callback fires.
+func TestWriterMerge_OnEnd(t *testing.T) {
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "done"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -150,17 +150,11 @@ func TestMergeStreamResult_OnEnd(t *testing.T) {
 	var endedText string
 	var buf bytes.Buffer
 	wr := NewWriter(&buf)
-	wr.MergeStreamResult(sr, MergeWithOnEnd(func(text string) {
+	wr.Merge(events, MergeWithOnEnd(func(text string) {
 		endedText = text
 	}))
 
 	if endedText != "done" {
 		t.Errorf("expected on-end text=%q, got %q", "done", endedText)
 	}
-}
-
-// TestMergeStreamResult_ImplementsStreamEventer verifies the test stream satisfies
-// the StreamEventer interface used by MergeStreamResult.
-func TestMergeStreamResult_ImplementsStreamEventer(t *testing.T) {
-	var _ StreamEventer = (*testStreamResult)(nil)
 }

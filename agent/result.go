@@ -456,7 +456,10 @@ func cloneStep(value Step) Step {
 	if value.Files != nil {
 		files := make([]GeneratedFile, len(value.Files))
 		for i := range value.Files {
-			files[i] = GeneratedFile{Data: append([]byte(nil), value.Files[i].Data...), MediaType: value.Files[i].MediaType}
+			files[i] = GeneratedFile{
+				Data:      append([]byte(nil), value.Files[i].Data...),
+				MediaType: value.Files[i].MediaType,
+			}
 		}
 		value.Files = files
 	}

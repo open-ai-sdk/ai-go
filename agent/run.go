@@ -11,10 +11,9 @@ import (
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// Stream executes the tool loop and streams StepEvents onto the returned
-// channel. The channel is closed when the run completes, the context is
-// cancelled, or an unrecoverable error occurs.
-func Stream(ctx context.Context, params RunParams) <-chan StepEvent {
+// driveStream is the private channel-backed driver used by Runner's iterator.
+// The channel closes on completion, cancellation, or terminal failure.
+func driveStream(ctx context.Context, params runConfig) <-chan StepEvent {
 	ch := make(chan StepEvent, 64)
 	go func() {
 		// This is the package's outer ownership boundary. It deliberately wraps
@@ -39,7 +38,7 @@ func emitTerminalError(
 	ch chan StepEvent,
 	err error,
 	logger *slog.Logger,
-	callbacks *LifecycleCallbacks,
+	callbacks *lifecycleCallbacks,
 ) {
 	event := StepEvent{Type: StepEventError, Error: err}
 	for {
@@ -60,14 +59,8 @@ func emitTerminalError(
 	}
 }
 
-// Run executes the tool loop and returns its event stream. It is equivalent
-// to [Stream]; both names are kept because callers commonly describe the
-// blocking aggregation path as a run and the live path as a stream.
-func Run(ctx context.Context, params RunParams) <-chan StepEvent {
-	return Stream(ctx, params)
-}
-
-func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error {
+//nolint:gocyclo // The driver keeps one explicit state machine and one cleanup boundary.
+func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error {
 	ctx, tracer, tracingEnabled := initializeRunTracing(ctx, params)
 	ctx, runSpan := tracer.Start(ctx, "ai.run")
 
@@ -84,7 +77,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// which of the loop's several exit points was taken. This mirrors the
 	// last completed step's outcome rather than a lifetime sum across steps —
 	// the cumulative total remains available to the caller via
-	// GenerateTextResult.Usage in the ai package.
+	// Result.Usage on the canonical aggregated result.
 	defer func() {
 		if tracingEnabled {
 			runSpan.SetAttributes(stepAttrs(lastSR)...)
@@ -253,7 +246,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 
 func finishTextStep(
 	r *run,
-	params RunParams,
+	params runConfig,
 	step int,
 	sr streamResult,
 	fullText string,
@@ -289,7 +282,7 @@ func finishTextStep(
 	return nil
 }
 
-func initializeRunTracing(ctx context.Context, params RunParams) (context.Context, tracing.Tracer, bool) {
+func initializeRunTracing(ctx context.Context, params runConfig) (context.Context, tracing.Tracer, bool) {
 	tracer := params.Tracer
 	enabled := tracer != nil
 	if !enabled {
@@ -301,7 +294,7 @@ func initializeRunTracing(ctx context.Context, params RunParams) (context.Contex
 	return ctx, tracer, enabled
 }
 
-func prepareRunHistory(r *run, params RunParams) ([]Message, bool, error) {
+func prepareRunHistory(r *run, params runConfig) ([]Message, bool, error) {
 	if err := params.Tools.Validate(); err != nil {
 		r.emitError(err)
 		return nil, false, nil
@@ -322,7 +315,7 @@ func prepareRunHistory(r *run, params RunParams) ([]Message, bool, error) {
 // true when the run should stop — a control emit failed (consumer gone), or
 // StopWhen fired (in which case it has already emitted the terminal Done event).
 func (r *run) executeToolStep(
-	params RunParams,
+	params runConfig,
 	step int,
 	sr streamResult,
 	fullText string,
@@ -438,7 +431,7 @@ func (r *run) executeToolStep(
 
 // applyPrepareStep runs the PrepareStep callback (if configured) and applies its
 // non-nil overrides to the current step's model and request in place.
-func applyPrepareStep(params RunParams, step int, completedSteps []StepResultInfo, model *Model, req *Request) {
+func applyPrepareStep(params runConfig, step int, completedSteps []StepResultInfo, model *Model, req *Request) {
 	if params.PrepareStep == nil {
 		return
 	}

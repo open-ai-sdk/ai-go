@@ -51,12 +51,12 @@ func (e siblingFailureExecutor) Execute(_ context.Context, name, _ string) (stri
 // results.
 func TestExecuteToolCallsParallel_SiblingFailure_OthersComplete(t *testing.T) {
 	names := []string{"ok-1", "fail", "ok-2"}
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: fixedToolCallsModel{toolNames: names},
-		Tools: &ToolSet{
-			Definitions: []ToolDefinition{{Name: "ok-1"}, {Name: "fail"}, {Name: "ok-2"}},
-			Executor:    siblingFailureExecutor{failName: "fail"},
-		},
+		Tools: testToolSet(
+			[]ToolDefinition{{Name: "ok-1"}, {Name: "fail"}, {Name: "ok-2"}},
+			siblingFailureExecutor{failName: "fail"}),
+
 		ParallelToolExecution: true,
 		MaxParallelTools:      3,
 		MaxSteps:              1,
@@ -87,12 +87,12 @@ func TestExecuteToolCallsParallel_SiblingFailure_OthersComplete(t *testing.T) {
 }
 
 func TestExecuteToolCallsParallel_PanicRetainsTypedExecutionError(t *testing.T) {
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: fixedToolCallsModel{toolNames: []string{"panic"}},
-		Tools: &ToolSet{
-			Definitions: []ToolDefinition{{Name: "panic"}},
-			Executor:    panicExecutor{},
-		},
+		Tools: testToolSet(
+			[]ToolDefinition{{Name: "panic"}},
+			panicExecutor{}),
+
 		ParallelToolExecution: true,
 		MaxParallelTools:      1,
 		MaxSteps:              1,
@@ -144,12 +144,12 @@ func TestExecuteToolCallsParallel_CancelWhileQueued_StopsFurtherBodies(t *testin
 	executor := &queueGateExecutor{started: make(chan struct{}), release: make(chan struct{})}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := Run(ctx, RunParams{
+	ch := driveStream(ctx, runConfig{
 		Model: fixedToolCallsModel{toolNames: names},
-		Tools: &ToolSet{
-			Definitions: []ToolDefinition{{Name: "slow"}},
-			Executor:    executor,
-		},
+		Tools: testToolSet(
+			[]ToolDefinition{{Name: "slow"}},
+			executor),
+
 		ParallelToolExecution: true,
 		MaxParallelTools:      1,
 		MaxSteps:              1,

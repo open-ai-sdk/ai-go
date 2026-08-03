@@ -206,7 +206,8 @@ func TestAgentRunnerSnapshotsAreDefensiveAndSafeForConcurrentRuns(t *testing.T) 
 		t.Fatalf("model requests = %d, want %d", len(requests), runs)
 	}
 	for _, request := range requests {
-		if len(request.Messages) != 2 || !reflect.DeepEqual(request.Messages[0], aikit.SystemMessage("original instructions")) {
+		if len(request.Messages) != 2 ||
+			!reflect.DeepEqual(request.Messages[0], aikit.SystemMessage("original instructions")) {
 			t.Fatalf("request messages = %#v", request.Messages)
 		}
 		if !reflect.DeepEqual(request.Settings.StopSequences, []string{"original-stop"}) {

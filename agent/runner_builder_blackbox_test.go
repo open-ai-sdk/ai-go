@@ -182,7 +182,8 @@ func TestRunnerRunAggregatesOneTurnResultAndTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.Text != "hello world" || result.MessageID != "assistant-1" || result.FinishReason != aikit.FinishReasonStop {
+	if result.Text != "hello world" || result.MessageID != "assistant-1" ||
+		result.FinishReason != aikit.FinishReasonStop {
 		t.Fatalf("result terminal fields = (%q, %q, %q)", result.Text, result.MessageID, result.FinishReason)
 	}
 	if result.Usage.TotalTokens != 5 || len(result.Steps) != 1 || result.FinalStep.Text != "hello world" {
@@ -202,10 +203,18 @@ func TestRunnerRunAggregatesOneTurnResultAndTranscript(t *testing.T) {
 }
 
 func TestRunnerDefaultMaxTurnsReturnsPartialResultAfterToolContinuation(t *testing.T) {
-	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{{
-		{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallName: "lookup", ToolCallArgsDelta: `{"q":"go"}`},
-		{Type: aikit.StreamEventFinish, MessageID: "assistant-tool", FinishReason: aikit.FinishReasonToolCalls},
-	}}}
+	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+		{
+			{
+				Type:              aikit.StreamEventToolCallDelta,
+				ToolCallIndex:     0,
+				ToolCallID:        "call-1",
+				ToolCallName:      "lookup",
+				ToolCallArgsDelta: `{"q":"go"}`,
+			},
+			{Type: aikit.StreamEventFinish, MessageID: "assistant-tool", FinishReason: aikit.FinishReasonToolCalls},
+		},
+	}}
 	lookup, err := tool.NewDynamic(
 		"lookup",
 		"test lookup",
@@ -245,7 +254,11 @@ func TestRunnerDefaultMaxTurnsReturnsPartialResultAfterToolContinuation(t *testi
 	}
 
 	streamModel := &runnerScriptModel{scripts: model.scripts}
-	streamAgent := mustRunnerAgent(t, streamModel, func(builder agent.Builder) agent.Builder { return builder.Tools(tools) })
+	streamAgent := mustRunnerAgent(
+		t,
+		streamModel,
+		func(builder agent.Builder) agent.Builder { return builder.Tools(tools) },
+	)
 	sequence, err := streamAgent.Runner().Prompt("look it up").Stream(context.Background())
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
@@ -273,7 +286,11 @@ func TestRunnerStructuredOutputConsumesTurnBudget(t *testing.T) {
 		"required":   []any{"ok"},
 	}}
 	oneTurnModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", "draft")}}
-	oneTurn := mustRunnerAgent(t, oneTurnModel, func(builder agent.Builder) agent.Builder { return builder.Output(output) })
+	oneTurn := mustRunnerAgent(
+		t,
+		oneTurnModel,
+		func(builder agent.Builder) agent.Builder { return builder.Output(output) },
+	)
 	partial, err := oneTurn.Runner().Prompt("answer as JSON").Run(context.Background())
 	var maxTurns *agent.MaxTurnsError
 	if !errors.As(err, &maxTurns) || partial == nil || partial.Text != "draft" {

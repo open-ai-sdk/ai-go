@@ -34,9 +34,9 @@ func TestRun_ToolExecutorPanic_FailsRunWithPanicError(t *testing.T) {
 		{textEvt("after"), finishEvt(FinishReasonStop)},
 	}}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: panicExecutor{}},
+		Tools:    testToolSet(nil, panicExecutor{}),
 		MaxSteps: 3,
 	})
 
@@ -68,9 +68,9 @@ func TestRun_OnChunkPanic_RunCompletes(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
 		{textEvt("hello"), finishEvt(FinishReasonStop)},
 	}}
-	cb := &LifecycleCallbacks{OnChunk: func(StepEvent) { panic("observer boom") }}
+	cb := &lifecycleCallbacks{OnChunk: func(StepEvent) { panic("observer boom") }}
 
-	ch := Run(context.Background(), RunParams{Model: model, MaxSteps: 1, Callbacks: cb})
+	ch := driveStream(context.Background(), runConfig{Model: model, MaxSteps: 1, Callbacks: cb})
 
 	sawDone, sawError := false, false
 	for ev := range ch {
@@ -92,10 +92,10 @@ func TestRun_OnChunkPanic_RunCompletes(t *testing.T) {
 
 func TestRun_PanicDuringInitialization_EmitsErrorAndClosesChannel(t *testing.T) {
 	var chunkError bool
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:  &mockModel{},
 		Tracer: panicStartTracer{},
-		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
+		Callbacks: &lifecycleCallbacks{OnChunk: func(event StepEvent) {
 			chunkError = chunkError || event.Type == StepEventError
 		}},
 	})

@@ -49,7 +49,7 @@ func TestCreateUIMessageStream_MergeWithToUIMessageStream(t *testing.T) {
 	}, func(sw *UIStreamWriter) error {
 		sw.WriteData("plan", map[string]string{"step": "1"})
 
-		sr := newMockStreamEventer(
+		events := newEventStream(
 			aikit.StepEvent{Type: aikit.StepEventStepStart},
 			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
 			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
@@ -57,11 +57,12 @@ func TestCreateUIMessageStream_MergeWithToUIMessageStream(t *testing.T) {
 			aikit.StepEvent{Type: aikit.StepEventDone},
 		)
 
-		chunks := ToUIMessageStream(sr, "msg-create-2", ToUIStreamOptions{
+		if err := sw.Merge(events, "msg-create-2", ToUIStreamOptions{
 			SendReasoning: true,
 			SendSources:   true,
-		})
-		sw.Merge(chunks)
+		}); err != nil {
+			return err
+		}
 
 		sw.WriteData("sources", []string{"https://example.com"})
 		return nil
@@ -141,17 +142,16 @@ func TestCreateUIMessageStream_OnEndCallback(t *testing.T) {
 			endResult = result
 		},
 	}, func(sw *UIStreamWriter) error {
-		sr := newMockStreamEventer(
+		events := newEventStream(
 			aikit.StepEvent{Type: aikit.StepEventStepStart},
 			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello world"},
 			aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
 			aikit.StepEvent{Type: aikit.StepEventDone},
 		)
-		sw.MergeStreamResult(sr, "msg-create-4", ToUIStreamOptions{
+		return sw.Merge(events, "msg-create-4", ToUIStreamOptions{
 			SendReasoning: true,
 			SendSources:   true,
 		})
-		return nil
 	})
 
 	if endResult.Text != "Hello world" {
@@ -224,7 +224,7 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 	CreateUIMessageStream(&buf, CreateUIStreamOptions{
 		MessageID: "msg-create-8",
 	}, func(sw *UIStreamWriter) error {
-		sr := newMockStreamEventer(
+		events := newEventStream(
 			aikit.StepEvent{Type: aikit.StepEventStepStart},
 			aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
 			aikit.StepEvent{Type: aikit.StepEventUsage, Usage: &aikit.Usage{
@@ -233,15 +233,13 @@ func TestCreateUIMessageStream_MergeMetadataFromFinish(t *testing.T) {
 			aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
 			aikit.StepEvent{Type: aikit.StepEventDone},
 		)
-		chunks := ToUIMessageStream(sr, "msg-create-8", ToUIStreamOptions{
+		return sw.Merge(events, "msg-create-8", ToUIStreamOptions{
 			SendReasoning: true,
 			SendSources:   true,
 			MessageMetadata: func(info MessageMetadataInfo) map[string]any {
 				return map[string]any{"tokens": info.Usage.TotalTokens}
 			},
 		})
-		sw.Merge(chunks)
-		return nil
 	})
 
 	output := buf.String()

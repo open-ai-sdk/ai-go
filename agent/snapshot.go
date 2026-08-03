@@ -74,8 +74,8 @@ func snapshotToolDefinitionsForCallback(tools *ToolSet) []ToolDefinition {
 	if tools == nil {
 		return nil
 	}
-	definitions := make([]ToolDefinition, len(tools.Definitions))
-	for i, definition := range tools.Definitions {
+	definitions := tools.DefinitionsSnapshot()
+	for i, definition := range definitions {
 		definitions[i] = definition
 		definitions[i].InputSchema = snapshotJSONMap(definition.InputSchema)
 		definitions[i].ContextSchema = snapshotJSONMap(definition.ContextSchema)

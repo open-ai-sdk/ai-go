@@ -2,6 +2,9 @@ package aisdk
 
 import (
 	"io"
+	"iter"
+
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // UIStreamOption configures StreamToWriter behavior.
@@ -47,19 +50,20 @@ func WithUIPersistence(b *PersistedMessageBuilder) UIStreamOption {
 }
 
 // StreamToWriter writes SSE UI message stream chunks to w, consuming all events
-// from sr. It returns the full assistant text for persistence.
+// from events. It returns the full assistant text for persistence.
 //
 // msgID is the assistant message identifier emitted in the start chunk.
 // Callers may pass UIStreamOption values to attach hooks.
-func StreamToWriter(sr StreamEventer, w io.Writer, msgID string, opts ...UIStreamOption) string {
+func StreamToWriter(
+	events iter.Seq2[aikit.StepEvent, error],
+	w io.Writer,
+	msgID string,
+	opts ...UIStreamOption,
+) string {
 	cfg := &uiStreamBridgeConfig{}
 	for _, o := range opts {
 		o(cfg)
 	}
-
-	// Drain textCh and consumeCh so the fan-out goroutine doesn't deadlock.
-	// StreamToWriter only consumes Stream().
-	sr.DrainUnused()
 
 	adapter := NewAdapter(msgID)
 
@@ -82,5 +86,5 @@ func StreamToWriter(sr StreamEventer, w io.Writer, msgID string, opts ...UIStrea
 		adapter.WithPersistenceBuilder(cfg.persistenceBuilder)
 	}
 
-	return adapter.Stream(sr.Stream(), w)
+	return adapter.Stream(events, w)
 }

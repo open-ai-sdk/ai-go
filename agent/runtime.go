@@ -17,7 +17,7 @@ type run struct {
 	ctx                 context.Context
 	out                 chan<- StepEvent
 	logger              *slog.Logger
-	callbacks           *LifecycleCallbacks
+	callbacks           *lifecycleCallbacks
 	approvalKey         []byte
 	approvalReplayGuard ApprovalReplayGuard
 	// tracer is never nil: runLoop substitutes tracing.NoopTracer{} when the
@@ -32,7 +32,7 @@ type run struct {
 	// retains it — so this flag is what keeps the fully-disabled path
 	// allocation-free instead of merely no-op.
 	tracingEnabled bool
-	// traceContent mirrors RunParams.TraceContent — whether spans may carry
+	// traceContent mirrors runConfig.TraceContent — whether spans may carry
 	// prompt/completion/tool-argument content.
 	traceContent bool
 	maxTurns     int
@@ -67,7 +67,7 @@ func safeObserver(logger *slog.Logger, fn func()) {
 	fn()
 }
 
-func notifyError(logger *slog.Logger, callbacks *LifecycleCallbacks, err error) {
+func notifyError(logger *slog.Logger, callbacks *lifecycleCallbacks, err error) {
 	if callbacks == nil || callbacks.OnError == nil {
 		return
 	}

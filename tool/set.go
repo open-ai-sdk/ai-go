@@ -10,21 +10,9 @@ import (
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// Set is an ordered registry of tool definitions and their execution paths.
-//
-// New code should construct sets with NewSet or NewSetFromExecutor and read
-// them through Snapshot, DefinitionsSnapshot, Lookup, or Invoker. Definitions
-// and Executor are retained temporarily for source compatibility with the
-// legacy agent runtime; constructor-made sets never use those mutable fields
-// as their internal source of truth.
+// Set is an immutable ordered registry of tool definitions and their exact
+// execution paths. Construct sets with NewSet or NewSetFromExecutor.
 type Set struct {
-	// Deprecated: construct a Set with NewSet or NewSetFromExecutor and use
-	// DefinitionsSnapshot to read its definitions.
-	Definitions []aikit.ToolDefinition
-	// Deprecated: construct a Set with NewSetFromExecutor.
-	Executor Executor
-
-	immutable   bool
 	definitions []aikit.ToolDefinition
 	executor    Executor
 	index       map[string]int
@@ -85,11 +73,6 @@ func newImmutableSet(
 		boundInvokers[name] = invoker
 	}
 	return &Set{
-		// Keep independent compatibility mirrors so callers mutating the
-		// legacy fields cannot mutate the canonical registry.
-		Definitions: cloneDefinitions(cloned),
-		Executor:    executor,
-		immutable:   true,
 		definitions: cloned,
 		executor:    executor,
 		index:       index,
@@ -97,17 +80,10 @@ func newImmutableSet(
 	}, nil
 }
 
-// Validate reports invalid or duplicate definitions. Constructor-made sets
-// are validated eagerly; legacy struct literals are validated on every call.
+// Validate reports whether the registry is valid. Constructor-made sets are
+// validated eagerly, so an existing Set is always valid.
 func (s *Set) Validate() error {
-	if s == nil {
-		return nil
-	}
-	if s.immutable {
-		return nil
-	}
-	_, err := indexDefinitions(s.Definitions)
-	return err
+	return nil
 }
 
 // Snapshot captures definitions and their exact execution paths together.
@@ -170,10 +146,7 @@ func (s *Set) Len() int {
 	if s == nil {
 		return 0
 	}
-	if s.immutable {
-		return len(s.definitions)
-	}
-	return len(s.Definitions)
+	return len(s.definitions)
 }
 
 // Lookup returns an independently owned copy of the named definition.
@@ -181,19 +154,11 @@ func (s *Set) Lookup(name string) (aikit.ToolDefinition, bool) {
 	if s == nil {
 		return aikit.ToolDefinition{}, false
 	}
-	if s.immutable {
-		i, ok := s.index[name]
-		if !ok {
-			return aikit.ToolDefinition{}, false
-		}
-		return cloneDefinition(s.definitions[i]), true
+	i, ok := s.index[name]
+	if !ok {
+		return aikit.ToolDefinition{}, false
 	}
-	for _, definition := range s.Definitions {
-		if definition.Name == name {
-			return cloneDefinition(definition), true
-		}
-	}
-	return aikit.ToolDefinition{}, false
+	return cloneDefinition(s.definitions[i]), true
 }
 
 // Invoker returns the exact typed invoker registered for name. Executor-backed
@@ -299,17 +264,11 @@ func (s Snapshot) Invoke(
 }
 
 func (s *Set) activeDefinitions() []aikit.ToolDefinition {
-	if s.immutable {
-		return cloneDefinitions(s.definitions)
-	}
-	return cloneDefinitions(s.Definitions)
+	return cloneDefinitions(s.definitions)
 }
 
 func (s *Set) activeExecutor() Executor {
-	if s.immutable {
-		return s.executor
-	}
-	return s.Executor
+	return s.executor
 }
 
 func indexDefinitions(definitions []aikit.ToolDefinition) (map[string]int, error) {

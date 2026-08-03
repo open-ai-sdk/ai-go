@@ -90,16 +90,16 @@ const (
 	StreamEventFileDelta      = aikit.StreamEventFileDelta
 )
 
-// LifecycleCallbacks holds optional observers for a run.
-type LifecycleCallbacks struct {
-	OnStepEnd func(event StepEndEvent)
-	OnEnd     func(event EndEvent)
+// lifecycleCallbacks is the internal callback bridge retained by the driver.
+type lifecycleCallbacks struct {
+	OnStepEnd func(event stepEndEvent)
+	OnEnd     func(event endEvent)
 	OnChunk   func(event StepEvent)
 	OnError   func(err error)
 }
 
-// StepEndEvent holds data passed to OnStepEnd after each step.
-type StepEndEvent struct {
+// stepEndEvent holds data passed to OnStepEnd after each step.
+type stepEndEvent struct {
 	StepNumber       int
 	MessageID        string
 	Text             string
@@ -112,8 +112,8 @@ type StepEndEvent struct {
 	Warnings         []Warning
 }
 
-// EndEvent holds data passed to OnEnd when the run completes.
-type EndEvent struct {
+// endEvent holds data passed to OnEnd when the run completes.
+type endEvent struct {
 	MessageID        string
 	Text             string
 	Reasoning        string
@@ -123,8 +123,8 @@ type EndEvent struct {
 	ProviderMetadata map[string]any
 }
 
-// RunParams configures a single agent run.
-type RunParams struct {
+// runConfig is the private driver snapshot produced by Runner.
+type runConfig struct {
 	Model    Model
 	Request  Request
 	Tools    *ToolSet
@@ -142,7 +142,7 @@ type RunParams struct {
 	ApprovalKey           []byte
 	ApprovalReplayGuard   ApprovalReplayGuard
 	Approver              ApprovalResponder
-	Callbacks             *LifecycleCallbacks
+	Callbacks             *lifecycleCallbacks
 	ParallelToolExecution bool
 	MaxParallelTools      int
 	Logger                *slog.Logger

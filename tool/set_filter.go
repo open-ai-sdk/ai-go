@@ -11,8 +11,7 @@ func (s *Set) Restrict(definitions []aikit.ToolDefinition) *Set {
 	}
 	snapshot, err := s.Snapshot()
 	if err != nil {
-		// Preserve the historical no-error signature for legacy invalid sets.
-		return &Set{Definitions: cloneDefinitions(definitions), Executor: s.activeExecutor()}
+		return nil
 	}
 
 	restrictedDefinitions := make([]aikit.ToolDefinition, 0, len(definitions))

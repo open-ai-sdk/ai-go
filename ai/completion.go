@@ -6,9 +6,9 @@ import (
 	"github.com/open-ai-sdk/ai-go/llm"
 )
 
-// NewCompletion starts a direct, single model completion. Unlike GenerateText,
-// it does not run a tool loop; tool calls remain in the returned assistant
-// message for the caller to handle.
+// NewCompletion starts a direct, single model completion. It does not run an
+// Agent or execute tools; tool calls remain in the returned assistant message
+// for the caller to handle.
 func NewCompletion(model LanguageModel, prompt string) CompletionRequestBuilder {
 	return llm.NewCompletion(model, prompt)
 }

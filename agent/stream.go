@@ -19,7 +19,7 @@ func consumeStream(
 	r *run,
 	eventCh <-chan StreamEvent,
 	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 ) (streamResult, bool) {
 	var sr streamResult
 	for {
@@ -45,7 +45,7 @@ func applyStreamEvent(
 	ev StreamEvent,
 	sr *streamResult,
 	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 ) bool {
 	emitChunk := func(stepEv StepEvent) bool {
 		if !r.emit(stepEv) {
@@ -116,7 +116,7 @@ func handleToolCallDelta(
 	r *run,
 	ev StreamEvent,
 	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 ) bool {
 	if acc == nil {
 		return true

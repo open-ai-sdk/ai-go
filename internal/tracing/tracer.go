@@ -23,6 +23,6 @@ type Tracer interface {
 }
 
 // NewTracer returns the core module's no-op tracer. Applications opt into a
-// backend by assigning [agent.RunParams.Tracer] (normally through an adapter
-// module); merely importing ai-go never activates or compiles a telemetry SDK.
+// backend through the public Agent Builder or Runner (normally through an
+// adapter module); importing ai-go never activates a telemetry SDK.
 func NewTracer() Tracer { return NoopTracer{} }

@@ -160,7 +160,11 @@ type HookFuncs struct {
 
 func (h HookFuncs) HookName() string { return h.Name }
 
-func (h HookFuncs) BeforeCompletion(ctx context.Context, hc HookContext, request llm.Request) (CompletionAction, error) {
+func (h HookFuncs) BeforeCompletion(
+	ctx context.Context,
+	hc HookContext,
+	request llm.Request,
+) (CompletionAction, error) {
 	if h.BeforeCompletionFunc == nil {
 		return CompletionAction{Kind: CompletionContinue}, nil
 	}
@@ -181,7 +185,11 @@ func (h HookFuncs) AfterTool(ctx context.Context, hc HookContext, result aikit.T
 	return h.AfterToolFunc(ctx, hc, result)
 }
 
-func (h HookFuncs) InvalidToolCall(ctx context.Context, hc HookContext, input aikit.RepairToolCallInput) (InvalidToolCallAction, error) {
+func (h HookFuncs) InvalidToolCall(
+	ctx context.Context,
+	hc HookContext,
+	input aikit.RepairToolCallInput,
+) (InvalidToolCallAction, error) {
 	if h.InvalidToolCallFunc == nil {
 		return InvalidToolCallAction{Kind: InvalidToolCallContinue}, nil
 	}
@@ -201,10 +209,6 @@ func hookStopped(hook Hook, phase, reason string) error {
 		err = fmt.Errorf("%w: %s", ErrHookStopped, reason)
 	}
 	return hookFailure(hook, phase, err)
-}
-
-func invalidHookAction(hook Hook, phase string, kind fmt.Stringer) error {
-	return hookFailure(hook, phase, fmt.Errorf("invalid action %s", kind))
 }
 
 func panicError(value interface{}) error {
@@ -270,22 +274,6 @@ func callInvalidTool(
 	return hook.InvalidToolCall(ctx, hc, input)
 }
 
-func callStreamEvent(
-	hook StreamEventHook,
-	ctx context.Context,
-	hc HookContext,
-	event aikit.StepEvent,
-) (err error) {
-	defer func() {
-		// Event callbacks are observers. A panic is isolated like the legacy
-		// lifecycle observers; an explicit returned error still steers the run.
-		if recover() != nil {
-			err = nil
-		}
-	}()
-	return hook.OnStreamEvent(ctx, hc, event)
-}
-
 func completionActionError(hook Hook, kind CompletionActionKind) error {
 	return hookFailure(hook, "before_completion", fmt.Errorf("invalid action %d", kind))
 }
@@ -301,8 +289,6 @@ func toolResultActionError(hook Hook, kind ToolResultActionKind) error {
 func invalidToolActionError(hook Hook, kind InvalidToolCallActionKind) error {
 	return hookFailure(hook, "invalid_tool_call", fmt.Errorf("invalid action %d", kind))
 }
-
-func isHookStopped(err error) bool { return errors.Is(err, ErrHookStopped) }
 
 func (h HookFuncs) OnStreamEvent(ctx context.Context, hc HookContext, event aikit.StepEvent) error {
 	if h.StreamEventFunc == nil {
@@ -320,6 +306,9 @@ func (h HookFuncs) OnRunFinished(ctx context.Context, hc HookContext, result *Re
 func (r *run) beforeCompletion(request llm.Request) (llm.Request, error) {
 	r.hookMu.Lock()
 	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return llm.Request{}, r.hookErr
+	}
 	for _, hook := range r.hooks {
 		capability, ok := hook.(BeforeCompletionHook)
 		if !ok {
@@ -347,6 +336,9 @@ func (r *run) beforeCompletion(request llm.Request) (llm.Request, error) {
 func (r *run) beforeTool(tc toolCallState) (toolCallState, bool, string, error) {
 	r.hookMu.Lock()
 	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return tc, false, "", r.hookErr
+	}
 	for _, hook := range r.hooks {
 		capability, ok := hook.(BeforeToolHook)
 		if !ok {
@@ -384,6 +376,9 @@ func (r *run) afterTool(result *aikit.ToolResult) (*aikit.ToolResult, error) {
 	}
 	r.hookMu.Lock()
 	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return nil, r.hookErr
+	}
 	effective := result.Clone()
 	for _, hook := range r.hooks {
 		capability, ok := hook.(AfterToolHook)
@@ -422,6 +417,9 @@ func (r *run) recoverInvalidToolCall(
 ) (InvalidToolCallAction, error) {
 	r.hookMu.Lock()
 	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return InvalidToolCallAction{}, r.hookErr
+	}
 	for _, hook := range r.hooks {
 		capability, ok := hook.(InvalidToolCallHook)
 		if !ok {

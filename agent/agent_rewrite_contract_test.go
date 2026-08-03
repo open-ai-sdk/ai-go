@@ -3,43 +3,35 @@ package agent_test
 import (
 	"context"
 	"iter"
+	"testing"
 
 	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/llm"
-	"github.com/open-ai-sdk/ai-go/tool"
 )
 
-// compileAgentRunnerContract is a build-only probe for the clean-break Agent
-// API. It intentionally compiles as part of the normal suite so the canonical
-// surface cannot drift unnoticed.
-func compileAgentRunnerContract(model llm.Model, tools *tool.Set, message aikit.Message) error {
-	assistant, err := agent.New(model).
+func requireRunSignature(run func(context.Context) (*agent.Result, error)) {}
+
+func requireStreamSignature(
+	stream func(context.Context) (iter.Seq2[aikit.StepEvent, error], error),
+) {
+}
+
+func TestAgentRunnerContractCompiles(t *testing.T) {
+	t.Parallel()
+
+	configured, err := agent.New(&runnerScriptModel{}).
 		ID("contract-agent").
 		Instructions("Follow the ordered conversation history.").
-		Tools(tools).
 		MaxTurns(4).
 		Build()
 	if err != nil {
-		return err
+		t.Fatalf("Build: %v", err)
 	}
 
-	runner := assistant.Runner().
-		Messages(
-			aikit.SystemMessage("System context"),
-			aikit.Message{
-				Role: aikit.RoleUser,
-				Content: []aikit.ContentPart{
-					aikit.TextPart("Describe this image"),
-					aikit.ImageURLPart("https://example.com/image.png"),
-				},
-			},
-		).
-		Message(message).
+	runner := configured.Runner().
+		Messages(aikit.SystemMessage("System context")).
+		Message(aikit.UserMessage("Describe this image")).
 		Prompt("Continue")
-
-	var run func(context.Context) (*agent.Result, error) = runner.Run
-	var stream func(context.Context) (iter.Seq2[aikit.StepEvent, error], error) = runner.Stream
-	_, _ = run, stream
-	return nil
+	requireRunSignature(runner.Run)
+	requireStreamSignature(runner.Stream)
 }

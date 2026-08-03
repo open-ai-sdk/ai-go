@@ -10,7 +10,7 @@ import (
 // tool-approval-request chunk carries isAutomatic and signature only when the
 // engine event sets them, matching the protocol's omit-when-absent shape.
 func TestChunkProducer_ToolApprovalRequest_OptionalFields(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{
 			Type:                aikit.StepEventToolApprovalRequest,
@@ -45,7 +45,7 @@ func TestChunkProducer_ToolApprovalRequest_OptionalFields(t *testing.T) {
 // TestChunkProducer_ToolApprovalRequest_OmitsUnsetOptionalFields verifies the
 // optional fields are absent when the engine does not set them.
 func TestChunkProducer_ToolApprovalRequest_OmitsUnsetOptionalFields(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{
 			Type:         aikit.StepEventToolApprovalRequest,
@@ -74,7 +74,7 @@ func TestChunkProducer_ToolApprovalRequest_OmitsUnsetOptionalFields(t *testing.T
 // carries providerMetadata when the engine source provides it.
 func TestChunkProducer_SourceURL_ProviderMetadata(t *testing.T) {
 	pm := map[string]any{"google": map[string]any{"groundingId": "g-1"}}
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{
 			Type: aikit.StepEventSource,

@@ -3,7 +3,7 @@ package gemini
 import "github.com/open-ai-sdk/ai-go/llm"
 
 // ProviderOptions holds Gemini-specific options passed via
-// GenerateTextRequest.ProviderOptions["gemini"].
+// llm.Request.ProviderOptions["gemini"], usually through Runner.With.
 type ProviderOptions struct {
 	// EnableGoogleSearch enables the Google Search grounding tool.
 	EnableGoogleSearch bool `json:"enableGoogleSearch"`

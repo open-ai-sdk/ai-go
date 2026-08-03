@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+//nolint:gocyclo // Tool actions intentionally share one ordered commit path.
 func executeToolCalls(
 	r *run,
 	tools *ToolSet,
@@ -29,12 +30,14 @@ func executeToolCalls(
 			break
 		}
 		if preparedCall.invalidErr != nil {
-			r.emitObserved(StepEvent{
+			if !r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
 				ToolCallID:        tc.id,
 				ToolCallName:      tc.name,
 				ToolCallArgsDelta: tc.args,
-			})
+			}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
 			errOutput := invalidToolCallOutput(tc, preparedCall.invalidErr)
 			*history = append(*history, buildToolResultMessage(tc.id, tc.name, errOutput))
 			toolNames = append(toolNames, tc.name)
@@ -54,13 +57,15 @@ func executeToolCalls(
 			}
 		}
 
-		r.emitObserved(StepEvent{
+		if !r.emitObserved(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
 			ToolCallName:      tc.name,
 			ToolCallArgsDelta: tc.args,
 			ThoughtSignature:  tc.thoughtSignature,
-		})
+		}) {
+			return toolNames, stepToolCalls, stepToolResults, r.stopError()
+		}
 		toolNames = append(toolNames, tc.name)
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
 			ID:               tc.id,
@@ -95,12 +100,14 @@ func executeToolCalls(
 		}
 		// Apply ToModelOutput transform for history; event keeps original output.
 		// def was resolved once during validation (prepareToolCalls), so no
-		// second scan of tools.Definitions is needed here.
+		// second scan of the tool registry is needed here.
 		modelOutput, transformErr := transformToolOutput(r, preparedCall.def, result)
 		if transformErr != nil {
 			result.ModelOutput = result.Output
 			result.ModelOutputSet = true
-			r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result})
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
 			if controlErr == nil {
 				controlErr = transformErr
 			}
@@ -120,7 +127,9 @@ func executeToolCalls(
 		}
 		stepToolCalls[len(stepToolCalls)-1].Args = json.RawMessage(result.Args)
 
-		r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result})
+		if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
+			return toolNames, stepToolCalls, stepToolResults, r.stopError()
+		}
 		updateLatestToolCallArgs(history, result.ID, result.Args)
 		*history = append(*history, toolResultHistoryMessage(result, modelOutput))
 		stepToolResults = append(stepToolResults, *result)
@@ -142,6 +151,8 @@ func skippedToolResult(tc toolCallState, reason string) *ToolResult {
 // Per-call errors travel through results[i].result.Output instead of through
 // g.Wait's return value. errgroup is used here only for concurrency limiting
 // and ctx propagation, not for fail-fast error aggregation.
+//
+//nolint:gocyclo // Parallel execution keeps validation, cancellation, and ordered commit together.
 func executeToolCallsParallel(
 	r *run,
 	tools *ToolSet,
@@ -201,13 +212,16 @@ func executeToolCallsParallel(
 		}
 
 		// Emit ToolCallReady before execution starts (matches sequential contract).
-		r.emitObserved(StepEvent{
+		if !r.emitObserved(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
 			ToolCallName:      tc.name,
 			ToolCallArgsDelta: tc.args,
 			ThoughtSignature:  tc.thoughtSignature,
-		})
+		}) {
+			results[i] = indexedResult{tc: tc, valid: true, controlErr: r.stopError()}
+			continue
+		}
 
 		results[i] = indexedResult{tc: tc, valid: true}
 		idx := i
@@ -299,19 +313,23 @@ func executeToolCallsParallel(
 	toolNames = make([]string, 0, len(prepared))
 	for _, res := range results {
 		if !res.valid {
-			r.emitObserved(StepEvent{
+			if !r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
 				ToolCallID:        res.tc.id,
 				ToolCallName:      res.tc.name,
 				ToolCallArgsDelta: res.tc.args,
-			})
+			}) {
+				res.controlErr = r.stopError()
+			}
 			*history = append(*history, buildToolResultMessage(res.tc.id, res.tc.name, res.result.Output))
 			toolNames = append(toolNames, res.tc.name)
 			continue
 		}
 
 		if res.result != nil {
-			r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result})
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result}) {
+				res.controlErr = r.stopError()
+			}
 			updateLatestToolCallArgs(history, res.result.ID, res.result.Args)
 			*history = append(*history, toolResultHistoryMessage(res.result, res.modelOutput))
 		}

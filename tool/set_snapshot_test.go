@@ -64,7 +64,7 @@ func TestSetSnapshotKeepsOrderDefinitionsAndExactInvokers(t *testing.T) {
 	}
 }
 
-func TestConstructorSetIgnoresLegacyFieldMutation(t *testing.T) {
+func TestConstructorSetOwnsInputDefinitions(t *testing.T) {
 	definitions := []aikit.ToolDefinition{{
 		Name:        "lookup",
 		InputSchema: map[string]any{"type": "object"},
@@ -75,19 +75,19 @@ func TestConstructorSetIgnoresLegacyFieldMutation(t *testing.T) {
 	}
 
 	definitions[0].Name = "source-mutated"
-	set.Definitions[0].Name = "legacy-mutated"
-	set.Definitions[0].InputSchema["type"] = "array"
-	set.Executor = nil
+	view := set.DefinitionsSnapshot()
+	view[0].Name = "view-mutated"
+	view[0].InputSchema["type"] = "array"
 
 	got := set.DefinitionsSnapshot()
 	if len(got) != 1 || got[0].Name != "lookup" || got[0].InputSchema["type"] != "object" {
 		t.Fatalf("canonical definitions = %#v", got)
 	}
-	if _, ok := set.Lookup("legacy-mutated"); ok {
-		t.Fatal("legacy field mutation changed canonical lookup")
+	if _, ok := set.Lookup("view-mutated"); ok {
+		t.Fatal("returned definition mutation changed canonical lookup")
 	}
 	if _, err := set.Invoke(context.Background(), "lookup", json.RawMessage(`{}`)); err != nil {
-		t.Fatalf("legacy executor mutation changed canonical invocation: %v", err)
+		t.Fatalf("constructor did not preserve invocation: %v", err)
 	}
 }
 
@@ -106,7 +106,8 @@ func TestSetCloneOwnsDefinitionsAndPreservesExactInvoker(t *testing.T) {
 		t.Fatalf("cloned invoker = %#v, %v; want exact original tool", invoker, ok)
 	}
 
-	cloned.Definitions[0].Name = "legacy-mutated"
+	clonedView := cloned.DefinitionsSnapshot()
+	clonedView[0].Name = "view-mutated"
 	if got := cloned.DefinitionsSnapshot()[0].Name; got != "clone" {
 		t.Fatalf("cloned canonical definition = %q, want clone", got)
 	}

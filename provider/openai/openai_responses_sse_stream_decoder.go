@@ -87,7 +87,7 @@ type pendingCall struct {
 // decodeResponsesSSEStream reads OpenAI Responses API SSE lines and emits
 // normalized aikit.StreamEvents onto ch. Closes ch when done or on error.
 // encodingWarnings are merged onto the finish event so callers see them in the
-// GenerateTextResult.Warnings field without a separate event.
+// agent.Result.Warnings field without a separate event.
 func decodeResponsesSSEStream(
 	ctx context.Context,
 	reader *transport.SSEReader,

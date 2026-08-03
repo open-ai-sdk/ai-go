@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -248,21 +247,14 @@ func (r Runner) Hook(value Hook) Runner {
 
 // Run executes and aggregates the same event driver exposed by Stream.
 func (r Runner) Run(ctx context.Context) (*Result, error) {
-	sequence, err := r.sequence(ctx, false)
+	reducer := newResultReducer(r.initialTranscript(), r.config.tools)
+	sequence, err := r.sequence(ctx, false, reducer)
 	if err != nil {
 		return nil, err
 	}
-	reducer := newResultReducer(r.initialTranscript(), r.config.tools)
-	for event, streamErr := range sequence {
+	for _, streamErr := range sequence {
 		if streamErr != nil {
 			return reducer.result, streamErr
-		}
-		terminal, consumeErr := reducer.consume(event)
-		if consumeErr != nil {
-			return reducer.result, consumeErr
-		}
-		if terminal {
-			break
 		}
 	}
 	return reducer.result, nil
@@ -271,10 +263,14 @@ func (r Runner) Run(ctx context.Context) (*Result, error) {
 // Stream validates the run and returns a single-use, single-owner event
 // iterator. Breaking iteration cancels and drains the underlying runtime.
 func (r Runner) Stream(ctx context.Context) (iter.Seq2[aikit.StepEvent, error], error) {
-	return r.sequence(ctx, true)
+	return r.sequence(ctx, true, nil)
 }
 
-func (r Runner) sequence(ctx context.Context, streaming bool) (iter.Seq2[aikit.StepEvent, error], error) {
+func (r Runner) sequence(
+	ctx context.Context,
+	streaming bool,
+	reducer *resultReducer,
+) (iter.Seq2[aikit.StepEvent, error], error) {
 	if ctx == nil {
 		return nil, &RunError{Field: "Context", Err: errors.New("context is nil")}
 	}
@@ -293,13 +289,15 @@ func (r Runner) sequence(ctx context.Context, streaming bool) (iter.Seq2[aikit.S
 			return
 		}
 		child, cancel := context.WithCancel(ctx)
-		ch := Stream(child, params)
-		shadow := newResultReducer(r.initialTranscript(), r.config.tools)
+		ch := driveStream(child, params)
+		if reducer == nil {
+			reducer = newResultReducer(r.initialTranscript(), r.config.tools)
+		}
 		hookContext := HookContext{RunID: runID, Turn: 1, Streaming: streaming, AgentID: r.config.id}
 		var runErr error
 		defer func() {
 			cancel()
-			r.notifyFinished(ctx, hookContext, shadow.result, runErr)
+			r.notifyFinished(ctx, hookContext, reducer.result, runErr)
 		}()
 		for event := range ch {
 			if event.Type == aikit.StepEventStepStart {
@@ -309,7 +307,7 @@ func (r Runner) sequence(ctx context.Context, streaming bool) (iter.Seq2[aikit.S
 				streamErr := event.Error
 				var maxTurns *MaxTurnsError
 				if errors.As(streamErr, &maxTurns) {
-					maxTurns.Result = shadow.result
+					maxTurns.Result = reducer.result
 				}
 				runErr = streamErr
 				yield(aikit.StepEvent{}, streamErr)
@@ -318,7 +316,14 @@ func (r Runner) sequence(ctx context.Context, streaming bool) (iter.Seq2[aikit.S
 				}
 				return
 			}
-			_, _ = shadow.consume(event)
+			if _, consumeErr := reducer.consume(event); consumeErr != nil {
+				runErr = consumeErr
+				yield(aikit.StepEvent{}, consumeErr)
+				cancel()
+				for range ch {
+				}
+				return
+			}
 			if !yield(snapshotStepEvent(event), nil) {
 				runErr = context.Canceled
 				cancel()
@@ -387,7 +392,12 @@ func validateMessageOrder(messages []aikit.Message) error {
 					return fmt.Errorf("tool result %q has no preceding tool call", part.ToolResultID)
 				}
 				if name != part.ToolResultName {
-					return fmt.Errorf("tool result %q names %q, preceding call names %q", part.ToolResultID, part.ToolResultName, name)
+					return fmt.Errorf(
+						"tool result %q names %q, preceding call names %q",
+						part.ToolResultID,
+						part.ToolResultName,
+						name,
+					)
 				}
 			case aikit.ContentPartTypeToolApprovalResponse:
 				if _, ok := approvals[part.ToolApprovalID]; !ok {
@@ -399,7 +409,7 @@ func validateMessageOrder(messages []aikit.Message) error {
 	return nil
 }
 
-func (r Runner) runParams(ctx context.Context, runID string, streaming bool) (RunParams, error) {
+func (r Runner) runParams(ctx context.Context, runID string, streaming bool) (runConfig, error) {
 	definitions := []aikit.ToolDefinition(nil)
 	if r.config.tools != nil {
 		definitions = r.config.tools.DefinitionsSnapshot()
@@ -432,7 +442,7 @@ func (r Runner) runParams(ctx context.Context, runID string, streaming bool) (Ru
 		ProviderOptions: jsonclone.Map(r.config.providerOptions),
 		ToolsContext:    cloneMap(r.config.toolsContext), RuntimeContext: cloneMap(r.config.runtimeContext),
 	}
-	return RunParams{
+	return runConfig{
 		Model: r.config.model, Request: request, Tools: r.config.tools,
 		StopWhen: stopWhen, MaxSteps: r.config.maxTurns,
 		ErrorOnMaxTurns: true,
@@ -507,7 +517,14 @@ func (r Runner) notifyFinished(ctx context.Context, hookContext HookContext, res
 	for _, hook := range r.config.hooks {
 		if capability, ok := hook.(RunFinishedHook); ok {
 			func() {
-				defer func() { _ = recover() }()
+				defer func() {
+					if value := recover(); value != nil && r.config.logger != nil {
+						r.config.logger.Error(
+							"agent run-finished hook panicked",
+							"hook", hook.HookName(), "panic", value,
+						)
+					}
+				}()
 				capability.OnRunFinished(ctx, hookContext, result, runErr)
 			}()
 		}
@@ -520,11 +537,4 @@ func newRunID() string {
 		return "unknown"
 	}
 	return hex.EncodeToString(value[:])
-}
-
-// MarshalProviderOptions is retained as a diagnostic helper for tests and
-// custom hooks that need a stable JSON view of provider options.
-func MarshalProviderOptions(value map[string]any) json.RawMessage {
-	raw, _ := json.Marshal(value)
-	return raw
 }

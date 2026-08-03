@@ -27,13 +27,13 @@ func TestPrepareStep_CompletedStepsAreDefensiveSnapshots(t *testing.T) {
 	}}
 	executor := &mockExecutor{}
 
-	var endEvent EndEvent
-	channel := Run(context.Background(), RunParams{
+	var capturedEnd endEvent
+	channel := driveStream(context.Background(), runConfig{
 		Model: model,
-		Tools: &ToolSet{
-			Definitions: []ToolDefinition{{Name: "search"}},
-			Executor:    executor,
-		},
+		Tools: testToolSet(
+			[]ToolDefinition{{Name: "search"}},
+			executor),
+
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			if ctx.StepNumber != 1 {
 				return nil
@@ -47,9 +47,9 @@ func TestPrepareStep_CompletedStepsAreDefensiveSnapshots(t *testing.T) {
 			step.ProviderMetadata["nested"].(map[string]any)["value"] = "corrupt"
 			return nil
 		},
-		Callbacks: &LifecycleCallbacks{
-			OnEnd: func(event EndEvent) {
-				endEvent = event
+		Callbacks: &lifecycleCallbacks{
+			OnEnd: func(event endEvent) {
+				capturedEnd = event
 			},
 		},
 		MaxSteps: 2,
@@ -60,7 +60,7 @@ func TestPrepareStep_CompletedStepsAreDefensiveSnapshots(t *testing.T) {
 		}
 	}
 
-	step := endEvent.Steps[0]
+	step := capturedEnd.Steps[0]
 	if step.Text != "original" {
 		t.Fatalf("OnEnd step text = %q, want original", step.Text)
 	}
@@ -93,10 +93,10 @@ func TestRepairToolCall_ReceivesIsolatedToolDefinitions(t *testing.T) {
 		finishEvt(FinishReasonToolCalls),
 	}}}
 
-	channel := Run(context.Background(), RunParams{
+	channel := driveStream(context.Background(), runConfig{
 		Model:   model,
 		Request: Request{Tools: definitions},
-		Tools:   &ToolSet{Definitions: definitions, Executor: executor},
+		Tools:   testToolSet(definitions, executor),
 		RepairToolCall: func(
 			_ context.Context,
 			input ToolCallRepairContext,
@@ -142,9 +142,9 @@ func TestOnChunk_UsagePayloadDoesNotAliasStreamEvent(t *testing.T) {
 		finishEvt(FinishReasonStop),
 	}}}
 
-	channel := Run(context.Background(), RunParams{
+	channel := driveStream(context.Background(), runConfig{
 		Model: model,
-		Callbacks: &LifecycleCallbacks{
+		Callbacks: &lifecycleCallbacks{
 			OnChunk: func(event StepEvent) {
 				if event.Type != StepEventUsage {
 					return

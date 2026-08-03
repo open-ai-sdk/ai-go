@@ -69,7 +69,7 @@ func TestRunLoop_TextOnly(t *testing.T) {
 		{textEvt("Hello "), textEvt("world"), finishEvt(FinishReasonStop)},
 	}}
 
-	ch := Run(context.Background(), RunParams{Model: model, MaxSteps: 5})
+	ch := driveStream(context.Background(), runConfig{Model: model, MaxSteps: 5})
 
 	var texts []string
 	var gotDone bool
@@ -100,9 +100,9 @@ func TestRunLoop_SingleToolCall(t *testing.T) {
 		{textEvt("It is 12:00 UTC"), finishEvt(FinishReasonStop)},
 	}}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: exec},
+		Tools:    testToolSet(nil, exec),
 		MaxSteps: 5,
 	})
 
@@ -143,15 +143,15 @@ func TestRunLoop_RepairToolCall_UnknownToolName(t *testing.T) {
 
 	var invalidCount int
 	var repairedResult *ToolResult
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: model,
 		Request: Request{
 			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "search"}}}},
 		},
-		Tools: &ToolSet{
-			Definitions: []ToolDefinition{{Name: "search"}},
-			Executor:    exec,
-		},
+		Tools: testToolSet(
+			[]ToolDefinition{{Name: "search"}},
+			exec),
+
 		RepairToolCall: func(_ context.Context, input ToolCallRepairContext) (*ToolCallInfo, error) {
 			if input.ToolCall.Name != "Search" {
 				return nil, errors.New("expected original tool call name to be Search")
@@ -203,15 +203,15 @@ func TestRunLoop_RepairToolCall_HistoryUsesRepairedToolCall(t *testing.T) {
 		{textEvt("done"), finishEvt(FinishReasonStop)},
 	}}}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: model,
 		Request: Request{
 			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "search"}}}},
 		},
-		Tools: &ToolSet{
-			Definitions: []ToolDefinition{{Name: "search"}},
-			Executor:    exec,
-		},
+		Tools: testToolSet(
+			[]ToolDefinition{{Name: "search"}},
+			exec),
+
 		RepairToolCall: func(_ context.Context, input ToolCallRepairContext) (*ToolCallInfo, error) {
 			return &ToolCallInfo{Name: "search"}, nil
 		},
@@ -264,9 +264,9 @@ func TestRunLoop_IsStepCount(t *testing.T) {
 
 	stopAfter1 := StopCondition(func(step int, _ *StepResult) bool { return step >= 1 })
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: exec},
+		Tools:    testToolSet(nil, exec),
 		StopWhen: stopAfter1,
 		MaxSteps: 10,
 	})
@@ -301,9 +301,9 @@ func TestRunLoop_MaxStepsExhausted(t *testing.T) {
 	}
 	model := &mockModel{calls: calls}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: exec},
+		Tools:    testToolSet(nil, exec),
 		MaxSteps: 3,
 	})
 
@@ -344,9 +344,9 @@ func TestRunLoop_NonPositiveMaxStepsIsUnbounded(t *testing.T) {
 				{toolCallEvt(0, "tc2", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
 				{toolCallEvt(0, "tc3", "loop", `{}`), finishEvt(FinishReasonToolCalls)},
 			}}
-			ch := Run(context.Background(), RunParams{
+			ch := driveStream(context.Background(), runConfig{
 				Model:    model,
-				Tools:    &ToolSet{Executor: &mockExecutor{}},
+				Tools:    testToolSet(nil, &mockExecutor{}),
 				StopWhen: IsStepCount(3),
 				MaxSteps: maxSteps,
 			})
@@ -394,13 +394,13 @@ func TestRunLoop_ToolsNeverStripped(t *testing.T) {
 		{Name: "browse"},
 	}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: rm,
 		Request: Request{
 			Tools:    inputTools,
 			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "hi"}}}},
 		},
-		Tools:    &ToolSet{Definitions: inputTools, Executor: exec},
+		Tools:    testToolSet(inputTools, exec),
 		MaxSteps: 5,
 	})
 	for ev := range ch {
@@ -432,15 +432,15 @@ func TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr(t *testing.T) {
 	}
 	model := &mockModel{calls: calls}
 
-	var endEvent EndEvent
+	var capturedEnd endEvent
 	var endSeen bool
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: exec},
+		Tools:    testToolSet(nil, exec),
 		MaxSteps: 2,
-		Callbacks: &LifecycleCallbacks{
-			OnEnd: func(event EndEvent) {
-				endEvent = event
+		Callbacks: &lifecycleCallbacks{
+			OnEnd: func(event endEvent) {
+				capturedEnd = event
 				endSeen = true
 			},
 		},
@@ -454,11 +454,11 @@ func TestRunLoop_MaxStepsExhausted_OnEndUsesLastStepSr(t *testing.T) {
 	if !endSeen {
 		t.Fatal("OnEnd was not called")
 	}
-	if endEvent.FinishReason != FinishReasonToolCalls {
-		t.Errorf("OnEnd.FinishReason: expected ToolCalls (honest), got %v", endEvent.FinishReason)
+	if capturedEnd.FinishReason != FinishReasonToolCalls {
+		t.Errorf("OnEnd.FinishReason: expected ToolCalls (honest), got %v", capturedEnd.FinishReason)
 	}
-	if len(endEvent.Steps) != 2 {
-		t.Errorf("expected 2 completed steps, got %d", len(endEvent.Steps))
+	if len(capturedEnd.Steps) != 2 {
+		t.Errorf("expected 2 completed steps, got %d", len(capturedEnd.Steps))
 	}
 }
 
@@ -504,12 +504,13 @@ func TestParseStructuredOutput_InvalidJSON(t *testing.T) {
 }
 
 func TestValidateToolCall_InvalidArgsIncludesCause(t *testing.T) {
-	_, err := validateToolCall(&ToolSet{
-		Definitions: []ToolDefinition{{Name: "search"}},
-	}, toolCallState{
-		name: "search",
-		args: `{"q":}`,
-	})
+	_, err := validateToolCall(testToolSet(
+		[]ToolDefinition{{Name: "search"}}, nil),
+
+		toolCallState{
+			name: "search",
+			args: `{"q":}`,
+		})
 	if err == nil {
 		t.Fatal("expected invalid args error")
 	}

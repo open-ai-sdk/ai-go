@@ -304,7 +304,9 @@ func (b Builder) Build() (*Agent, error) {
 	if len(b.config.approvalKey) > 0 && len(b.config.approvalKey) < minApprovalKeyBytes {
 		return nil, buildError("ApprovalKey", errInvalidApprovalKey)
 	}
-	if len(b.config.toolApproval) > 0 && isNilInterface(b.config.approver) && len(b.config.approvalKey) < minApprovalKeyBytes {
+	if len(b.config.toolApproval) > 0 &&
+		isNilInterface(b.config.approver) &&
+		len(b.config.approvalKey) < minApprovalKeyBytes {
 		return nil, buildError("ApprovalKey", errMissingApprovalKey)
 	}
 	for i, hook := range b.config.hooks {

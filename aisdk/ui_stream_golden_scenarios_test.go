@@ -3,19 +3,15 @@ package aisdk
 import (
 	"bytes"
 	"fmt"
+	"iter"
 	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-func makeEvents(evs ...aikit.StepEvent) <-chan aikit.StepEvent {
-	ch := make(chan aikit.StepEvent, len(evs))
-	for _, e := range evs {
-		ch <- e
-	}
-	close(ch)
-	return ch
+func makeEvents(events ...aikit.StepEvent) iter.Seq2[aikit.StepEvent, error] {
+	return newEventStream(events...)
 }
 
 func runAdapter(evs ...aikit.StepEvent) string {

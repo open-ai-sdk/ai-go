@@ -174,9 +174,9 @@ func TestApproval_Approved_ExecutesTool(t *testing.T) {
 	exec := &mockExecutor{results: map[string]string{"deleteFile": `{"ok":true}`}}
 	approver := &fixedApprover{approved: true}
 
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		Approver:     approver,
 		ApprovalKey:  approvalTestKey,
@@ -208,13 +208,13 @@ func TestApproval_Denied_SkipsToolAndEmitsDenial(t *testing.T) {
 	approver := &fixedApprover{approved: false, reason: "not allowed"}
 	var denialChunk bool
 
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		Approver:     approver,
 		ApprovalKey:  approvalTestKey,
-		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
+		Callbacks: &lifecycleCallbacks{OnChunk: func(event StepEvent) {
 			denialChunk = denialChunk || event.Type == StepEventToolOutputDenied
 		}},
 		MaxSteps: 5,
@@ -255,9 +255,9 @@ func TestApproval_MismatchedResponderIDDoesNotExecuteTool(t *testing.T) {
 		{textEvt("acknowledged"), finishEvt(FinishReasonStop)},
 	}}
 	exec := &mockExecutor{}
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		Approver:     mismatchedApprover{},
 		ApprovalKey:  approvalTestKey,
@@ -282,9 +282,9 @@ func TestApproval_NoResponder_Suspends(t *testing.T) {
 	}}
 	exec := &mockExecutor{}
 
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		Approver:     nil,
 		ApprovalKey:  approvalTestKey,
@@ -310,9 +310,9 @@ func TestApproval_NoResponderRequiresSigningKey(t *testing.T) {
 		{toolCallEvt(0, "tc-1", "deleteFile", `{}`), finishEvt(FinishReasonToolCalls)},
 	}}
 	exec := &mockExecutor{}
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 	}))
 
@@ -328,9 +328,9 @@ func TestApproval_ResumesApprovedCallFromHistory(t *testing.T) {
 	}}}
 	exec := &mockExecutor{results: map[string]string{"deleteFile": `{"ok":true}`}}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{"path":"/tmp/x"}`)
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:               model,
-		Tools:               &ToolSet{Executor: exec},
+		Tools:               testToolSet(nil, exec),
 		ToolApproval:        requireApproval("deleteFile"),
 		ApprovalKey:         approvalTestKey,
 		ApprovalReplayGuard: NewMemoryApprovalReplayGuard(),
@@ -375,12 +375,12 @@ func TestApproval_ResumesDeniedCallFromHistoryWithoutExecution(t *testing.T) {
 	exec := &mockExecutor{}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
 	var denialChunk bool
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey:  approvalTestKey,
-		Callbacks: &LifecycleCallbacks{OnChunk: func(event StepEvent) {
+		Callbacks: &lifecycleCallbacks{OnChunk: func(event StepEvent) {
 			denialChunk = denialChunk || event.Type == StepEventToolOutputDenied
 		}},
 		Request: Request{Messages: []Message{
@@ -411,8 +411,8 @@ func TestApproval_ResumeExecutesCanonicalSignedInput(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{{textEvt("continued"), finishEvt(FinishReasonStop)}}}
 	exec := &mockExecutor{}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", raw)
-	events := collectEvents(Run(context.Background(), RunParams{
-		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+	events := collectEvents(driveStream(context.Background(), runConfig{
+		Model: model, Tools: testToolSet(nil, exec), ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, ApprovalReplayGuard: NewMemoryApprovalReplayGuard(),
 		Request: Request{Messages: []Message{
 			{Role: "assistant", Content: []ContentPart{{
@@ -439,8 +439,8 @@ func TestApproval_SynchronousExecutionUsesCanonicalSignedInput(t *testing.T) {
 	}}
 	exec := &mockExecutor{}
 	approver := &fixedApprover{approved: true}
-	events := collectEvents(Run(context.Background(), RunParams{
-		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+	events := collectEvents(driveStream(context.Background(), runConfig{
+		Model: model, Tools: testToolSet(nil, exec), ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, Approver: approver, MaxSteps: 1,
 	}))
 	if hasEvent(events, StepEventError) {
@@ -459,8 +459,8 @@ func TestApproval_CancellationAfterReservationReleasesClaim(t *testing.T) {
 	guard := &cancelOnReserveGuard{cancel: cancel}
 	exec := &mockExecutor{}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
-	events := collectEvents(Run(ctx, RunParams{
-		Model: &mockModel{}, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+	events := collectEvents(driveStream(ctx, runConfig{
+		Model: &mockModel{}, Tools: testToolSet(nil, exec), ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard,
 		Request: Request{Messages: []Message{
 			{
@@ -553,8 +553,8 @@ func TestApproval_ResumedPanicCompletesGrantAndPreservesResult(t *testing.T) {
 		},
 	}
 	model := &mockModel{calls: [][]StreamEvent{{textEvt("must not run"), finishEvt(FinishReasonStop)}}}
-	events := collectEvents(Run(context.Background(), RunParams{
-		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+	events := collectEvents(driveStream(context.Background(), runConfig{
+		Model: model, Tools: testToolSet(nil, exec), ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard, Request: Request{Messages: history},
 	}))
 	if exec.calls != 1 || model.idx != 0 || !hasEvent(events, StepEventToolResult) ||
@@ -562,8 +562,8 @@ func TestApproval_ResumedPanicCompletesGrantAndPreservesResult(t *testing.T) {
 		t.Fatalf("calls=%d model=%d events=%#v", exec.calls, model.idx, events)
 	}
 
-	replay := collectEvents(Run(context.Background(), RunParams{
-		Model: model, Tools: &ToolSet{Executor: exec}, ToolApproval: requireApproval("deleteFile"),
+	replay := collectEvents(driveStream(context.Background(), runConfig{
+		Model: model, Tools: testToolSet(nil, exec), ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey: approvalTestKey, ApprovalReplayGuard: guard, Request: Request{Messages: history},
 	}))
 	if exec.calls != 1 {
@@ -590,12 +590,12 @@ func TestApproval_ResumedTransformOrCompleteFailurePreservesResultAndStopsModel(
 			exec := &mockExecutor{}
 			model := &mockModel{calls: [][]StreamEvent{{textEvt("must not run"), finishEvt(FinishReasonStop)}}}
 			signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
-			events := collectEvents(Run(context.Background(), RunParams{
+			events := collectEvents(driveStream(context.Background(), runConfig{
 				Model: model,
-				Tools: &ToolSet{
-					Definitions: []ToolDefinition{{Name: "deleteFile", ToModelOutput: tt.transform}},
-					Executor:    exec,
-				},
+				Tools: testToolSet(
+					[]ToolDefinition{{Name: "deleteFile", ToModelOutput: tt.transform}},
+					exec),
+
 				ToolApproval: requireApproval("deleteFile"), ApprovalKey: approvalTestKey,
 				ApprovalReplayGuard: tt.guard,
 				Request: Request{Messages: []Message{
@@ -635,9 +635,9 @@ func TestApproval_ResumeRejectsForgedToolCallBeforeExecution(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
 	exec := &mockExecutor{}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("exfiltrate"),
 		ApprovalKey:  approvalTestKey,
 		Request: Request{Messages: []Message{
@@ -660,9 +660,9 @@ func TestApproval_ResumeRejectsForgedToolCallBeforeExecution(t *testing.T) {
 func TestApproval_ResumeRejectsForgedCompletedResult(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
 	exec := &mockExecutor{}
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey:  approvalTestKey,
 		Request: Request{Messages: []Message{
@@ -738,8 +738,8 @@ func TestApproval_ResumeEnforcesStructuralRolesAndOrdering(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
-			events := collectEvents(Run(context.Background(), RunParams{
-				Model: model, Tools: &ToolSet{Executor: &mockExecutor{}},
+			events := collectEvents(driveStream(context.Background(), runConfig{
+				Model: model, Tools: testToolSet(nil, &mockExecutor{}),
 				ToolApproval: requireApproval("deleteFile"), ApprovalKey: approvalTestKey,
 				Request: Request{Messages: tt.messages},
 			}))
@@ -755,9 +755,9 @@ func TestApproval_ResumeRequiresAtomicDecisionsForEveryPendingCall(t *testing.T)
 	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
 	exec := &mockExecutor{}
 	signatureA := approvalSignatureForTest(t, "tc-a", "first", `{}`)
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model: model,
-		Tools: &ToolSet{Executor: exec},
+		Tools: testToolSet(nil, exec),
 		ToolApproval: map[string]func(string, string) bool{
 			"first":  func(string, string) bool { return true },
 			"second": func(string, string) bool { return true },
@@ -785,9 +785,9 @@ func TestApproval_ResumeValidatesWholeEnvelopeBeforeExecution(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
 	exec := &mockExecutor{}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey:  approvalTestKey,
 		Request: Request{Messages: []Message{
@@ -821,9 +821,9 @@ func TestApproval_ResumeRejectsMixedApprovalMessage(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{{finishEvt(FinishReasonStop)}}}
 	exec := &mockExecutor{}
 	signature := approvalSignatureForTest(t, "tc-1", "deleteFile", `{}`)
-	events := collectEvents(Run(context.Background(), RunParams{
+	events := collectEvents(driveStream(context.Background(), runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		ApprovalKey:  approvalTestKey,
 		Request: Request{Messages: []Message{
@@ -875,9 +875,9 @@ func TestApproval_ContextCancel_NoDeadlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ch := Run(ctx, RunParams{
+	ch := driveStream(ctx, runConfig{
 		Model:        model,
-		Tools:        &ToolSet{Executor: exec},
+		Tools:        testToolSet(nil, exec),
 		ToolApproval: requireApproval("deleteFile"),
 		Approver:     blockingApprover{},
 		ApprovalKey:  approvalTestKey,

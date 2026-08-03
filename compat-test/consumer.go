@@ -10,31 +10,26 @@ import (
 	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/aisdk"
 	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/provider/openaicompat"
 )
 
-// fakeModel is a hand-written ai.LanguageModel built entirely from the public
+// fakeModel is a hand-written llm.Model built entirely from the public
 // surface. The compile-time interface assertion below is the proof.
 type fakeModel struct{}
 
 func (fakeModel) ModelID() string { return "fake" }
 
-func (fakeModel) Stream(_ context.Context, req ai.LanguageModelRequest) (<-chan ai.StreamEvent, error) {
-	ch := make(chan ai.StreamEvent, 2)
-	text := "hello"
-	if req.Output != nil {
-		text = `{"value":"ok"}`
-	}
-	ch <- ai.StreamEvent{Type: ai.StreamEventTextDelta, TextDelta: text}
+func (fakeModel) Stream(_ context.Context, _ llm.Request) (<-chan aikit.StreamEvent, error) {
+	ch := make(chan aikit.StreamEvent, 2)
+	ch <- aikit.StreamEvent{Type: aikit.StreamEventTextDelta, TextDelta: "hello"}
 	ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonStop}
 	close(ch)
 	return ch, nil
 }
 
 // Compile-time proof an external consumer can implement the model interface.
-var _ ai.LanguageModel = fakeModel{}
+var _ llm.Model = fakeModel{}
 
 // nativeFake proves providers can add the optional native completion
 // capability without changing the minimal streaming model contract.
@@ -52,9 +47,7 @@ func (nativeFake) Complete(_ context.Context, _ llm.Request) (*llm.CompletionRes
 	}, nil
 }
 
-var (
-	_ ai.CompletionModel = nativeFake{}
-)
+var _ ai.CompletionModel = nativeFake{}
 
 // NativeCompletion exercises native payload access through public APIs only.
 func NativeCompletion(ctx context.Context) (string, bool, error) {
@@ -64,47 +57,6 @@ func NativeCompletion(ctx context.Context) (string, bool, error) {
 	}
 	_, typed := ai.RawResponseAs[rawResponse](response)
 	return response.MessageID, typed, nil
-}
-
-// GenerateText exercises the ergonomic blocking façade with public request
-// and result contracts only.
-func GenerateText(ctx context.Context) (string, error) {
-	result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-		Model:    fakeModel{},
-		Messages: []aikit.Message{aikit.UserMessage("hello")},
-	})
-	if err != nil {
-		return "", err
-	}
-	return result.Text, nil
-}
-
-// StreamText exercises the live façade and its aggregate result view.
-func StreamText(ctx context.Context) (string, error) {
-	result, err := ai.StreamText(ctx, ai.GenerateTextRequest{
-		Model:    fakeModel{},
-		Messages: []aikit.Message{aikit.UserMessage("hello")},
-	}).Consume()
-	if err != nil {
-		return "", err
-	}
-	return result.Text, nil
-}
-
-type generatedObject struct {
-	Value string `json:"value"`
-}
-
-// GenerateObject exercises the generic structured-output façade.
-func GenerateObject(ctx context.Context) (string, error) {
-	result, err := ai.GenerateObject[generatedObject](ctx, ai.GenerateObjectRequest{
-		Model:    fakeModel{},
-		Messages: []aikit.Message{aikit.UserMessage("hello")},
-	})
-	if err != nil {
-		return "", err
-	}
-	return result.Object.Value, nil
 }
 
 type fakeEmbeddingModel struct{}
@@ -157,33 +109,4 @@ func CompatibleModel() llm.Model {
 		ModelID:  "external-model",
 		APIKey:   "key",
 	})
-}
-
-// fakeStreamEventer implements aisdk.StreamEventer from outside the module,
-// proving the UI-stream surface is mockable — its Stream() returns the public
-// aikit.StepEvent, not an unnameable internal type.
-type fakeStreamEventer struct{ ch <-chan aikit.StepEvent }
-
-func (f fakeStreamEventer) Stream() <-chan aikit.StepEvent { return f.ch }
-func (fakeStreamEventer) DrainUnused()                     {}
-
-// Compile-time proof an external consumer can implement the aisdk surface.
-var _ aisdk.StreamEventer = fakeStreamEventer{}
-
-// ConsumeFakeStream builds a StepEvent channel by hand and drives it through
-// ai.NewStreamResult — both the channel element type and NewStreamResult's
-// parameter were unnameable outside the module before aikit was made public.
-func ConsumeFakeStream() (string, error) {
-	ch := make(chan aikit.StepEvent, 3)
-	ch <- aikit.StepEvent{Type: aikit.StepEventStepStart}
-	ch <- aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"}
-	ch <- aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop}
-	close(ch)
-
-	sr := ai.NewStreamResult(ch) // parameter type is aikit.StepEvent via the ai.StepEvent alias
-	res, err := sr.Consume()
-	if err != nil {
-		return "", err
-	}
-	return res.Text, nil
 }

@@ -41,14 +41,20 @@ func hookDynamicTool(
 func TestRunnerHooksUseStableContextAndPerTurnCompletionPatches(t *testing.T) {
 	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
 		{
-			{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallName: "lookup", ToolCallArgsDelta: `{}`},
+			{
+				Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0,
+				ToolCallID: "call-1", ToolCallName: "lookup", ToolCallArgsDelta: `{}`,
+			},
 			{Type: aikit.StreamEventFinish, MessageID: "tool-turn", FinishReason: aikit.FinishReasonToolCalls},
 		},
 		runnerTextEvents("answer", "done"),
 	}}
-	set := mustHookToolSet(t, hookDynamicTool(t, "lookup", func(context.Context, json.RawMessage) (json.RawMessage, error) {
-		return json.RawMessage(`{"ok":true}`), nil
-	}))
+	set := mustHookToolSet(
+		t,
+		hookDynamicTool(t, "lookup", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"ok":true}`), nil
+		}),
+	)
 
 	var mu sync.Mutex
 	var completionContexts []agent.HookContext
@@ -125,7 +131,8 @@ func TestRunnerHooksUseStableContextAndPerTurnCompletionPatches(t *testing.T) {
 			t.Fatalf("completion context %d = %#v", i, hc)
 		}
 	}
-	if completionContexts[0].RunID != completionContexts[1].RunID || finishedContext.RunID != completionContexts[0].RunID {
+	if completionContexts[0].RunID != completionContexts[1].RunID ||
+		finishedContext.RunID != completionContexts[0].RunID {
 		t.Fatalf("run IDs are not stable: completion=%#v finished=%#v", completionContexts, finishedContext)
 	}
 	if finishedContext.Turn != 2 || finishedContext.Streaming || finishedContext.AgentID != "hook-agent" {
@@ -135,7 +142,8 @@ func TestRunnerHooksUseStableContextAndPerTurnCompletionPatches(t *testing.T) {
 		t.Fatalf("event hook order = %v", eventOrder)
 	}
 	for i := 0; i < len(eventOrder); i += 2 {
-		if eventOrder[i][:6] != "first:" || eventOrder[i+1][:7] != "second:" || eventOrder[i][6:] != eventOrder[i+1][7:] {
+		if eventOrder[i][:6] != "first:" || eventOrder[i+1][:7] != "second:" ||
+			eventOrder[i][6:] != eventOrder[i+1][7:] {
 			t.Fatalf("event hook registration order at %d = %v", i, eventOrder[i:i+2])
 		}
 	}
@@ -154,11 +162,48 @@ func TestRunnerHookErrorIsTypedAndObserverPanicIsRecovered(t *testing.T) {
 	})
 	_, err := blocked.Runner().Prompt("blocked").Run(context.Background())
 	var hookErr *agent.HookError
-	if !errors.As(err, &hookErr) || !errors.Is(err, sentinel) || hookErr.Hook != "policy" || hookErr.Phase != "before_completion" {
+	if !errors.As(err, &hookErr) || !errors.Is(err, sentinel) || hookErr.Hook != "policy" ||
+		hookErr.Phase != "before_completion" {
 		t.Fatalf("Run() error = %T %v, want typed policy HookError", err, err)
 	}
 	if len(blockedModel.requestSnapshots()) != 0 {
 		t.Fatal("model was called after steering hook failure")
+	}
+
+	var toolExecutions atomic.Int32
+	readyModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+		{
+			{
+				Type:              aikit.StreamEventToolCallDelta,
+				ToolCallIndex:     0,
+				ToolCallID:        "call-1",
+				ToolCallName:      "work",
+				ToolCallArgsDelta: `{}`,
+			},
+			{Type: aikit.StreamEventFinish, MessageID: "tool-turn", FinishReason: aikit.FinishReasonToolCalls},
+		},
+	}}
+	readySet := mustHookToolSet(
+		t,
+		hookDynamicTool(t, "work", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			toolExecutions.Add(1)
+			return json.RawMessage(`"unexpected"`), nil
+		}),
+	)
+	readyBlocked := mustRunnerAgent(t, readyModel, func(builder agent.Builder) agent.Builder {
+		return builder.Tools(readySet).Hook(agent.HookFuncs{
+			Name: "event-policy",
+			StreamEventFunc: func(_ context.Context, _ agent.HookContext, event aikit.StepEvent) error {
+				if event.Type == aikit.StepEventToolCallReady {
+					return sentinel
+				}
+				return nil
+			},
+		})
+	})
+	_, err = readyBlocked.Runner().Prompt("work").Run(context.Background())
+	if !errors.As(err, &hookErr) || hookErr.Phase != "stream_event" || toolExecutions.Load() != 0 {
+		t.Fatalf("ready event failure = (%T %v), executions=%d", err, err, toolExecutions.Load())
 	}
 
 	panicModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", "ok")}}
@@ -182,22 +227,39 @@ func TestRunnerHookErrorIsTypedAndObserverPanicIsRecovered(t *testing.T) {
 func TestRunnerToolHooksRewriteSkipAndRepair(t *testing.T) {
 	t.Run("sequential rewrite", func(t *testing.T) {
 		var executed json.RawMessage
-		set := mustHookToolSet(t, hookDynamicTool(t, "echo", func(_ context.Context, input json.RawMessage) (json.RawMessage, error) {
-			executed = append(json.RawMessage(nil), input...)
-			return input, nil
-		}))
-		model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{{
-			{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "echo-1", ToolCallName: "echo", ToolCallArgsDelta: `{"value":"original"}`},
-			{Type: aikit.StreamEventFinish, MessageID: "tool-turn", FinishReason: aikit.FinishReasonToolCalls},
-		}}}
+		set := mustHookToolSet(
+			t,
+			hookDynamicTool(t, "echo", func(_ context.Context, input json.RawMessage) (json.RawMessage, error) {
+				executed = append(json.RawMessage(nil), input...)
+				return input, nil
+			}),
+		)
+		model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+			{
+				{
+					Type:              aikit.StreamEventToolCallDelta,
+					ToolCallIndex:     0,
+					ToolCallID:        "echo-1",
+					ToolCallName:      "echo",
+					ToolCallArgsDelta: `{"value":"original"}`,
+				},
+				{Type: aikit.StreamEventFinish, MessageID: "tool-turn", FinishReason: aikit.FinishReasonToolCalls},
+			},
+		}}
 		built := mustRunnerAgent(t, model, func(builder agent.Builder) agent.Builder {
 			return builder.Tools(set).Hook(agent.HookFuncs{
 				Name: "rewrite",
 				BeforeToolFunc: func(context.Context, agent.HookContext, aikit.ToolCallInfo) (agent.ToolCallAction, error) {
-					return agent.ToolCallAction{Kind: agent.ToolCallRewrite, Args: json.RawMessage(`{"value":"rewritten"}`)}, nil
+					return agent.ToolCallAction{
+						Kind: agent.ToolCallRewrite,
+						Args: json.RawMessage(`{"value":"rewritten"}`),
+					}, nil
 				},
 				AfterToolFunc: func(context.Context, agent.HookContext, aikit.ToolResult) (agent.ToolResultAction, error) {
-					return agent.ToolResultAction{Kind: agent.ToolResultRewrite, Result: aikit.ToolResult{Output: "after"}}, nil
+					return agent.ToolResultAction{
+						Kind:   agent.ToolResultRewrite,
+						Result: aikit.ToolResult{Output: "after"},
+					}, nil
 				},
 			})
 		})
@@ -206,7 +268,8 @@ func TestRunnerToolHooksRewriteSkipAndRepair(t *testing.T) {
 		if !errors.As(err, &maxTurns) || result == nil {
 			t.Fatalf("Run() = (%#v, %v), want partial MaxTurnsError", result, err)
 		}
-		if string(executed) != `{"value":"rewritten"}` || len(result.ToolResults) != 1 || result.ToolResults[0].Output != "after" {
+		if string(executed) != `{"value":"rewritten"}` || len(result.ToolResults) != 1 ||
+			result.ToolResults[0].Output != "after" {
 			t.Fatalf("rewrite result: executed=%s results=%#v", executed, result.ToolResults)
 		}
 	})
@@ -222,11 +285,25 @@ func TestRunnerToolHooksRewriteSkipAndRepair(t *testing.T) {
 				return json.RawMessage(`"ran"`), nil
 			}),
 		)
-		model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{{
-			{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "skip-1", ToolCallName: "skip", ToolCallArgsDelta: `{}`},
-			{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 1, ToolCallID: "run-1", ToolCallName: "run", ToolCallArgsDelta: `{}`},
-			{Type: aikit.StreamEventFinish, MessageID: "parallel", FinishReason: aikit.FinishReasonToolCalls},
-		}}}
+		model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+			{
+				{
+					Type:              aikit.StreamEventToolCallDelta,
+					ToolCallIndex:     0,
+					ToolCallID:        "skip-1",
+					ToolCallName:      "skip",
+					ToolCallArgsDelta: `{}`,
+				},
+				{
+					Type:              aikit.StreamEventToolCallDelta,
+					ToolCallIndex:     1,
+					ToolCallID:        "run-1",
+					ToolCallName:      "run",
+					ToolCallArgsDelta: `{}`,
+				},
+				{Type: aikit.StreamEventFinish, MessageID: "parallel", FinishReason: aikit.FinishReasonToolCalls},
+			},
+		}}
 		built := mustRunnerAgent(t, model, func(builder agent.Builder) agent.Builder {
 			return builder.Tools(set).ToolConcurrency(2).Hook(agent.HookFuncs{
 				Name: "skip-policy",
@@ -243,21 +320,33 @@ func TestRunnerToolHooksRewriteSkipAndRepair(t *testing.T) {
 		if !errors.As(err, &maxTurns) || result == nil || len(result.ToolResults) != 2 {
 			t.Fatalf("Run() = (%#v, %v), want two partial tool results", result, err)
 		}
-		if skipExecutions.Load() != 0 || result.ToolResults[0].Output != "denied" || result.ToolResults[1].Output != `"ran"` {
+		if skipExecutions.Load() != 0 || result.ToolResults[0].Output != "denied" ||
+			result.ToolResults[1].Output != `"ran"` {
 			t.Fatalf("parallel results=%#v skip executions=%d", result.ToolResults, skipExecutions.Load())
 		}
 	})
 
 	t.Run("invalid call repair", func(t *testing.T) {
 		var executions atomic.Int32
-		set := mustHookToolSet(t, hookDynamicTool(t, "actual", func(context.Context, json.RawMessage) (json.RawMessage, error) {
-			executions.Add(1)
-			return json.RawMessage(`{"repaired":true}`), nil
-		}))
-		model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{{
-			{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "bad-1", ToolCallName: "typo", ToolCallArgsDelta: `{}`},
-			{Type: aikit.StreamEventFinish, MessageID: "repair", FinishReason: aikit.FinishReasonToolCalls},
-		}}}
+		set := mustHookToolSet(
+			t,
+			hookDynamicTool(t, "actual", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+				executions.Add(1)
+				return json.RawMessage(`{"repaired":true}`), nil
+			}),
+		)
+		model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+			{
+				{
+					Type:              aikit.StreamEventToolCallDelta,
+					ToolCallIndex:     0,
+					ToolCallID:        "bad-1",
+					ToolCallName:      "typo",
+					ToolCallArgsDelta: `{}`,
+				},
+				{Type: aikit.StreamEventFinish, MessageID: "repair", FinishReason: aikit.FinishReasonToolCalls},
+			},
+		}}
 		built := mustRunnerAgent(t, model, func(builder agent.Builder) agent.Builder {
 			return builder.Tools(set).Hook(agent.HookFuncs{
 				Name: "repair",

@@ -2,6 +2,9 @@ package aisdk
 
 import (
 	"io"
+	"iter"
+
+	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
 // CreateUIStreamOptions configures CreateUIMessageStream.
@@ -35,13 +38,13 @@ func (sw *UIStreamWriter) WriteTransientData(name string, payload any) error {
 	return sw.writer.WriteTransientData(name, payload)
 }
 
-// Merge pipes chunks from a ToUIMessageStream output into this stream.
+// mergeChunks pipes chunks from a ToUIMessageStream output into this stream.
 // The merge respects lifecycle: it skips the start chunk from the merged stream
 // (since the outer stream already emitted start) and captures the finish reason
 // without emitting finish (the outer stream manages finish).
 // Merge returns the first write error (client disconnected); writes stop after
 // it while text tracking continues so the returned text stays accurate.
-func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) error {
+func (sw *UIStreamWriter) mergeChunks(chunks <-chan Chunk) error {
 	var writeErr error
 	for c := range chunks {
 		switch c.Type {
@@ -71,10 +74,10 @@ func (sw *UIStreamWriter) Merge(chunks <-chan Chunk) error {
 	return writeErr
 }
 
-// MergeStreamResult is a convenience that merges a StreamEventer using ToUIMessageStream.
-func (sw *UIStreamWriter) MergeStreamResult(sr StreamEventer, msgID string, opts ToUIStreamOptions) error {
-	chunks := ToUIMessageStream(sr, msgID, opts)
-	return sw.Merge(chunks)
+// Merge converts and merges an event iterator into the managed UI stream.
+func (sw *UIStreamWriter) Merge(events iter.Seq2[aikit.StepEvent, error], msgID string, opts ToUIStreamOptions) error {
+	chunks := ToUIMessageStream(events, msgID, opts)
+	return sw.mergeChunks(chunks)
 }
 
 // CreateUIMessageStream creates a managed UI message stream.

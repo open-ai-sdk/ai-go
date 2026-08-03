@@ -81,11 +81,10 @@ func TestToolSetFromClient_CreatesInvokableRemoteTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolSetFromClient: %v", err)
 	}
-	if set.Executor != nil {
-		t.Fatal("remote tools should be registered as invokers, not through the legacy executor seam")
-	}
-
 	canonical := QualifiedName("remote", "search")
+	if _, ok := set.Invoker(canonical); !ok {
+		t.Fatal("remote tool should be registered as an invoker")
+	}
 	definition, ok := set.Lookup(canonical)
 	if !ok {
 		t.Fatalf("missing definition %q", canonical)

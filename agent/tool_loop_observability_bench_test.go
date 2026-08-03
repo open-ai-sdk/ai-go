@@ -24,8 +24,8 @@ func (benchModel) Stream(context.Context, Request) (<-chan StreamEvent, error) {
 	return ch, nil
 }
 
-func runBenchOnce(params RunParams) {
-	ch := Run(context.Background(), params)
+func runBenchOnce(params runConfig) {
+	ch := driveStream(context.Background(), params)
 	for range ch {
 	}
 }
@@ -35,7 +35,7 @@ func runBenchOnce(params RunParams) {
 func BenchmarkToolLoop_InstrumentationDisabled(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		runBenchOnce(RunParams{Model: benchModel{}, MaxSteps: 1})
+		runBenchOnce(runConfig{Model: benchModel{}, MaxSteps: 1})
 	}
 }
 
@@ -46,6 +46,6 @@ func BenchmarkToolLoop_InstrumentationEnabled(b *testing.B) {
 	logger := slog.New(slog.DiscardHandler)
 	tracer := tracing.NewTracer()
 	for i := 0; i < b.N; i++ {
-		runBenchOnce(RunParams{Model: benchModel{}, MaxSteps: 1, Logger: logger, Tracer: tracer})
+		runBenchOnce(runConfig{Model: benchModel{}, MaxSteps: 1, Logger: logger, Tracer: tracer})
 	}
 }

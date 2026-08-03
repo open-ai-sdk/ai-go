@@ -39,7 +39,11 @@ func TestBuilderBuildDefaults(t *testing.T) {
 		t.Fatalf("MaxTurns() = %d, want 1", built.MaxTurns())
 	}
 	if built.config.maxParallelTools != 1 || built.config.parallelToolExecution {
-		t.Fatalf("tool concurrency = (%d, %v), want (1, false)", built.config.maxParallelTools, built.config.parallelToolExecution)
+		t.Fatalf(
+			"tool concurrency = (%d, %v), want (1, false)",
+			built.config.maxParallelTools,
+			built.config.parallelToolExecution,
+		)
 	}
 	if built.config.model != model {
 		t.Fatal("Build changed the configured model")
@@ -60,8 +64,16 @@ func TestBuilderBuildRejectsStaticConfigurationErrors(t *testing.T) {
 		{name: "nil model", build: New(nil), field: "Model", cause: errNilModel},
 		{name: "typed nil model", build: New(typedNilModel), field: "Model", cause: errNilModel},
 		{name: "zero max turns", build: New(model).MaxTurns(0), field: "MaxTurns", cause: errInvalidMaxTurns},
-		{name: "zero concurrency", build: New(model).ToolConcurrency(0), field: "ToolConcurrency", cause: errInvalidConcurrency},
-		{name: "short approval key", build: New(model).ApprovalKey(shortKey), field: "ApprovalKey", cause: errInvalidApprovalKey},
+		{
+			name: "zero concurrency", build: New(model).ToolConcurrency(0),
+			field: "ToolConcurrency", cause: errInvalidConcurrency,
+		},
+		{
+			name:  "short approval key",
+			build: New(model).ApprovalKey(shortKey),
+			field: "ApprovalKey",
+			cause: errInvalidApprovalKey,
+		},
 		{
 			name: "suspending approval without key",
 			build: New(model).ToolApproval(map[string]ApprovalPolicy{
@@ -99,9 +111,14 @@ func TestBuilderBuildRejectsStaticConfigurationErrors(t *testing.T) {
 
 func TestBuilderBuildValidatesToolsAndChoice(t *testing.T) {
 	model := &builderTestModel{id: "model-id"}
-	lookup, err := tool.NewDynamic("lookup", "", map[string]any{"type": "object"}, func(context.Context, json.RawMessage) (json.RawMessage, error) {
-		return json.RawMessage(`{}`), nil
-	})
+	lookup, err := tool.NewDynamic(
+		"lookup",
+		"",
+		map[string]any{"type": "object"},
+		func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{}`), nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("NewDynamic() error = %v", err)
 	}
@@ -271,9 +288,10 @@ func TestBuilderBuildSnapshotsToolRegistry(t *testing.T) {
 		t.Fatal("Build retained the caller's tool registry pointer")
 	}
 
-	// Legacy mirrors remain mutable during the cutover. They cannot alter the
-	// Agent's canonical registry or a per-Runner clone.
-	set.Definitions[0].Name = "mutated"
+	// Read views are independent and cannot alter the Agent's canonical
+	// registry or a per-Runner clone.
+	definitions := set.DefinitionsSnapshot()
+	definitions[0].Name = "mutated"
 	definition, exists := built.config.tools.Lookup("lookup")
 	if !exists || definition.Description != "original" {
 		t.Fatalf("Agent tool = (%#v, %v), want original lookup", definition, exists)

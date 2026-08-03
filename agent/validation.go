@@ -138,7 +138,7 @@ func applyToolCallRepair(tc toolCallState, repaired *ToolCallInfo) toolCallState
 
 // validateToolCall checks tc against tools and, on success, returns the
 // matched ToolDefinition so callers resolve a tool call's definition exactly
-// once instead of validating and then re-scanning Definitions during
+// once instead of validating and then re-scanning the registry during
 // execution for ToModelOutput/Timeout. The zero ToolDefinition is returned
 // when tools carries no Definitions at all (any tool name is accepted, same
 // as before Lookup existed).
@@ -149,7 +149,7 @@ func validateToolCall(tools *ToolSet, tc toolCallState) (ToolDefinition, error) 
 			AvailableTools: nil,
 		}
 	}
-	if len(tools.Definitions) == 0 {
+	if tools.Len() == 0 {
 		if err := invalidToolArgumentsError(tc.name, tc.args); err != nil {
 			return ToolDefinition{}, err
 		}
@@ -198,11 +198,12 @@ func invalidToolCallOutput(tc toolCallState, err error) string {
 }
 
 func toolDefinitionNames(tools *ToolSet) []string {
-	if tools == nil || len(tools.Definitions) == 0 {
+	if tools == nil || tools.Len() == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(tools.Definitions))
-	for _, def := range tools.Definitions {
+	definitions := tools.DefinitionsSnapshot()
+	names := make([]string, 0, len(definitions))
+	for _, def := range definitions {
 		names = append(names, def.Name)
 	}
 	return names
@@ -212,7 +213,7 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 	if tools == nil {
 		return nil
 	}
-	if len(tools.Definitions) == 0 {
+	if tools.Len() == 0 {
 		return tools.Restrict(nil)
 	}
 	if len(activeDefs) == 0 {
@@ -221,7 +222,7 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 	return tools.Restrict(activeDefs)
 }
 
-// executeToolCall invokes tools.Executor for a single validated call. def is
+// executeToolCall invokes the immutable tool registry for a validated call. def is
 // the ToolDefinition resolved during validation; its Timeout, if set, bounds
 // this call — the default (zero) leaves ctx as the caller's, since agent
 // tools may legitimately run for minutes and an SDK-imposed default would be

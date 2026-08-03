@@ -84,7 +84,7 @@ func filterTools(tools []ToolDefinition, active []string) []ToolDefinition {
 }
 
 func emitOnStepEnd(
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 	step int,
 	toolCalls []ToolCallInfo,
 	toolResults []ToolResult,
@@ -93,7 +93,7 @@ func emitOnStepEnd(
 	if cb == nil || cb.OnStepEnd == nil {
 		return
 	}
-	cb.OnStepEnd(StepEndEvent{
+	cb.OnStepEnd(stepEndEvent{
 		StepNumber:       step,
 		MessageID:        sr.messageID,
 		Text:             sr.text,
@@ -107,7 +107,7 @@ func emitOnStepEnd(
 	})
 }
 
-func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) {
+func emitOnEnd(cb *lifecycleCallbacks, steps []StepResultInfo, sr streamResult) {
 	if cb == nil || cb.OnEnd == nil {
 		return
 	}
@@ -139,7 +139,7 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 	if sr.providerMeta != nil {
 		lastMeta = sr.providerMeta
 	}
-	cb.OnEnd(EndEvent{
+	cb.OnEnd(endEvent{
 		MessageID:        lastMessageID,
 		Text:             totalText,
 		Reasoning:        totalReasoning,

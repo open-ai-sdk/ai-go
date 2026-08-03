@@ -8,7 +8,7 @@ func IsStepCount(n int) StopCondition {
 }
 
 // Never never stops a run early. The model ending without a tool call still
-// terminates naturally, and a positive RunParams.MaxSteps remains a hard cap.
+// terminates naturally, and a positive runConfig.MaxSteps remains a hard cap.
 func Never() StopCondition {
 	return func(_ int, _ *StepResult) bool {
 		return false
