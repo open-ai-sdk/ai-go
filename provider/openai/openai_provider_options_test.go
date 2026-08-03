@@ -2,6 +2,7 @@ package openai
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/ai"
@@ -19,6 +20,34 @@ func TestResponsesProviderOptionsAcceptJSONNumber(t *testing.T) {
 	}
 	if request.MaxOutputTokens != 321 {
 		t.Fatalf("MaxOutputTokens = %d, want 321", request.MaxOutputTokens)
+	}
+}
+
+func TestResponsesProviderOptionsAcceptPDFDetail(t *testing.T) {
+	request, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+			ai.DocumentDataPart([]byte("pdf"), "application/pdf", "report.pdf"),
+		}}},
+		ProviderOptions: map[string]any{
+			"openai": map[string]any{"pdfDetail": "low"},
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	if got := request.Input[0].Content[0].Detail; got != "low" {
+		t.Fatalf("Detail = %q, want low", got)
+	}
+}
+
+func TestResponsesProviderOptionsRejectInvalidPDFDetail(t *testing.T) {
+	_, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
+		ProviderOptions: map[string]any{
+			"openai": ProviderOptions{PDFDetail: "ultra"},
+		},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "pdf detail") {
+		t.Fatalf("error = %v, want invalid pdf detail", err)
 	}
 }
 

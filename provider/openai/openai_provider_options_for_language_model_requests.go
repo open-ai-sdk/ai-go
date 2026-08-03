@@ -43,6 +43,10 @@ type ProviderOptions struct {
 	// If zero, CallSettings.MaxTokens is used.
 	MaxOutputTokens int `json:"maxOutputTokens"`
 
+	// PDFDetail controls page-image processing for PDF input files.
+	// Valid values are "auto", "low", and "high". Empty uses the API default.
+	PDFDetail string `json:"pdfDetail"`
+
 	// Store controls whether the response is stored server-side.
 	// Defaults to true (OpenAI default). Set to false to opt out.
 	Store *bool `json:"store"`

@@ -70,8 +70,10 @@ type inputPart struct {
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 	FileID   string `json:"file_id,omitempty"`
+	FileData string `json:"file_data,omitempty"`
 	FileURL  string `json:"file_url,omitempty"`
 	Filename string `json:"filename,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 // responsesTool describes a tool available to the model.
@@ -88,9 +90,12 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
+	if err := validatePDFDetail(opts.PDFDetail); err != nil {
+		return responsesRequest{}, nil, err
+	}
 	var warnings []aikit.Warning
 
-	input, encWarnings, err := encodeInput(req)
+	input, encWarnings, err := encodeInput(req, opts.PDFDetail)
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
@@ -165,7 +170,7 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 }
 
 // encodeInput converts system prompt + messages to Responses API input items.
-func encodeInput(req llm.Request) ([]inputItem, []aikit.Warning, error) {
+func encodeInput(req llm.Request, pdfDetail string) ([]inputItem, []aikit.Warning, error) {
 	var items []inputItem
 	var warnings []aikit.Warning
 
@@ -177,7 +182,7 @@ func encodeInput(req llm.Request) ([]inputItem, []aikit.Warning, error) {
 	}
 
 	for _, m := range req.Messages {
-		encoded, w, err := encodeMessage(m)
+		encoded, w, err := encodeMessage(m, pdfDetail)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -187,12 +192,12 @@ func encodeInput(req llm.Request) ([]inputItem, []aikit.Warning, error) {
 	return items, warnings, nil
 }
 
-func encodeMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
+func encodeMessage(m aikit.Message, pdfDetail string) ([]inputItem, []aikit.Warning, error) {
 	switch m.Role {
 	case aikit.RoleSystem:
 		return encodeSystemMessage(m)
 	case aikit.RoleUser:
-		return encodeUserMessage(m)
+		return encodeUserMessage(m, pdfDetail)
 	case aikit.RoleAssistant:
 		return encodeAssistantMessage(m)
 	case aikit.RoleTool:
@@ -227,7 +232,7 @@ func encodeSystemMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) 
 	return []inputItem{{Role: "system", Content: parts}}, warnings, nil
 }
 
-func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
+func encodeUserMessage(m aikit.Message, pdfDetail string) ([]inputItem, []aikit.Warning, error) {
 	var parts []inputPart
 	var warnings []aikit.Warning
 
@@ -256,42 +261,14 @@ func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 				default:
 					parts = append(parts, inputPart{Type: "input_image", ImageURL: p.FileURL})
 				}
-			} else if p.FileID != "" {
-				parts = append(parts, inputPart{Type: "input_file", FileID: p.FileID, Filename: p.Filename})
-			} else if len(p.Data) > 0 {
-				mediaType := p.MediaType
-				if mediaType == "" {
-					mediaType = "application/octet-stream"
-				}
-				parts = append(
-					parts,
-					inputPart{
-						Type:     "input_file",
-						FileURL:  "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data),
-						Filename: p.Filename,
-					},
-				)
 			} else {
-				parts = append(parts, inputPart{Type: "input_file", FileURL: p.FileURL, Filename: p.Filename})
+				parts = append(parts, encodeInputFilePart(p, pdfDetail))
 			}
 		case aikit.ContentPartTypeDocument:
-			switch {
-			case p.FileID != "":
-				parts = append(parts, inputPart{Type: "input_file", FileID: p.FileID, Filename: p.Filename})
-			case p.FileURL != "":
-				parts = append(parts, inputPart{Type: "input_file", FileURL: p.FileURL, Filename: p.Filename})
-			case len(p.Data) > 0:
-				mediaType := p.MediaType
-				if mediaType == "" {
-					mediaType = "application/octet-stream"
-				}
-				parts = append(parts, inputPart{
-					Type: "input_file", FileURL: "data:" + mediaType + ";base64," +
-						base64.StdEncoding.EncodeToString(p.Data), Filename: p.Filename,
-				})
-			default:
+			if p.FileID == "" && p.FileURL == "" && len(p.Data) == 0 {
 				return nil, warnings, fmt.Errorf("openai: document part has no source")
 			}
+			parts = append(parts, encodeInputFilePart(p, pdfDetail))
 		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeVideo:
 			return nil, warnings, fmt.Errorf("openai: Responses API does not support %s input", p.Type)
 
@@ -308,6 +285,47 @@ func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 		return nil, warnings, nil
 	}
 	return []inputItem{{Role: "user", Content: parts}}, warnings, nil
+}
+
+func encodeInputFilePart(p aikit.ContentPart, pdfDetail string) inputPart {
+	part := inputPart{
+		Type: "input_file", Filename: p.Filename,
+		Detail: pdfDetailForPart(p, pdfDetail),
+	}
+	switch {
+	case p.FileID != "":
+		part.FileID = p.FileID
+	case len(p.Data) > 0:
+		mediaType := p.MediaType
+		if mediaType == "" {
+			mediaType = "application/octet-stream"
+		}
+		part.FileData = "data:" + mediaType + ";base64," +
+			base64.StdEncoding.EncodeToString(p.Data)
+	default:
+		part.FileURL = p.FileURL
+	}
+	return part
+}
+
+func pdfDetailForPart(p aikit.ContentPart, detail string) string {
+	mediaType, _, _ := strings.Cut(p.MediaType, ";")
+	if strings.EqualFold(strings.TrimSpace(mediaType), "application/pdf") {
+		return detail
+	}
+	return ""
+}
+
+func validatePDFDetail(detail string) error {
+	switch detail {
+	case "", "auto", "low", "high":
+		return nil
+	default:
+		return fmt.Errorf(
+			"openai: pdf detail must be one of auto, low, or high, got %q",
+			detail,
+		)
+	}
 }
 
 func encodeAssistantMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {

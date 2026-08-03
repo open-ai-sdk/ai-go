@@ -93,6 +93,43 @@ file/image events, direct completion aggregation exposes them through
 other assistant content. OpenAI does not yet expose a dedicated `ImageModel`
 factory in ai-go.
 
+## PDF inputs
+
+Responses models accept PDF input through inline data, an external URL, or an
+uploaded file ID. Inline bytes use `file_data` on the wire:
+
+```go
+pdf, err := os.ReadFile("report.pdf")
+if err != nil {
+  return err
+}
+
+message := ai.Message{
+  Role: ai.RoleUser,
+  Content: []ai.ContentPart{
+    ai.TextPart("Summarize the report and explain its charts."),
+    ai.DocumentDataPart(pdf, "application/pdf", "report.pdf"),
+  },
+}
+
+response, err := ai.NewCompletion(model, "").
+  Messages(message).
+  With(openai.ProviderOptions{PDFDetail: "high"}).
+  Send(ctx)
+```
+
+`PDFDetail` accepts `auto`, `low`, or `high` and applies to PDF page-image
+processing. Leave it empty to use the API default. Extracted PDF text is always
+included; higher detail primarily benefits dense charts, diagrams, and small
+print while consuming more input tokens.
+
+For files reused across requests, upload once with `Client.UploadFile` using
+`FilePurposeUserData`, then pass the returned ID with
+`ai.DocumentFileIDPart`. `ai.DocumentURLPart` sends an external URL directly.
+OpenAI currently limits each file and the combined files in one request to 50
+MB; see the [file-input guide](https://developers.openai.com/api/docs/guides/file-inputs)
+for current limits and processing details.
+
 ## Compatibility
 
 `openai.NewLanguageModel` and `openai.NewChatLanguageModel` remain available for

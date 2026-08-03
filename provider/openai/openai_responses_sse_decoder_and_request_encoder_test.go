@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -454,11 +455,139 @@ func TestEncodeRequest_FileDataInput(t *testing.T) {
 	if filePart.Type != "input_file" {
 		t.Errorf("expected type=input_file, got %q", filePart.Type)
 	}
-	if filePart.FileURL == "" {
-		t.Error("expected FileURL to be set with data URI")
+	if filePart.FileData != "data:application/pdf;base64,cGRmLWNvbnRlbnQ=" {
+		t.Errorf("FileData = %q, want PDF data URI", filePart.FileData)
+	}
+	if filePart.FileURL != "" {
+		t.Errorf("FileURL = %q, want empty for inline data", filePart.FileURL)
 	}
 	if filePart.Filename != "doc.pdf" {
 		t.Errorf("expected Filename=doc.pdf, got %q", filePart.Filename)
+	}
+}
+
+func TestEncodeRequest_PDFSourcesAndDetail(t *testing.T) {
+	tests := []struct {
+		name string
+		part ai.ContentPart
+		want func(t *testing.T, part inputPart)
+	}{
+		{
+			name: "inline data",
+			part: ai.DocumentDataPart([]byte("pdf"), "application/pdf", "report.pdf"),
+			want: func(t *testing.T, part inputPart) {
+				t.Helper()
+				if part.FileData != "data:application/pdf;base64,cGRm" {
+					t.Errorf("FileData = %q", part.FileData)
+				}
+			},
+		},
+		{
+			name: "external URL",
+			part: ai.DocumentURLPart("https://example.com/report.pdf", "application/pdf"),
+			want: func(t *testing.T, part inputPart) {
+				t.Helper()
+				if part.FileURL != "https://example.com/report.pdf" {
+					t.Errorf("FileURL = %q", part.FileURL)
+				}
+			},
+		},
+		{
+			name: "file ID",
+			part: ai.DocumentFileIDPart("file-pdf123", "application/pdf", "report.pdf"),
+			want: func(t *testing.T, part inputPart) {
+				t.Helper()
+				if part.FileID != "file-pdf123" {
+					t.Errorf("FileID = %q", part.FileID)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := ai.LanguageModelRequest{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+					ai.TextPart("summarize"), test.part,
+				}}},
+				ProviderOptions: map[string]any{
+					"openai": ProviderOptions{PDFDetail: "high"},
+				},
+			}
+			encoded, _, err := encodeRequest("gpt-test", req, false)
+			if err != nil {
+				t.Fatalf("encodeRequest() error = %v", err)
+			}
+			part := encoded.Input[0].Content[1]
+			if part.Type != "input_file" || part.Detail != "high" {
+				t.Fatalf("part = %#v, want input_file detail=high", part)
+			}
+			test.want(t, part)
+		})
+	}
+}
+
+func TestEncodeRequest_InlinePDFUsesFileDataJSONKey(t *testing.T) {
+	req := ai.LanguageModelRequest{Messages: []ai.Message{{
+		Role: ai.RoleUser,
+		Content: []ai.ContentPart{
+			ai.DocumentDataPart([]byte("pdf"), "application/pdf", "report.pdf"),
+		},
+	}}}
+	encoded, _, err := encodeRequest("gpt-test", req, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	raw, err := json.Marshal(encoded.Input[0].Content[0])
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	jsonText := string(raw)
+	if !strings.Contains(jsonText, `"file_data":"data:application/pdf;base64,cGRm"`) {
+		t.Fatalf("JSON = %s, want file_data", jsonText)
+	}
+	if strings.Contains(jsonText, `"file_url"`) {
+		t.Fatalf("JSON = %s, must not contain file_url for inline data", jsonText)
+	}
+}
+
+func TestEncodeRequest_PDFDetailIsOmittedForNonPDF(t *testing.T) {
+	req := ai.LanguageModelRequest{
+		Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+			ai.DocumentDataPart([]byte("notes"), "text/plain", "notes.txt"),
+		}}},
+		ProviderOptions: map[string]any{
+			"openai": ProviderOptions{PDFDetail: "high"},
+		},
+	}
+	encoded, _, err := encodeRequest("gpt-test", req, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	if got := encoded.Input[0].Content[0].Detail; got != "" {
+		t.Fatalf("Detail = %q, want empty for non-PDF input", got)
+	}
+}
+
+func TestEncodeRequest_RejectsAudioAndVideoInput(t *testing.T) {
+	tests := []struct {
+		name string
+		part ai.ContentPart
+	}{
+		{name: "audio", part: ai.AudioDataPart([]byte("wav"), "audio/wav")},
+		{name: "video", part: ai.VideoDataPart([]byte("mp4"), "video/mp4")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
+				Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{
+					test.part,
+				}}},
+			}, false)
+			if err == nil || !strings.Contains(err.Error(), "does not support "+test.name+" input") {
+				t.Fatalf("error = %v, want unsupported %s input", err, test.name)
+			}
+		})
 	}
 }
 
