@@ -16,6 +16,14 @@ type completionModel struct {
 	err     error
 }
 
+type blockingCompletionModel struct{ events chan aikit.StreamEvent }
+
+func (*blockingCompletionModel) ModelID() string { return "blocking-completion-test" }
+
+func (m *blockingCompletionModel) Stream(context.Context, llm.Request) (<-chan aikit.StreamEvent, error) {
+	return m.events, nil
+}
+
 func (*completionModel) ModelID() string { return "completion-test" }
 
 func (m *completionModel) Stream(_ context.Context, request llm.Request) (<-chan aikit.StreamEvent, error) {
@@ -121,11 +129,50 @@ func TestCompletionReturnsPartialResponseForStreamError(t *testing.T) {
 
 func TestCompletionBuilderBuildCopiesOwnedValues(t *testing.T) {
 	model := &completionModel{}
-	first := llm.NewCompletion(model, "prompt").StopSequences("first").Build()
-	second := llm.NewCompletion(model, "prompt").StopSequences("second").Build()
+	builder := llm.NewCompletion(model, "prompt").StopSequences("first")
+	first := builder.Build()
+	second := builder.Build()
 	first.Settings.StopSequences[0] = "changed"
-	if !reflect.DeepEqual(second.Settings.StopSequences, []string{"second"}) {
+	if !reflect.DeepEqual(second.Settings.StopSequences, []string{"first"}) {
 		t.Fatalf("second = %#v", second)
+	}
+
+	jsonBuilder := builder.ProviderOptionsJSON("json", map[string]any{"nested": map[string]any{"value": "original"}})
+	jsonFirst := jsonBuilder.Build()
+	jsonSecond := jsonBuilder.Build()
+	jsonFirst.ProviderOptions["json"] = map[string]any{"value": "changed"}
+	if got := jsonSecond.ProviderOptions["json"].(map[string]any)["nested"].(map[string]any)["value"]; got != "original" {
+		t.Fatalf("ProviderOptionsJSON branch value = %v", got)
+	}
+
+	withBuilder := builder.With(testProviderOptions{Value: "original"})
+	withFirst := withBuilder.Build()
+	withSecond := withBuilder.Build()
+	withFirst.ProviderOptions["test"] = testProviderOptions{Value: "changed"}
+	if got := withSecond.ProviderOptions["test"].(testProviderOptions).Value; got != "original" {
+		t.Fatalf("With branch value = %q", got)
+	}
+}
+
+func TestCompletionReturnsPartialResponseOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	model := &blockingCompletionModel{events: make(chan aikit.StreamEvent)}
+	result := make(chan struct {
+		response *llm.CompletionResponse
+		err      error
+	}, 1)
+	go func() {
+		response, err := llm.NewCompletion(model, "prompt").Send(ctx)
+		result <- struct {
+			response *llm.CompletionResponse
+			err      error
+		}{response, err}
+	}()
+	model.events <- aikit.StreamEvent{Type: aikit.StreamEventTextDelta, TextDelta: "partial"}
+	cancel()
+	got := <-result
+	if !errors.Is(got.err, context.Canceled) || got.response == nil || got.response.Text != "partial" {
+		t.Fatalf("response=%#v err=%v", got.response, got.err)
 	}
 }
 

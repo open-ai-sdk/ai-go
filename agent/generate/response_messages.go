@@ -24,7 +24,7 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	for _, tc := range step.ToolCalls {
 		part := ContentPart{
 			Type: ContentPartTypeToolCall, ToolCallID: tc.ID, ToolCallName: tc.Name,
-			ToolCallArgs: tc.Args, ThoughtSignature: tc.ThoughtSignature,
+			ToolCallArgs: append(json.RawMessage(nil), tc.Args...), ThoughtSignature: tc.ThoughtSignature,
 			ToolApprovalID: tc.ApprovalID, ToolApprovalSignature: tc.ApprovalSignature,
 		}
 		if index := toolCallContentIndex(assistantParts, tc.ID); index >= 0 {

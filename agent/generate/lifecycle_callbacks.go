@@ -35,6 +35,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 				Reasoning:        event.Reasoning,
 				Content:          cloneContentParts(completed.Content),
 				Files:            cloneGeneratedFiles(completed.Files),
+				Sources:          append([]Source(nil), completed.Sources...),
 				ToolCalls:        event.ToolCalls,
 				ToolResults:      event.ToolResults,
 				FinishReason:     event.FinishReason,
@@ -66,6 +67,7 @@ func lifecycleCallbacks(req GenerateTextRequest) *agent.LifecycleCallbacks {
 				if i < len(capturedSteps) {
 					steps[i].Content = cloneContentParts(capturedSteps[i].Content)
 					steps[i].Files = cloneGeneratedFiles(capturedSteps[i].Files)
+					steps[i].Sources = append([]Source(nil), capturedSteps[i].Sources...)
 				}
 				steps[i].Response = Response{Messages: ResponseMessagesForStep(steps[i], req.Tools)}
 			}
@@ -121,5 +123,9 @@ func captureLifecycleContent(current *StepOutput, event StepEvent) {
 			Type: ContentPartTypeFile, Data: append([]byte(nil), event.FileData...),
 			MediaType: event.FileMediaType,
 		})
+	case StepEventSource:
+		if event.Source != nil {
+			current.Sources = append(current.Sources, *event.Source)
+		}
 	}
 }

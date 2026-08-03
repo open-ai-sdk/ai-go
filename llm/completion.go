@@ -173,7 +173,7 @@ func (b CompletionRequestBuilder) Send(ctx context.Context) (*CompletionResponse
 	if err != nil {
 		return nil, err
 	}
-	return collectCompletion(stream)
+	return collectCompletion(ctx, stream)
 }
 
 // Complete is the explicit function form of CompletionRequestBuilder.Send.
@@ -201,50 +201,57 @@ func Chat(ctx context.Context, model Model, prompt string, history ...aikit.Mess
 	return response.Text, err
 }
 
-func collectCompletion(stream <-chan aikit.StreamEvent) (*CompletionResponse, error) {
+func collectCompletion(ctx context.Context, stream <-chan aikit.StreamEvent) (*CompletionResponse, error) {
 	response := &CompletionResponse{Message: aikit.Message{Role: aikit.RoleAssistant}}
 	toolParts := make(map[int]int)
-	for event := range stream {
-		switch event.Type {
-		case aikit.StreamEventTextDelta:
-			response.Text += event.TextDelta
-			appendText(&response.Message.Content, event.TextDelta, event.ThoughtSignature)
-		case aikit.StreamEventReasoningDelta:
-			response.Reasoning += event.TextDelta
-			appendReasoning(&response.Message.Content, event.TextDelta, event.ThoughtSignature)
-		case aikit.StreamEventToolCallDelta:
-			appendToolCall(&response.Message.Content, toolParts, event)
-		case aikit.StreamEventUsage:
-			if event.Usage != nil {
-				response.Usage = mergeUsage(response.Usage, *event.Usage)
+	for {
+		select {
+		case <-ctx.Done():
+			return response, ctx.Err()
+		case event, ok := <-stream:
+			if !ok {
+				return response, nil
 			}
-		case aikit.StreamEventSource:
-			if event.Source != nil {
-				response.Sources = append(response.Sources, *event.Source)
+			switch event.Type {
+			case aikit.StreamEventTextDelta:
+				response.Text += event.TextDelta
+				appendText(&response.Message.Content, event.TextDelta, event.ThoughtSignature)
+			case aikit.StreamEventReasoningDelta:
+				response.Reasoning += event.TextDelta
+				appendReasoning(&response.Message.Content, event.TextDelta, event.ThoughtSignature)
+			case aikit.StreamEventToolCallDelta:
+				appendToolCall(&response.Message.Content, toolParts, event)
+			case aikit.StreamEventUsage:
+				if event.Usage != nil {
+					response.Usage = mergeUsage(response.Usage, *event.Usage)
+				}
+			case aikit.StreamEventSource:
+				if event.Source != nil {
+					response.Sources = append(response.Sources, *event.Source)
+				}
+			case aikit.StreamEventFileDelta:
+				if len(event.FileData) != 0 {
+					data := append([]byte(nil), event.FileData...)
+					response.Files = append(response.Files, GeneratedFile{Data: data, MediaType: event.FileMediaType})
+					response.Message.Content = append(response.Message.Content, aikit.ContentPart{
+						Type:      aikit.ContentPartTypeFile,
+						Data:      append([]byte(nil), data...),
+						MediaType: event.FileMediaType,
+					})
+				}
+			case aikit.StreamEventFinish:
+				response.FinishReason = event.FinishReason
+				response.RawFinishReason = event.RawFinishReason
+				response.ProviderMetadata = cloneMap(event.ProviderMetadata)
+				response.Warnings = append(response.Warnings, event.Warnings...)
+			case aikit.StreamEventError:
+				if event.Error == nil {
+					return response, fmt.Errorf("llm: completion stream emitted a nil error")
+				}
+				return response, event.Error
 			}
-		case aikit.StreamEventFileDelta:
-			if len(event.FileData) != 0 {
-				data := append([]byte(nil), event.FileData...)
-				response.Files = append(response.Files, GeneratedFile{Data: data, MediaType: event.FileMediaType})
-				response.Message.Content = append(response.Message.Content, aikit.ContentPart{
-					Type:      aikit.ContentPartTypeFile,
-					Data:      append([]byte(nil), data...),
-					MediaType: event.FileMediaType,
-				})
-			}
-		case aikit.StreamEventFinish:
-			response.FinishReason = event.FinishReason
-			response.RawFinishReason = event.RawFinishReason
-			response.ProviderMetadata = cloneMap(event.ProviderMetadata)
-			response.Warnings = append(response.Warnings, event.Warnings...)
-		case aikit.StreamEventError:
-			if event.Error == nil {
-				return response, fmt.Errorf("llm: completion stream emitted a nil error")
-			}
-			return response, event.Error
 		}
 	}
-	return response, nil
 }
 
 func appendText(parts *[]aikit.ContentPart, value, signature string) {

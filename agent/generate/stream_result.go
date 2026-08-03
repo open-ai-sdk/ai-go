@@ -531,10 +531,10 @@ func handleFileDelta(event StepEvent, result *GenerateTextResult, step *StepOutp
 	if len(event.FileData) == 0 {
 		return
 	}
-	file := GeneratedFile{Data: event.FileData, MediaType: event.FileMediaType}
+	file := GeneratedFile{Data: append([]byte(nil), event.FileData...), MediaType: event.FileMediaType}
 	result.Files = append(result.Files, file)
 	if step != nil {
-		step.Files = append(step.Files, file)
+		step.Files = append(step.Files, GeneratedFile{Data: append([]byte(nil), file.Data...), MediaType: file.MediaType})
 		step.Content = append(step.Content, ContentPart{
 			Type: ContentPartTypeFile, Data: append([]byte(nil), event.FileData...),
 			MediaType: event.FileMediaType,

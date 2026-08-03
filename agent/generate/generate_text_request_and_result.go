@@ -159,6 +159,7 @@ type StepEndEvent struct {
 	Reasoning        string
 	Content          []ContentPart
 	Files            []GeneratedFile
+	Sources          []Source
 	ToolCalls        []ToolCallOutput
 	ToolResults      []ToolResult
 	FinishReason     FinishReason

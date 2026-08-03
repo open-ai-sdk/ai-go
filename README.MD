@@ -47,9 +47,13 @@ import (
 )
 
 func main() {
-	model := openai.NewLanguageModel("gpt-5", openai.Config{
+	client, err := openai.NewClient(openai.Config{
 		APIKey: os.Getenv("OPENAI_API_KEY"),
 	})
+	if err != nil {
+		panic(err)
+	}
+	model := client.CompletionModel("gpt-5")
 
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
 		Model:        model,

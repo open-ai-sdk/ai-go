@@ -49,7 +49,7 @@ func TestToolLoopAgentCompletionUsesAgentDefaultsAndTools(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	if result.Text != "done" || model.calls != 2 || atomic.LoadInt32(&executor.calls) != 1 {
-		t.Fatalf("result=%#v model.calls=%d executor.calls=%d", result, model.calls, executor.calls)
+		t.Fatalf("result=%#v model.calls=%d executor.calls=%d", result, model.calls, atomic.LoadInt32(&executor.calls))
 	}
 	if len(model.requests[0].Messages) != 2 || model.requests[0].Messages[0].Role != RoleSystem ||
 		model.requests[0].Messages[0].Content[0].Text != "override" ||

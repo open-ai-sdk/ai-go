@@ -1,9 +1,9 @@
 # Completions
 
 Completion is ai-go's provider-neutral layer for asking a language model to
-produce an assistant message. It exposes both convenient one-shot APIs and a
-lower-level request builder using ordinary interfaces, functions, value
-builders, and channels.
+produce an assistant message. It exposes four API levels: convenient one-shot
+text APIs, a direct response builder, and typed direct completion, using
+ordinary interfaces, functions, value builders, and channels.
 
 The completion APIs cover one provider model call:
 
@@ -79,8 +79,12 @@ answer, err := ai.Chat(
   model,
   "And what is its population?",
   ai.UserMessage("Tell me about Hanoi."),
-  ai.AssistantMessage("Hanoi is the capital of Vietnam."),
+	ai.AssistantMessage("Hanoi is the capital of Vietnam."),
 )
+if err != nil {
+  return err
+}
+fmt.Println(answer)
 ```
 
 Both functions intentionally return only text. They discard the richer view

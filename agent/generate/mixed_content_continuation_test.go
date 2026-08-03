@@ -83,6 +83,26 @@ func TestLifecycleCallbackResponsesPreserveMixedContent(t *testing.T) {
 	}
 }
 
+func TestLifecycleCallbacksPreserveSources(t *testing.T) {
+	var stepEvent StepEndEvent
+	var endEvent EndEvent
+	callbacks := lifecycleCallbacks(GenerateTextRequest{
+		OnStepEnd: func(event StepEndEvent) { stepEvent = event },
+		OnEnd:     func(event EndEvent) { endEvent = event },
+	})
+	callbacks.OnChunk(StepEvent{Type: StepEventStepStart})
+	callbacks.OnChunk(StepEvent{Type: StepEventSource, Source: &Source{ID: "source-1"}})
+	callbacks.OnStepEnd(coreagent.StepEndEvent{})
+	callbacks.OnEnd(coreagent.EndEvent{Steps: []coreagent.StepResultInfo{{}}})
+
+	if len(stepEvent.Sources) != 1 || stepEvent.Sources[0].ID != "source-1" {
+		t.Fatalf("step sources = %#v", stepEvent.Sources)
+	}
+	if len(endEvent.Steps) != 1 || len(endEvent.Steps[0].Sources) != 1 || endEvent.Steps[0].Sources[0].ID != "source-1" {
+		t.Fatalf("end steps = %#v", endEvent.Steps)
+	}
+}
+
 func TestResponseMessagesReconcilesPartialContentWithToolCalls(t *testing.T) {
 	step := StepOutput{
 		Content: []ContentPart{{Type: ContentPartTypeFile, Data: []byte("image"), MediaType: "image/png"}},
@@ -101,5 +121,9 @@ func TestResponseMessagesReconcilesPartialContentWithToolCalls(t *testing.T) {
 		parts[2].ToolCallID != "call-1" || parts[2].ToolApprovalID != "approval-1" ||
 		parts[2].ToolApprovalSignature != "signature-1" {
 		t.Fatalf("reconciled content = %#v", parts)
+	}
+	parts[2].ToolCallArgs[0] = 'X'
+	if string(step.ToolCalls[0].Args) != `{"detail":"high"}` {
+		t.Fatalf("response message aliases tool call args: %q", step.ToolCalls[0].Args)
 	}
 }

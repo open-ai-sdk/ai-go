@@ -97,12 +97,15 @@ type (
 // Direct completion contracts are owned by llm because they use the model
 // boundary without entering the agent runtime.
 type (
-	AgentCompletionRequestBuilder = generate.AgentCompletionRequestBuilder
-	CompletionRequest             = llm.CompletionRequest
-	CompletionRequestBuilder      = llm.CompletionRequestBuilder
-	CompletionResponse            = llm.CompletionResponse
-	CompletionFile                = llm.GeneratedFile
+	CompletionRequest        = llm.CompletionRequest
+	CompletionRequestBuilder = llm.CompletionRequestBuilder
+	CompletionResponse       = llm.CompletionResponse
+	CompletionFile           = llm.GeneratedFile
 )
+
+// AgentCompletionRequestBuilder belongs to the agent runtime and runs its
+// full tool loop.
+type AgentCompletionRequestBuilder = generate.AgentCompletionRequestBuilder
 
 type ObjectResult[T any] = generate.ObjectResult[T]
 

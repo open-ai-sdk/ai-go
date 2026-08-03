@@ -32,9 +32,10 @@ type ClientConfig struct {
 // provider clients compose one or more Client values and expose only the model
 // capabilities they actually implement.
 type Client[P Policy] struct {
-	policy    P
-	baseURL   string
-	transport *transport.Client
+	policy       P
+	providerName string
+	baseURL      string
+	transport    *transport.Client
 }
 
 // NewClient constructs a reusable provider client and validates its endpoint.
@@ -55,13 +56,18 @@ func NewClient[P Policy](policy P, config ClientConfig) (*Client[P], error) {
 		Provider:   providerName,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("provider %s: configure transport: %w", policy.ProviderName(), err)
+		return nil, fmt.Errorf("provider %s: configure transport: %w", providerName, err)
 	}
-	return &Client[P]{policy: policy, baseURL: baseURL, transport: client}, nil
+	return &Client[P]{policy: policy, providerName: providerName, baseURL: baseURL, transport: client}, nil
 }
 
 // ProviderName returns the stable provider identifier.
-func (c *Client[P]) ProviderName() string { return c.policy.ProviderName() }
+func (c *Client[P]) ProviderName() string {
+	if c.providerName != "" {
+		return c.providerName
+	}
+	return c.policy.ProviderName()
+}
 
 // BaseURL returns the configured provider endpoint.
 func (c *Client[P]) BaseURL() string { return c.baseURL }

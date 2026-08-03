@@ -92,7 +92,7 @@ export default withMermaid(defineConfig({
   themeConfig: {
     logo: { light: '/logo-light.svg', dark: '/logo-dark.svg', alt: 'ai-go' },
     nav: [
-      { text: 'Get Started', link: '/' },
+      { text: 'Get Started', link: '/getting-started' },
       { text: 'Docs', link: '/docs/' },
       { text: 'Tutorials & Guides', link: '/guides/' },
       { text: 'Examples', link: '/examples/' },
