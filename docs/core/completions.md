@@ -1,10 +1,9 @@
 # Completions
 
 Completion is ai-go's provider-neutral layer for asking a language model to
-produce an assistant message. Like Rig, ai-go exposes both convenient one-shot
-APIs and a lower-level request builder. The Go API uses ordinary interfaces,
-functions, value builders, and channels instead of Rust traits and associated
-types.
+produce an assistant message. It exposes both convenient one-shot APIs and a
+lower-level request builder using ordinary interfaces, functions, value
+builders, and channels.
 
 The completion APIs cover one provider model call:
 
@@ -34,8 +33,7 @@ flowchart TD
 
 ## Core contracts
 
-Rig centers its low-level completion layer on `CompletionModel`. The equivalent
-provider boundary in ai-go is deliberately smaller:
+The provider boundary in ai-go is deliberately small:
 
 ```go
 type Model interface {

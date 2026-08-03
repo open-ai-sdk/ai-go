@@ -75,5 +75,4 @@ eagerly and shares provider resources across model handles. The legacy
 method; prefer `Client.UploadFile` in new code.
 
 See [providers and clients](/core/providers-and-clients) for the capability
-model, generic provider infrastructure, and the differences from Rig's trait
-and typestate design.
+model and generic provider infrastructure.

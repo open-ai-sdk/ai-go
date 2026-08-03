@@ -35,9 +35,9 @@ type GeneratedFile struct {
 	MediaType string
 }
 
-// CompletionRequestBuilder binds a normalized request to a model. It provides
-// Rig-style low-level control while keeping ai-go's stream-first model contract.
-// All methods return a new top-level builder value.
+// CompletionRequestBuilder binds a normalized request to a model while keeping
+// ai-go's stream-first model contract. All methods return a new top-level
+// builder value.
 type CompletionRequestBuilder struct {
 	model   Model
 	request Request

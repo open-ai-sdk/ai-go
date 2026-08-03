@@ -123,25 +123,6 @@ client. Keeping the generic layer behind a concrete type prevents provider
 policy details and generic parameters from leaking into ordinary application
 code.
 
-## Relationship to Rig
-
-The design follows Rig's separation of provider clients, shared resources, and
-capability-specific model handles, but expresses it with Go conventions:
-
-- `Config` plus `NewClient(Config) (*Client, error)` replaces a typestate
-  provider builder;
-- interface composition and a generic infrastructure client replace shared
-  trait implementation;
-- concrete client method sets replace marker-generic capability proofs; and
-- small `llm` interfaces remain the provider-neutral boundary consumed by
-  completions and agents.
-
-Go does not provide Rust-style conditional methods or associated types, so
-replicating Rig's typestate and marker hierarchy would add ceremony without the
-same compile-time guarantees. Runtime validation at `NewClient`, followed by
-capability methods on concrete clients, preserves the useful boundary while
-keeping the API natural in Go.
-
 ## Compatibility constructors
 
 `openai.NewLanguageModel` and `openai.NewChatLanguageModel` remain available for

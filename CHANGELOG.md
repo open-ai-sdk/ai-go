@@ -54,7 +54,7 @@ The package table above records the earlier cross-package moves.
 
 ### Behavioral changes
 
-- `agent/generate.Agent` now includes the Rig-shaped `Completion` capability:
+- `agent/generate.Agent` now includes the `Completion` capability:
   custom Agent implementations must add `Prompt(context.Context, string)` and
   `Chat(context.Context, string, ...Message)`. `ToolLoopAgent` supplies both
   methods plus `Completion(prompt)` for an agent-bound request builder.

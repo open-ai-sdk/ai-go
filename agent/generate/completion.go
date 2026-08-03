@@ -14,10 +14,9 @@ type Completion interface {
 	Chat(context.Context, string, ...Message) (string, error)
 }
 
-// AgentCompletionRequestBuilder configures one ToolLoopAgent completion. It
-// maps Rig's agent-level CompletionRequestBuilder onto ai-go's existing
-// GenerateText options, so Send and Stream retain the agent's configured
-// tools, approval policy, callbacks, and multi-step stop condition.
+// AgentCompletionRequestBuilder configures one ToolLoopAgent completion using
+// ai-go's existing GenerateText options. Send and Stream retain the agent's
+// configured tools, approval policy, callbacks, and multi-step stop condition.
 type AgentCompletionRequestBuilder struct {
 	agent    *ToolLoopAgent
 	messages []Message

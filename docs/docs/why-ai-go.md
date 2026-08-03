@@ -21,9 +21,9 @@ The SDK uses concrete provider clients, small interfaces, and composition:
   execution contracts; and
 - `transport.Doer` keeps HTTP behavior injectable for tests and applications.
 
-This retains the useful separation found in Rig's provider architecture while
-using runtime validation and ordinary Go method sets instead of Rust typestate
-or capability markers.
+This separation uses runtime validation and ordinary Go method sets to keep
+provider capabilities explicit without coupling applications to provider
+configuration details.
 
 ## Stream-first execution
 
