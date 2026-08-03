@@ -126,7 +126,7 @@ func normalizeResponsesResponse(
 			return nil, err
 		}
 	}
-	if len(state.message.Content) == 0 {
+	if len(state.message.Content) == 0 && native.Status != "incomplete" {
 		return nil, fmt.Errorf("responses API returned no assistant content")
 	}
 	state.message.ID = state.messageID

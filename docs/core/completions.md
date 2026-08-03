@@ -297,6 +297,12 @@ Usage fields are zero when a provider does not report them. `RawFinishReason`,
 raw usage, and provider metadata are useful for diagnostics, but application
 control flow should prefer normalized fields when possible.
 
+A reasoning model can exhaust its output-token budget before producing visible
+text. In that case a successful provider response may have empty `Text` and an
+empty assistant `Message`, while `FinishReason`, usage, and `RawResponse` still
+describe the incomplete call. Treat `FinishReasonLength` as truncation and
+retry with an appropriate budget when the application requires visible output.
+
 When usage values are accumulated, the selected `Usage.Raw` snapshot is
 defensively cloned. Common JSON-like maps, slices, byte data, raw JSON, and
 string collections are independently owned; named container types, aliases,

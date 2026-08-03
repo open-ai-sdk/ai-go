@@ -71,6 +71,54 @@ func TestNormalizeResponsesIncompleteReason(t *testing.T) {
 	}
 }
 
+func TestNormalizeResponsesIncompleteWithoutVisibleContent(t *testing.T) {
+	native := &ResponsesResponse{
+		ID:     "resp_incomplete",
+		Status: "incomplete",
+		IncompleteDetails: &ResponsesIncompleteDetail{
+			Reason: "max_output_tokens",
+		},
+		Output: []ResponsesOutputItem{{
+			ID: "rs_1", Type: "reasoning",
+		}},
+		Usage: &ResponsesUsage{
+			InputTokens: 22, OutputTokens: 256, TotalTokens: 278,
+			OutputDetails: &struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			}{ReasoningTokens: 256},
+		},
+		Raw: json.RawMessage(`{"id":"resp_incomplete","status":"incomplete"}`),
+	}
+
+	response, err := normalizeResponsesResponse(native, nil)
+	if err != nil {
+		t.Fatalf("normalizeResponsesResponse() error = %v", err)
+	}
+	if response.Text != "" || len(response.Message.Content) != 0 {
+		t.Fatalf("visible content = %#v, want empty", response.Message.Content)
+	}
+	if response.FinishReason != aikit.FinishReasonLength ||
+		response.RawFinishReason != "max_output_tokens" {
+		t.Fatalf("finish = %q/%q, want length/max_output_tokens", response.FinishReason, response.RawFinishReason)
+	}
+	if response.Usage.TotalTokens != 278 || response.Usage.OutputTokenDetails.ReasoningTokens != 256 {
+		t.Fatalf("usage = %#v", response.Usage)
+	}
+	raw, ok := llm.RawResponseAs[*ResponsesResponse](response)
+	if !ok || raw != native || len(raw.Raw) == 0 {
+		t.Fatalf("raw = %#v, ok=%v", raw, ok)
+	}
+}
+
+func TestNormalizeResponsesCompletedStillRequiresAssistantContent(t *testing.T) {
+	_, err := normalizeResponsesResponse(&ResponsesResponse{
+		ID: "resp_empty", Status: "completed",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected an empty completed response to fail validation")
+	}
+}
+
 func TestResponsesCompleteAppliesConfiguredBodyTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
