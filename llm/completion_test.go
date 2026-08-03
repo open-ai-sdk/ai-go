@@ -18,6 +18,24 @@ type completionModel struct {
 
 type blockingCompletionModel struct{ events chan aikit.StreamEvent }
 
+type nativeCompletionModel struct {
+	completionCalls int
+	streamCalls     int
+	response        *llm.CompletionResponse
+	err             error
+}
+
+func (*nativeCompletionModel) ModelID() string { return "native-completion-test" }
+func (m *nativeCompletionModel) Stream(context.Context, llm.Request) (<-chan aikit.StreamEvent, error) {
+	m.streamCalls++
+	return nil, errors.New("unexpected stream call")
+}
+
+func (m *nativeCompletionModel) Complete(context.Context, llm.Request) (*llm.CompletionResponse, error) {
+	m.completionCalls++
+	return m.response, m.err
+}
+
 func (*blockingCompletionModel) ModelID() string { return "blocking-completion-test" }
 
 func (m *blockingCompletionModel) Stream(context.Context, llm.Request) (<-chan aikit.StreamEvent, error) {
@@ -81,11 +99,18 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 			Type:  aikit.StreamEventUsage,
 			Usage: &aikit.Usage{InputTokens: 3, InputTokenDetails: aikit.InputTokenDetails{CacheReadTokens: 1}},
 		},
-		{Type: aikit.StreamEventUsage, Usage: &aikit.Usage{OutputTokens: 5, Raw: map[string]any{"provider": "test"}}},
+		{
+			Type: aikit.StreamEventUsage,
+			Usage: &aikit.Usage{
+				OutputTokens: 5, ToolUsePromptTokens: 2,
+				Raw: map[string]any{"provider": "test"},
+			},
+		},
 		{Type: aikit.StreamEventSource, Source: &aikit.Source{ID: "source-1"}},
 		{Type: aikit.StreamEventFileDelta, FileData: []byte("file"), FileMediaType: "text/plain"},
 		{
 			Type:             aikit.StreamEventFinish,
+			MessageID:        "msg-stream-1",
 			FinishReason:     aikit.FinishReasonToolCalls,
 			RawFinishReason:  "tool_calls",
 			ProviderMetadata: map[string]any{"request": "r1"},
@@ -99,9 +124,13 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 	if response.Text != "before after" || response.Reasoning != "think" || response.Usage.InputTokens != 3 ||
 		response.Usage.InputTokenDetails.CacheReadTokens != 1 ||
 		response.Usage.OutputTokens != 5 ||
+		response.Usage.ToolUsePromptTokens != 2 ||
 		len(response.Sources) != 1 ||
 		len(response.Files) != 1 {
 		t.Fatalf("response summary = %#v", response)
+	}
+	if response.MessageID != "msg-stream-1" || response.Message.ID != "msg-stream-1" {
+		t.Fatalf("message IDs = %q/%q", response.MessageID, response.Message.ID)
 	}
 	parts := response.Message.Content
 	if len(parts) != 5 || parts[0].Text != "before " || parts[1].ReasoningText != "think" ||
@@ -112,6 +141,43 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 	response.Usage.Raw["provider"] = "changed"
 	if got := model.events[6].Usage.Raw["provider"]; got != "test" {
 		t.Fatalf("usage raw map was not copied: %v", got)
+	}
+}
+
+func TestCompletionSendPrefersNativeCapability(t *testing.T) {
+	wantRaw := &struct{ ID string }{ID: "raw-1"}
+	model := &nativeCompletionModel{response: &llm.CompletionResponse{
+		Message: aikit.AssistantMessage("native"), Text: "native", RawResponse: wantRaw,
+	}}
+	response, err := llm.NewCompletion(model, "prompt").Send(context.Background())
+	if err != nil || response.Text != "native" || model.completionCalls != 1 || model.streamCalls != 0 {
+		t.Fatalf("response=%#v err=%v complete=%d stream=%d", response, err, model.completionCalls, model.streamCalls)
+	}
+	raw, ok := llm.RawResponseAs[*struct{ ID string }](response)
+	if !ok || raw != wantRaw {
+		t.Fatalf("raw=%#v ok=%v", raw, ok)
+	}
+}
+
+func TestCompletionSendValidatesNativeBoundary(t *testing.T) {
+	plainErr := errors.New("native failed")
+	model := &nativeCompletionModel{err: plainErr}
+	if _, err := llm.NewCompletion(model, "prompt").Send(context.Background()); err == nil {
+		t.Fatal("expected native error")
+	} else {
+		var completionErr *llm.CompletionError
+		if !errors.As(err, &completionErr) || !errors.Is(err, plainErr) {
+			t.Fatalf("native error was not classified: %T %v", err, err)
+		}
+	}
+
+	model.err = nil
+	response, err := llm.NewCompletion(model, "prompt").Send(context.Background())
+	if response != nil || !errors.Is(
+		err,
+		&llm.CompletionError{Kind: llm.CompletionErrorKindResponse},
+	) {
+		t.Fatalf("nil native response = %#v, %T %v", response, err, err)
 	}
 }
 

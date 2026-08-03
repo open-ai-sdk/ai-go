@@ -3,6 +3,7 @@ package openai
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -61,7 +62,7 @@ type inputItem struct {
 	Arguments string `json:"arguments,omitempty"`
 
 	// Function call output (tool result).
-	Output string `json:"output,omitempty"`
+	Output any `json:"output,omitempty"`
 }
 
 // inputPart is a single part inside a user or assistant message.
@@ -236,7 +237,7 @@ func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 		case aikit.ContentPartTypeText:
 			parts = append(parts, inputPart{Type: "input_text", Text: p.Text})
 
-		case aikit.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				switch {
 				case p.FileID != "":
@@ -274,6 +275,26 @@ func encodeUserMessage(m aikit.Message) ([]inputItem, []aikit.Warning, error) {
 			} else {
 				parts = append(parts, inputPart{Type: "input_file", FileURL: p.FileURL, Filename: p.Filename})
 			}
+		case aikit.ContentPartTypeDocument:
+			switch {
+			case p.FileID != "":
+				parts = append(parts, inputPart{Type: "input_file", FileID: p.FileID, Filename: p.Filename})
+			case p.FileURL != "":
+				parts = append(parts, inputPart{Type: "input_file", FileURL: p.FileURL, Filename: p.Filename})
+			case len(p.Data) > 0:
+				mediaType := p.MediaType
+				if mediaType == "" {
+					mediaType = "application/octet-stream"
+				}
+				parts = append(parts, inputPart{
+					Type: "input_file", FileURL: "data:" + mediaType + ";base64," +
+						base64.StdEncoding.EncodeToString(p.Data), Filename: p.Filename,
+				})
+			default:
+				return nil, warnings, fmt.Errorf("openai: document part has no source")
+			}
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeVideo:
+			return nil, warnings, fmt.Errorf("openai: Responses API does not support %s input", p.Type)
 
 		default:
 			warnings = append(warnings, aikit.Warning{
@@ -310,6 +331,10 @@ func encodeAssistantMessage(m aikit.Message) ([]inputItem, []aikit.Warning, erro
 				Name:      p.ToolCallName,
 				Arguments: string(p.ToolCallArgs),
 			})
+		case aikit.ContentPartTypeImage:
+			return nil, nil, fmt.Errorf(
+				"openai: Responses API cannot replay assistant image content",
+			)
 		}
 	}
 	if len(textParts) > 0 {
@@ -322,14 +347,49 @@ func encodeToolResultMessage(m aikit.Message) ([]inputItem, []aikit.Warning, err
 	var items []inputItem
 	for _, p := range m.Content {
 		if p.Type == aikit.ContentPartTypeToolResult {
+			output, err := encodeResponsesToolResultOutput(p)
+			if err != nil {
+				return nil, nil, err
+			}
 			items = append(items, inputItem{
 				Type:   "function_call_output",
 				CallID: p.ToolResultID,
-				Output: p.ToolResultOutput,
+				Output: output,
 			})
 		}
 	}
 	return items, nil, nil
+}
+
+func encodeResponsesToolResultOutput(part aikit.ContentPart) (any, error) {
+	if len(part.ToolResultContent) == 0 {
+		return part.ToolResultOutput, nil
+	}
+	output := make([]inputPart, 0, len(part.ToolResultContent))
+	for _, content := range part.ToolResultContent {
+		switch content.Type {
+		case aikit.ToolResultContentTypeText:
+			output = append(output, inputPart{Type: "input_text", Text: content.Text})
+		case aikit.ToolResultContentTypeJSON:
+			if !json.Valid(content.JSON) {
+				return nil, fmt.Errorf("openai: tool result contains invalid JSON")
+			}
+			output = append(output, inputPart{Type: "input_text", Text: string(content.JSON)})
+		case aikit.ToolResultContentTypeImage:
+			if len(content.Data) == 0 {
+				return nil, fmt.Errorf("openai: image tool result has no data")
+			}
+			mediaType := content.MediaType
+			if mediaType == "" {
+				mediaType = "image/png"
+			}
+			output = append(output, inputPart{Type: "input_image", ImageURL: "data:" + mediaType +
+				";base64," + base64.StdEncoding.EncodeToString(content.Data)})
+		default:
+			return nil, fmt.Errorf("openai: unsupported tool result content type %q", content.Type)
+		}
+	}
+	return output, nil
 }
 
 func encodeTools(defs []aikit.ToolDefinition, opts ProviderOptions) ([]responsesTool, []aikit.Warning) {

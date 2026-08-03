@@ -35,6 +35,7 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	}
 	if len(assistantParts) > 0 {
 		messages = append(messages, Message{
+			ID:      step.MessageID,
 			Role:    RoleAssistant,
 			Content: assistantParts,
 		})
@@ -42,6 +43,12 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 
 	for _, tr := range step.ToolResults {
 		part := ToolResultPart(tr.ID, tr.Name, responseMessageToolOutput(tr, tools))
+		if len(tr.Content) > 0 {
+			part.ToolResultContent = make([]ToolResultContent, len(tr.Content))
+			for i := range tr.Content {
+				part.ToolResultContent[i] = tr.Content[i].Clone()
+			}
+		}
 		part.ToolApprovalID = tr.ApprovalID
 		part.ToolResultApprovalSignature = tr.ApprovalSignature
 		part.ToolResultApprovalApproved = tr.ApprovalApproved
@@ -78,9 +85,7 @@ func cloneContentParts(parts []ContentPart) []ContentPart {
 	}
 	cloned := make([]ContentPart, len(parts))
 	for i, part := range parts {
-		cloned[i] = part
-		cloned[i].Data = append([]byte(nil), part.Data...)
-		cloned[i].ToolCallArgs = append(json.RawMessage(nil), part.ToolCallArgs...)
+		cloned[i] = part.Clone()
 	}
 	return cloned
 }

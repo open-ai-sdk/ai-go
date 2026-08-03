@@ -21,6 +21,7 @@ const docsSidebar = [
       { text: 'Providers and clients', link: '/core/providers-and-clients' },
       { text: 'Agents', link: '/core/agents' },
       { text: 'Completions', link: '/core/completions' },
+      { text: 'Messages and content', link: '/core/messages-and-content' },
       { text: 'Streaming', link: '/core/streaming' },
       { text: 'Structured output', link: '/core/structured-output' },
       { text: 'Tools', link: '/core/tools' },
@@ -59,6 +60,7 @@ const guidesSidebar = [
     items: [
       { text: 'Overview', link: '/guides/' },
       { text: 'Build a chat server', link: '/guides/chat-server' },
+      { text: 'Error handling', link: '/guides/error-handling' },
     ],
   },
 ]

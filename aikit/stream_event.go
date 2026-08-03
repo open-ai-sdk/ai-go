@@ -26,6 +26,9 @@ type Source struct {
 // StreamEvent is a normalized event from a [Model] stream.
 type StreamEvent struct {
 	Type StreamEventType
+	// MessageID is the provider's assistant-message ID on terminal events. It
+	// is never a tool-call ID.
+	MessageID string
 
 	TextDelta         string
 	ToolCallIndex     int

@@ -54,6 +54,23 @@ The package table above records the earlier cross-package moves.
 
 ### Behavioral changes
 
+- Direct completions now preserve provider-native successful payloads through
+  `CompletionResponse.RawResponse`, with `RawResponseAs[T]` for checked access.
+  The optional `llm.CompletionModel` capability leaves stream-only custom
+  providers source-compatible.
+- Messages now carry provider assistant IDs and explicit image, audio,
+  document, and video content kinds. Role-aware validation and deep clone
+  helpers are public; legacy generic file parts remain supported.
+- Agent results expose `Transcript` as the full independently owned
+  conversation while retaining continuation-only `Response.Messages`.
+- Usage aggregation now retains cache, reasoning, and tool-use prompt counters
+  and exposes `HasValues`, `Add`, and `Accumulate`.
+- Completion, prompt, and structured-output failures have stable typed
+  classifications that preserve their causes and partial state through
+  `errors.Is`/`errors.As`.
+- Tool results can contain explicit ordered text, JSON, and image parts.
+  JSON-looking text is never reinterpreted implicitly.
+
 - `agent/generate.Agent` now includes the `Completion` capability:
   custom Agent implementations must add `Prompt(context.Context, string)` and
   `Chat(context.Context, string, ...Message)`. `ToolLoopAgent` supplies both

@@ -23,6 +23,10 @@ const (
 
 	ContentPartTypeText                 = aikit.ContentPartTypeText
 	ContentPartTypeFile                 = aikit.ContentPartTypeFile
+	ContentPartTypeImage                = aikit.ContentPartTypeImage
+	ContentPartTypeAudio                = aikit.ContentPartTypeAudio
+	ContentPartTypeDocument             = aikit.ContentPartTypeDocument
+	ContentPartTypeVideo                = aikit.ContentPartTypeVideo
 	ContentPartTypeToolCall             = aikit.ContentPartTypeToolCall
 	ContentPartTypeToolResult           = aikit.ContentPartTypeToolResult
 	ContentPartTypeToolApprovalResponse = aikit.ContentPartTypeToolApprovalResponse
@@ -31,21 +35,17 @@ const (
 
 // TextPart constructs a text ContentPart.
 func TextPart(text string) ContentPart {
-	return ContentPart{Type: ContentPartTypeText, Text: text}
+	return aikit.TextPart(text)
 }
 
-// ImageURLPart constructs a file ContentPart for an image at a URL or data URI.
-// Images have no dedicated part kind — this is a convenience over FilePart.
-// MediaType is set to the bare top-level segment "image" because the subtype is
-// unknown here; without it, encoders that route on media type would treat the
-// part as a generic file and drop the image.
+// ImageURLPart constructs an explicit image ContentPart at a URL or data URI.
 func ImageURLPart(url string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MediaType: "image"}
+	return aikit.ImageURLPart(url)
 }
 
 // FilePart constructs a file ContentPart from a URL or data URI.
 func FilePart(url, mediaType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileURL: url, MediaType: mediaType}
+	return aikit.FilePart(url, mediaType)
 }
 
 // ImageDataPart constructs an image ContentPart from inline binary data.
@@ -59,7 +59,7 @@ func FilePart(url, mediaType string) ContentPart {
 //	data, _ := os.ReadFile("screenshot.png")
 //	part := ai.ImageDataPart(data, "image/png")
 func ImageDataPart(data []byte, mediaType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mediaType}
+	return aikit.ImageDataPart(data, mediaType)
 }
 
 // ImageFileIDPart constructs an image ContentPart referencing a provider-hosted file.
@@ -71,7 +71,7 @@ func ImageDataPart(data []byte, mediaType string) ContentPart {
 //
 //	part := ai.ImageFileIDPart("file-abc123")
 func ImageFileIDPart(fileID string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MediaType: "image"}
+	return aikit.ImageFileIDPart(fileID)
 }
 
 // FileDataPart constructs a file ContentPart from inline binary data.
@@ -84,7 +84,7 @@ func ImageFileIDPart(fileID string) ContentPart {
 //	data, _ := os.ReadFile("report.pdf")
 //	part := ai.FileDataPart(data, "application/pdf", "report.pdf")
 func FileDataPart(data []byte, mediaType, filename string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, Data: data, MediaType: mediaType, Filename: filename}
+	return aikit.FileDataPart(data, mediaType, filename)
 }
 
 // FileIDPart constructs a file ContentPart referencing a provider-hosted file.
@@ -96,34 +96,80 @@ func FileDataPart(data []byte, mediaType, filename string) ContentPart {
 //
 //	part := ai.FileIDPart("file-xyz", "application/pdf")
 func FileIDPart(fileID, mediaType string) ContentPart {
-	return ContentPart{Type: ContentPartTypeFile, FileID: fileID, MediaType: mediaType}
+	return aikit.FileIDPart(fileID, mediaType)
+}
+
+func AudioURLPart(url string, mediaType ...string) ContentPart {
+	return aikit.AudioURLPart(url, mediaType...)
+}
+
+func AudioDataPart(data []byte, mediaType string) ContentPart {
+	return aikit.AudioDataPart(data, mediaType)
+}
+
+func AudioFileIDPart(fileID string, mediaType ...string) ContentPart {
+	return aikit.AudioFileIDPart(fileID, mediaType...)
+}
+
+func DocumentURLPart(url, mediaType string, filename ...string) ContentPart {
+	return aikit.DocumentURLPart(url, mediaType, filename...)
+}
+
+func DocumentDataPart(data []byte, mediaType string, filename ...string) ContentPart {
+	return aikit.DocumentDataPart(data, mediaType, filename...)
+}
+
+func DocumentFileIDPart(fileID, mediaType string, filename ...string) ContentPart {
+	return aikit.DocumentFileIDPart(fileID, mediaType, filename...)
+}
+
+func VideoURLPart(url string, mediaType ...string) ContentPart {
+	return aikit.VideoURLPart(url, mediaType...)
+}
+
+func VideoDataPart(data []byte, mediaType string) ContentPart {
+	return aikit.VideoDataPart(data, mediaType)
+}
+
+func VideoFileIDPart(fileID string, mediaType ...string) ContentPart {
+	return aikit.VideoFileIDPart(fileID, mediaType...)
+}
+
+func TextToolResultContent(text string) ToolResultContent {
+	return aikit.TextToolResultContent(text)
+}
+
+func JSONToolResultContent(raw json.RawMessage) ToolResultContent {
+	return aikit.JSONToolResultContent(raw)
+}
+
+func ImageToolResultContent(data []byte, mediaType string) ToolResultContent {
+	return aikit.ImageToolResultContent(data, mediaType)
+}
+
+func ParseToolResultJSON(output string) (ToolResultContent, error) {
+	return aikit.ParseToolResultJSON(output)
 }
 
 // ReasoningPart constructs a reasoning ContentPart for history replay.
 // Use this when reconstructing assistant messages that included a reasoning block
 // (e.g. Claude extended thinking) so that the model can continue from prior reasoning.
 func ReasoningPart(reasoningText string) ContentPart {
-	return ContentPart{Type: ContentPartTypeReasoning, ReasoningText: reasoningText}
+	return aikit.ReasoningPart(reasoningText)
 }
 
 // ToolCallPart constructs a tool-call ContentPart for assistant messages.
 func ToolCallPart(id, name string, args json.RawMessage) ContentPart {
-	return ContentPart{
-		Type:         ContentPartTypeToolCall,
-		ToolCallID:   id,
-		ToolCallName: name,
-		ToolCallArgs: args,
-	}
+	return aikit.ToolCallPart(id, name, args)
 }
 
 // ToolResultPart constructs a tool-result ContentPart for tool messages.
 func ToolResultPart(id, name, output string) ContentPart {
-	return ContentPart{
-		Type:             ContentPartTypeToolResult,
-		ToolResultID:     id,
-		ToolResultName:   name,
-		ToolResultOutput: output,
-	}
+	return aikit.ToolResultPart(id, name, output)
+}
+
+func RichToolResultPart(id, name string, content ...ToolResultContent) ContentPart {
+	return aikit.RichToolResultPart(id, name, content...)
 }
 
 // ToolApprovalResponsePart carries a decision for a previously emitted tool
@@ -132,26 +178,20 @@ func ToolResultPart(id, name, output string) ContentPart {
 // signature and resolves the matching pending tool call without retaining
 // server state.
 func ToolApprovalResponsePart(approvalID, signature string, approved bool, reason string) ContentPart {
-	return ContentPart{
-		Type:                  ContentPartTypeToolApprovalResponse,
-		ToolApprovalID:        approvalID,
-		ToolApprovalSignature: signature,
-		ToolApprovalApproved:  approved,
-		ToolApprovalReason:    reason,
-	}
+	return aikit.ToolApprovalResponsePart(approvalID, signature, approved, reason)
 }
 
 // UserMessage creates a user message with a single text part.
 func UserMessage(text string) Message {
-	return Message{Role: RoleUser, Content: []ContentPart{TextPart(text)}}
+	return aikit.UserMessage(text)
 }
 
 // AssistantMessage creates an assistant message with a single text part.
 func AssistantMessage(text string) Message {
-	return Message{Role: RoleAssistant, Content: []ContentPart{TextPart(text)}}
+	return aikit.AssistantMessage(text)
 }
 
 // SystemMessage creates a system message with a single text part.
 func SystemMessage(text string) Message {
-	return Message{Role: RoleSystem, Content: []ContentPart{TextPart(text)}}
+	return aikit.SystemMessage(text)
 }

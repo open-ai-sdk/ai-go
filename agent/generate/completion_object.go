@@ -3,8 +3,9 @@ package generate
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strings"
 
+	"github.com/open-ai-sdk/ai-go/agent"
 	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/tool"
 )
@@ -30,20 +31,29 @@ func CompleteObject[T any](
 ) (CompletionObjectResult[T], error) {
 	schema, err := tool.Schema[T]()
 	if err != nil {
-		return CompletionObjectResult[T]{}, fmt.Errorf("ai: CompleteObject: %w", err)
+		return CompletionObjectResult[T]{}, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindPrompt, Reason: "invalid output request", Cause: err,
+		}
 	}
 
 	request.Output = &llm.OutputSchema{Type: "object", Schema: schema}
 	response, err := llm.Complete(ctx, model, request)
 	result := CompletionObjectResult[T]{Response: response}
 	if err != nil {
-		return result, err
+		return result, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindPrompt, Reason: "completion failed", Cause: err,
+		}
 	}
-	if response == nil {
-		return result, fmt.Errorf("ai: CompleteObject: model returned no response")
+	if response == nil || strings.TrimSpace(response.Text) == "" {
+		return result, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty",
+		}
 	}
 	if err := json.Unmarshal([]byte(response.Text), &result.Object); err != nil {
-		return result, fmt.Errorf("ai: CompleteObject: unmarshal result: %w", err)
+		return result, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindJSONDecode, Path: "$",
+			Reason: "is invalid JSON: " + err.Error(), Cause: err,
+		}
 	}
 	return result, nil
 }

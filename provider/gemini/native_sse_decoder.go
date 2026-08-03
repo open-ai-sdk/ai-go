@@ -18,6 +18,7 @@ import (
 // --------------------------------------------------------------------
 
 type nativeSSEChunk struct {
+	ResponseID    string               `json:"responseId"`
 	Candidates    []nativeCandidate    `json:"candidates"`
 	UsageMetadata *nativeUsageMetadata `json:"usageMetadata"`
 	ModelVersion  string               `json:"modelVersion"`
@@ -59,6 +60,7 @@ type nativeUsageMetadata struct {
 	TotalTokenCount         int `json:"totalTokenCount"`
 	ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+	ToolUsePromptTokenCount int `json:"toolUsePromptTokenCount"`
 }
 
 // nativeUsageToAI maps Gemini usage metadata to the v7 nested usage shape.
@@ -69,21 +71,27 @@ func nativeUsageToAI(u *nativeUsageMetadata) *aikit.Usage {
 	if noCache < 0 {
 		noCache = 0
 	}
+	outputTokens := u.CandidatesTokenCount
+	if outputTokens == 0 && u.TotalTokenCount > u.PromptTokenCount {
+		outputTokens = u.TotalTokenCount - u.PromptTokenCount
+	}
 	return &aikit.Usage{
 		InputTokens: u.PromptTokenCount,
 		InputTokenDetails: aikit.InputTokenDetails{
 			NoCacheTokens:   noCache,
 			CacheReadTokens: u.CachedContentTokenCount,
 		},
-		OutputTokens:       u.CandidatesTokenCount,
-		OutputTokenDetails: aikit.OutputTokenDetails{ReasoningTokens: u.ThoughtsTokenCount},
-		TotalTokens:        u.TotalTokenCount,
+		OutputTokens:        outputTokens,
+		OutputTokenDetails:  aikit.OutputTokenDetails{ReasoningTokens: u.ThoughtsTokenCount},
+		TotalTokens:         u.TotalTokenCount,
+		ToolUsePromptTokens: u.ToolUsePromptTokenCount,
 		Raw: map[string]any{
 			"promptTokenCount":        u.PromptTokenCount,
 			"candidatesTokenCount":    u.CandidatesTokenCount,
 			"totalTokenCount":         u.TotalTokenCount,
 			"thoughtsTokenCount":      u.ThoughtsTokenCount,
 			"cachedContentTokenCount": u.CachedContentTokenCount,
+			"toolUsePromptTokenCount": u.ToolUsePromptTokenCount,
 		},
 	}
 }
@@ -263,6 +271,7 @@ func emitNativeChunkEvents(
 			}
 			ch <- aikit.StreamEvent{
 				Type:             aikit.StreamEventFinish,
+				MessageID:        chunk.ResponseID,
 				FinishReason:     reason,
 				RawFinishReason:  raw,
 				ProviderMetadata: provMeta,

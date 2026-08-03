@@ -68,6 +68,42 @@ func ImageDataPart(data []byte, mediaType string) ContentPart {
 	return generate.ImageDataPart(data, mediaType)
 }
 func ImageFileIDPart(fileID string) ContentPart { return generate.ImageFileIDPart(fileID) }
+func AudioURLPart(url string, mediaType ...string) ContentPart {
+	return generate.AudioURLPart(url, mediaType...)
+}
+
+func AudioDataPart(data []byte, mediaType string) ContentPart {
+	return generate.AudioDataPart(data, mediaType)
+}
+
+func AudioFileIDPart(fileID string, mediaType ...string) ContentPart {
+	return generate.AudioFileIDPart(fileID, mediaType...)
+}
+
+func DocumentURLPart(url, mediaType string, filename ...string) ContentPart {
+	return generate.DocumentURLPart(url, mediaType, filename...)
+}
+
+func DocumentDataPart(data []byte, mediaType string, filename ...string) ContentPart {
+	return generate.DocumentDataPart(data, mediaType, filename...)
+}
+
+func DocumentFileIDPart(fileID, mediaType string, filename ...string) ContentPart {
+	return generate.DocumentFileIDPart(fileID, mediaType, filename...)
+}
+
+func VideoURLPart(url string, mediaType ...string) ContentPart {
+	return generate.VideoURLPart(url, mediaType...)
+}
+
+func VideoDataPart(data []byte, mediaType string) ContentPart {
+	return generate.VideoDataPart(data, mediaType)
+}
+
+func VideoFileIDPart(fileID string, mediaType ...string) ContentPart {
+	return generate.VideoFileIDPart(fileID, mediaType...)
+}
+
 func FileDataPart(data []byte, mediaType, filename string) ContentPart {
 	return generate.FileDataPart(data, mediaType, filename)
 }
@@ -79,6 +115,26 @@ func ToolCallPart(id, name string, args json.RawMessage) ContentPart {
 
 func ToolResultPart(id, name, output string) ContentPart {
 	return generate.ToolResultPart(id, name, output)
+}
+
+func RichToolResultPart(id, name string, content ...ToolResultContent) ContentPart {
+	return generate.RichToolResultPart(id, name, content...)
+}
+
+func TextToolResultContent(text string) ToolResultContent {
+	return generate.TextToolResultContent(text)
+}
+
+func JSONToolResultContent(raw json.RawMessage) ToolResultContent {
+	return generate.JSONToolResultContent(raw)
+}
+
+func ImageToolResultContent(data []byte, mediaType string) ToolResultContent {
+	return generate.ImageToolResultContent(data, mediaType)
+}
+
+func ParseToolResultJSON(output string) (ToolResultContent, error) {
+	return generate.ParseToolResultJSON(output)
 }
 
 func ToolApprovalResponsePart(id, signature string, approved bool, reason string) ContentPart {

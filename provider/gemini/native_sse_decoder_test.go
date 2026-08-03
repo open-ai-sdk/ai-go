@@ -153,7 +153,7 @@ func TestDecodeNativeSSE_ToolCall(t *testing.T) {
 }
 
 func TestDecodeNativeSSE_UsageMapping(t *testing.T) {
-	sse := `data: {"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30,"thoughtsTokenCount":5,"cachedContentTokenCount":3},"modelVersion":"gemini-2.5-flash"}
+	sse := `data: {"candidates":[{"content":{"parts":[{"text":"hi"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30,"thoughtsTokenCount":5,"cachedContentTokenCount":3,"toolUsePromptTokenCount":4},"modelVersion":"gemini-2.5-flash"}
 `
 	events := collectNativeEvents(nativeStreamFromString(sse))
 
@@ -177,6 +177,30 @@ func TestDecodeNativeSSE_UsageMapping(t *testing.T) {
 	}
 	if usage.OutputTokenDetails.ReasoningTokens != 5 {
 		t.Errorf("expected 5 reasoning tokens, got %d", usage.OutputTokenDetails.ReasoningTokens)
+	}
+	if usage.ToolUsePromptTokens != 4 {
+		t.Errorf("expected 4 tool-use prompt tokens, got %d", usage.ToolUsePromptTokens)
+	}
+}
+
+func TestNativeUsageToAIInfersMissingOutputWithSaturatingSubtraction(t *testing.T) {
+	usage := nativeUsageToAI(&nativeUsageMetadata{
+		PromptTokenCount: 12,
+		TotalTokenCount:  20,
+	})
+	if usage.OutputTokens != 8 {
+		t.Fatalf("OutputTokens = %d, want 8", usage.OutputTokens)
+	}
+	if usage.TotalTokens != 20 {
+		t.Fatalf("TotalTokens = %d, want provider total 20", usage.TotalTokens)
+	}
+	if got := usage.Raw["candidatesTokenCount"]; got != 0 {
+		t.Fatalf("raw candidatesTokenCount = %v, want provider value 0", got)
+	}
+
+	usage = nativeUsageToAI(&nativeUsageMetadata{PromptTokenCount: 12, TotalTokenCount: 10})
+	if usage.OutputTokens != 0 {
+		t.Fatalf("saturated OutputTokens = %d, want 0", usage.OutputTokens)
 	}
 }
 

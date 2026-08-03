@@ -1,7 +1,13 @@
 package generate
 
 func cloneGenerateTextRequest(request GenerateTextRequest) GenerateTextRequest {
-	request.Messages = append([]Message(nil), request.Messages...)
+	if request.Messages != nil {
+		messages := make([]Message, len(request.Messages))
+		for i := range request.Messages {
+			messages[i] = request.Messages[i].Clone()
+		}
+		request.Messages = messages
+	}
 	request.Settings.StopSequences = append(
 		[]string(nil),
 		request.Settings.StopSequences...,

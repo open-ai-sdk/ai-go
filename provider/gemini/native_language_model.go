@@ -43,6 +43,7 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
+	cfg.Timeout = timeout
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = nativeBaseURL

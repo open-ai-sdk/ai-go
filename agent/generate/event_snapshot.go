@@ -23,14 +23,7 @@ func snapshotStepEvent(event StepEvent) StepEvent {
 	snapshot.FileData = append([]byte(nil), event.FileData...)
 	snapshot.StructuredOutput = append(json.RawMessage(nil), event.StructuredOutput...)
 	if event.ToolResult != nil {
-		result := *event.ToolResult
-		if event.ToolResult.Content != nil {
-			result.Content = make([]ToolResultContent, len(event.ToolResult.Content))
-			for i, content := range event.ToolResult.Content {
-				result.Content[i] = content
-				result.Content[i].Data = append([]byte(nil), content.Data...)
-			}
-		}
+		result := event.ToolResult.Clone()
 		snapshot.ToolResult = &result
 	}
 	if event.Source != nil {
@@ -137,15 +130,7 @@ func snapshotToolResults(results []ToolResult) []ToolResult {
 	}
 	snapshot := make([]ToolResult, len(results))
 	for i, result := range results {
-		snapshot[i] = result
-		if result.Content == nil {
-			continue
-		}
-		snapshot[i].Content = make([]ToolResultContent, len(result.Content))
-		for j, content := range result.Content {
-			snapshot[i].Content[j] = content
-			snapshot[i].Content[j].Data = append([]byte(nil), content.Data...)
-		}
+		snapshot[i] = result.Clone()
 	}
 	return snapshot
 }
@@ -157,19 +142,7 @@ func snapshotResponse(response Response) Response {
 	}
 	snapshot.Messages = make([]Message, len(response.Messages))
 	for i, message := range response.Messages {
-		snapshot.Messages[i] = message
-		if message.Content == nil {
-			continue
-		}
-		snapshot.Messages[i].Content = make([]ContentPart, len(message.Content))
-		for j, content := range message.Content {
-			snapshot.Messages[i].Content[j] = content
-			snapshot.Messages[i].Content[j].Data = append([]byte(nil), content.Data...)
-			snapshot.Messages[i].Content[j].ToolCallArgs = append(
-				json.RawMessage(nil),
-				content.ToolCallArgs...,
-			)
-		}
+		snapshot.Messages[i] = message.Clone()
 	}
 	return snapshot
 }

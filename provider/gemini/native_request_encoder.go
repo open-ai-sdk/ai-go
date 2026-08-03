@@ -174,12 +174,14 @@ func encodeUserParts(parts []aikit.ContentPart) []nativePart {
 		switch p.Type {
 		case aikit.ContentPartTypeText:
 			out = append(out, nativePart{Text: p.Text})
-		case aikit.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				out = append(out, encodeImagePart(p))
 			} else {
 				out = append(out, encodeFilePart(p))
 			}
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeDocument, aikit.ContentPartTypeVideo:
+			out = append(out, encodeFilePart(p))
 		}
 	}
 	return out
@@ -209,12 +211,14 @@ func encodeAssistantParts(parts []aikit.ContentPart) []nativePart {
 				np.ThoughtSignature = p.ThoughtSignature
 			}
 			out = append(out, np)
-		case aikit.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
 			if strings.HasPrefix(p.MediaType, "image/") || p.MediaType == "image" {
 				out = append(out, encodeImagePart(p))
 			} else {
 				out = append(out, encodeFilePart(p))
 			}
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeDocument, aikit.ContentPartTypeVideo:
+			out = append(out, encodeFilePart(p))
 		}
 	}
 	return out
@@ -225,13 +229,32 @@ func encodeToolParts(parts []aikit.ContentPart) []nativePart {
 	var out []nativePart
 	for _, p := range parts {
 		if p.Type == aikit.ContentPartTypeToolResult {
+			response := any(map[string]string{"name": p.ToolResultName, "content": p.ToolResultOutput})
+			if len(p.ToolResultContent) > 0 {
+				items := make([]any, 0, len(p.ToolResultContent))
+				for _, item := range p.ToolResultContent {
+					switch item.Type {
+					case aikit.ToolResultContentTypeText:
+						items = append(items, item.Text)
+					case aikit.ToolResultContentTypeJSON:
+						var value any
+						if json.Unmarshal(item.JSON, &value) == nil {
+							items = append(items, value)
+						}
+					case aikit.ToolResultContentTypeImage:
+						items = append(items, map[string]any{
+							"inlineData": map[string]any{
+								"mimeType": item.MediaType,
+								"data":     base64.StdEncoding.EncodeToString(item.Data),
+							},
+						})
+					}
+				}
+				response = map[string]any{"name": p.ToolResultName, "content": items}
+			}
 			out = append(out, nativePart{
 				FunctionResponse: &nativeFuncResp{
-					Name: p.ToolResultName,
-					Response: map[string]string{
-						"name":    p.ToolResultName,
-						"content": p.ToolResultOutput,
-					},
+					Name: p.ToolResultName, Response: response,
 				},
 			})
 		}

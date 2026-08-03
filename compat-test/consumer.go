@@ -36,12 +36,43 @@ func (fakeModel) Stream(_ context.Context, req ai.LanguageModelRequest) (<-chan 
 // Compile-time proof an external consumer can implement the model interface.
 var _ ai.LanguageModel = fakeModel{}
 
+// nativeFake proves providers can add the optional native completion
+// capability without changing the minimal streaming model contract.
+type nativeFake struct{ fakeModel }
+
+type rawResponse struct{ RequestID string }
+
+func (nativeFake) Complete(_ context.Context, _ llm.Request) (*llm.CompletionResponse, error) {
+	raw := rawResponse{RequestID: "req_external"}
+	return &llm.CompletionResponse{
+		Message:     aikit.AssistantMessage("native"),
+		MessageID:   "msg_external",
+		Text:        "native",
+		RawResponse: raw,
+	}, nil
+}
+
+var (
+	_ ai.CompletionModel           = nativeFake{}
+	_ ai.CompletionBuilderProvider = ai.NewToolLoopAgent(fakeModel{})
+)
+
+// NativeCompletion exercises native payload access through public APIs only.
+func NativeCompletion(ctx context.Context) (string, bool, error) {
+	response, err := ai.NewCompletion(nativeFake{}, "hello").Send(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	_, typed := ai.RawResponseAs[rawResponse](response)
+	return response.MessageID, typed, nil
+}
+
 // GenerateText exercises the ergonomic blocking façade with public request
 // and result contracts only.
 func GenerateText(ctx context.Context) (string, error) {
 	result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
 		Model:    fakeModel{},
-		Messages: []aikit.Message{{Role: aikit.RoleUser}},
+		Messages: []aikit.Message{aikit.UserMessage("hello")},
 	})
 	if err != nil {
 		return "", err
@@ -53,7 +84,7 @@ func GenerateText(ctx context.Context) (string, error) {
 func StreamText(ctx context.Context) (string, error) {
 	result, err := ai.StreamText(ctx, ai.GenerateTextRequest{
 		Model:    fakeModel{},
-		Messages: []aikit.Message{{Role: aikit.RoleUser}},
+		Messages: []aikit.Message{aikit.UserMessage("hello")},
 	}).Consume()
 	if err != nil {
 		return "", err
@@ -69,7 +100,7 @@ type generatedObject struct {
 func GenerateObject(ctx context.Context) (string, error) {
 	result, err := ai.GenerateObject[generatedObject](ctx, ai.GenerateObjectRequest{
 		Model:    fakeModel{},
-		Messages: []aikit.Message{{Role: aikit.RoleUser}},
+		Messages: []aikit.Message{aikit.UserMessage("hello")},
 	})
 	if err != nil {
 		return "", err
@@ -83,6 +114,7 @@ func (fakeEmbeddingModel) ModelID() string { return "fake-embedding" }
 func (fakeEmbeddingModel) Embed(context.Context, string) ([]float32, error) {
 	return []float32{1, 2, 3}, nil
 }
+
 func (fakeEmbeddingModel) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
 	result := make([][]float32, len(texts))
 	for index := range result {

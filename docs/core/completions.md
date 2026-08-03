@@ -47,7 +47,10 @@ This interface lives in `llm` and is re-exported by the `ai` facade as
 normalizes the response into stream events. Aggregation and agent behavior stay
 outside the provider.
 
-The small interface has two useful consequences:
+Providers may additionally implement `llm.CompletionModel`, whose `Complete`
+method returns a native non-streaming response. `Send` detects this optional
+capability and otherwise aggregates `Stream` exactly as before. The small base
+interface therefore has two useful consequences:
 
 - A provider only needs to implement one stream-first operation.
 - Direct completion, text generation, middleware, fallback models, and agents
@@ -197,6 +200,9 @@ Helper constructors cover common content:
 
 - `ai.TextPart`, `ai.UserMessage`, `ai.AssistantMessage`, `ai.SystemMessage`
 - `ai.ImageURLPart`, `ai.ImageDataPart`, `ai.ImageFileIDPart`
+- `ai.AudioURLPart`, `ai.AudioDataPart`, `ai.AudioFileIDPart`
+- `ai.DocumentURLPart`, `ai.DocumentDataPart`, `ai.DocumentFileIDPart`
+- `ai.VideoURLPart`, `ai.VideoDataPart`, `ai.VideoFileIDPart`
 - `ai.FilePart`, `ai.FileDataPart`, `ai.FileIDPart`
 - `ai.ReasoningPart`, `ai.ToolCallPart`, `ai.ToolResultPart`
 
@@ -220,6 +226,9 @@ response, err := ai.NewCompletion(model, "").
 Not every provider or model accepts every content kind. The normalized type
 preserves portability at the SDK boundary; it does not imply universal model
 capability.
+
+See [Messages and content](/core/messages-and-content) for role validation,
+message IDs, cloning, and rich tool-result content.
 
 ## Streaming
 
@@ -267,6 +276,7 @@ normalized assistant message:
 | Field | Meaning |
 | --- | --- |
 | `Message` | Ordered assistant content, suitable for later history |
+| `MessageID` | Provider-issued assistant-message identifier, also copied to `Message.ID` |
 | `Text` | All text deltas concatenated |
 | `Reasoning` | All reasoning deltas concatenated |
 | `Usage` | Normalized token counts plus raw provider usage |
@@ -276,6 +286,7 @@ normalized assistant message:
 | `Warnings` | Request or response normalization warnings |
 | `Sources` | Provider-native source references |
 | `Files` | Generated file or image bytes and media types |
+| `RawResponse` | Untranslated successful provider payload when native completion is supported |
 
 `Text` and `Reasoning` are convenience views. Use `Message.Content` whenever
 the ordering or individual part metadata matters. In particular, preserve tool
@@ -285,6 +296,11 @@ conversation.
 Usage fields are zero when a provider does not report them. `RawFinishReason`,
 raw usage, and provider metadata are useful for diagnostics, but application
 control flow should prefer normalized fields when possible.
+
+Use `ai.RawResponseAs[T](response)` to access a provider's native success DTO
+without an unchecked type assertion. Raw responses may include sensitive or
+provider-specific fields; ai-go never logs them automatically. The normalized
+fields remain the stable application contract.
 
 ## Tool calls and manual continuation
 
@@ -413,8 +429,10 @@ if err != nil {
 
 Failures before streaming starts return a nil response. Failures emitted after
 one or more events return the partially aggregated response and the error.
-Provider errors remain provider-defined Go errors, so use `errors.Is` or
-`errors.As` when a provider exposes typed error details.
+Completion failures are wrapped by `*ai.CompletionError` with transport, JSON
+decode, invalid request, invalid response, or provider classification. The
+cause remains available to `errors.Is` and `errors.As`, including typed
+`*ai.APIError` values. See [Error handling](/guides/error-handling).
 
 ## Choosing an API
 

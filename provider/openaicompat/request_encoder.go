@@ -3,6 +3,7 @@ package openaicompat
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -170,12 +171,17 @@ func encodeContentMessage(m aikit.Message) (map[string]any, []aikit.Warning, err
 		switch part.Type {
 		case aikit.ContentPartTypeText:
 			parts = append(parts, map[string]any{"type": "text", "text": part.Text})
-		case aikit.ContentPartTypeFile:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
 			encoded, w := encodeFilePart(part)
 			warnings = append(warnings, w...)
 			if encoded != nil {
 				parts = append(parts, encoded)
 			}
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeDocument, aikit.ContentPartTypeVideo:
+			return nil, nil, fmt.Errorf(
+				"openai-compatible: content part type %q is not supported by Chat Completions",
+				part.Type,
+			)
 		case aikit.ContentPartTypeToolCall:
 			call := map[string]any{
 				"id":   part.ToolCallID,
@@ -258,14 +264,50 @@ func encodeFilePart(part aikit.ContentPart) (map[string]any, []aikit.Warning) {
 func encodeToolResultMessage(m aikit.Message) (map[string]any, error) {
 	for _, part := range m.Content {
 		if part.Type == aikit.ContentPartTypeToolResult {
+			content, err := encodeCompatibleToolResult(part)
+			if err != nil {
+				return nil, err
+			}
 			return map[string]any{
 				"role":         "tool",
 				"tool_call_id": part.ToolResultID,
-				"content":      part.ToolResultOutput,
+				"content":      content,
 			}, nil
 		}
 	}
 	return map[string]any{"role": "tool", "content": ""}, nil
+}
+
+func encodeCompatibleToolResult(part aikit.ContentPart) (any, error) {
+	if len(part.ToolResultContent) == 0 {
+		return part.ToolResultOutput, nil
+	}
+	content := make([]map[string]any, 0, len(part.ToolResultContent))
+	for _, item := range part.ToolResultContent {
+		switch item.Type {
+		case aikit.ToolResultContentTypeText:
+			content = append(content, map[string]any{"type": "text", "text": item.Text})
+		case aikit.ToolResultContentTypeJSON:
+			if !json.Valid(item.JSON) {
+				return nil, fmt.Errorf("openai-compatible: tool result contains invalid JSON")
+			}
+			content = append(content, map[string]any{"type": "text", "text": string(item.JSON)})
+		case aikit.ToolResultContentTypeImage:
+			if len(item.Data) == 0 {
+				return nil, fmt.Errorf("openai-compatible: image tool result has no data")
+			}
+			mediaType := item.MediaType
+			if mediaType == "" {
+				mediaType = "image/png"
+			}
+			content = append(content, map[string]any{"type": "image_url", "image_url": map[string]string{
+				"url": "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(item.Data),
+			}})
+		default:
+			return nil, fmt.Errorf("openai-compatible: unsupported tool result content type %q", item.Type)
+		}
+	}
+	return content, nil
 }
 
 // encodeToolChoice converts an aikit.ToolChoice to the OpenAI wire format.

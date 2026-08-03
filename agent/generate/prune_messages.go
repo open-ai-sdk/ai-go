@@ -60,7 +60,9 @@ func PruneMessages(messages []Message, opts PruneOptions) []Message {
 	// Fast path: nothing to prune.
 	if reasoning == PruneModeNone && toolCalls == PruneModeNone {
 		out := make([]Message, len(messages))
-		copy(out, messages)
+		for i := range messages {
+			out[i] = messages[i].Clone()
+		}
 		return out
 	}
 
@@ -84,7 +86,7 @@ func pruneMessage(msg Message, pruneReasoning, pruneToolCalls bool, emptyMsgs Pr
 		if emptyMsgs == PruneModeRemove {
 			return Message{}, false
 		}
-		return Message{Role: msg.Role}, true
+		return Message{ID: msg.ID, Role: msg.Role}, true
 	}
 
 	if !pruneReasoning && !pruneToolCalls {
@@ -107,7 +109,11 @@ func pruneMessage(msg Message, pruneReasoning, pruneToolCalls bool, emptyMsgs Pr
 		return Message{}, false
 	}
 
-	return Message{Role: msg.Role, Content: filtered}, true
+	cloned := make([]ContentPart, len(filtered))
+	for i := range filtered {
+		cloned[i] = filtered[i].Clone()
+	}
+	return Message{ID: msg.ID, Role: msg.Role, Content: cloned}, true
 }
 
 // shouldPrune returns true if content at index i should be pruned given the mode.

@@ -14,6 +14,12 @@ type Completion interface {
 	Chat(context.Context, string, ...Message) (string, error)
 }
 
+// CompletionBuilderProvider is the optional capability for callers that need
+// detailed agent completion configuration from an interface value.
+type CompletionBuilderProvider interface {
+	Completion(string) AgentCompletionRequestBuilder
+}
+
 // AgentCompletionRequestBuilder configures one ToolLoopAgent completion using
 // ai-go's existing GenerateText options. Send and Stream retain the agent's
 // configured tools, approval policy, callbacks, and multi-step stop condition.

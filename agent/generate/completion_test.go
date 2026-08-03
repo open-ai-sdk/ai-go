@@ -22,10 +22,10 @@ func (m *agentCompletionModel) Stream(_ context.Context, request llm.Request) (<
 	ch := make(chan aikit.StreamEvent, 2)
 	if m.calls == 1 && len(request.Tools) > 0 {
 		ch <- aikit.StreamEvent{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallName: "lookup", ToolCallArgsDelta: `{}`}
-		ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonToolCalls}
+		ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, MessageID: "msg-tool", FinishReason: aikit.FinishReasonToolCalls}
 	} else {
 		ch <- aikit.StreamEvent{Type: aikit.StreamEventTextDelta, TextDelta: "done"}
-		ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonStop}
+		ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, MessageID: "msg-final", FinishReason: aikit.FinishReasonStop}
 	}
 	close(ch)
 	return ch, nil
@@ -50,6 +50,14 @@ func TestToolLoopAgentCompletionUsesAgentDefaultsAndTools(t *testing.T) {
 	}
 	if result.Text != "done" || model.calls != 2 || atomic.LoadInt32(&executor.calls) != 1 {
 		t.Fatalf("result=%#v model.calls=%d executor.calls=%d", result, model.calls, atomic.LoadInt32(&executor.calls))
+	}
+	if result.MessageID != "msg-final" || len(result.Response.Messages) != 3 ||
+		result.Response.Messages[0].ID != "msg-tool" || result.Response.Messages[2].ID != "msg-final" {
+		t.Fatalf("message identity was not preserved: %#v", result)
+	}
+	if len(result.Transcript) != 5 || result.Transcript[0].Role != RoleSystem ||
+		result.Transcript[1].Role != RoleUser || result.Transcript[4].ID != "msg-final" {
+		t.Fatalf("full transcript was not preserved: %#v", result.Transcript)
 	}
 	if len(model.requests[0].Messages) != 2 || model.requests[0].Messages[0].Role != RoleSystem ||
 		model.requests[0].Messages[0].Content[0].Text != "override" ||

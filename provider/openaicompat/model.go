@@ -30,9 +30,10 @@ type Config struct {
 	// the timer. If no data arrives within this duration, the stream is aborted
 	// with ErrChunkTimeout. Zero means no per-chunk timeout.
 	ChunkTimeout time.Duration
-	// HTTPClient is an optional custom doer. When non-nil, Timeout is ignored
-	// and the caller owns transport + timeout. Used for injecting logging
-	// RoundTrippers or proxy behavior without changing this package.
+	// HTTPClient is an optional custom doer. The caller owns its streaming
+	// transport behavior; a non-zero Timeout still bounds native Complete calls.
+	// Used for injecting logging RoundTrippers or proxy behavior without
+	// changing this package.
 	HTTPClient transport.Doer
 }
 
@@ -95,40 +96,12 @@ func (m *Model) Stream(
 	ctx context.Context,
 	req llm.Request,
 ) (<-chan aikit.StreamEvent, error) {
+	body, encodeWarnings, err := m.prepareRequest(req, true)
+	if err != nil {
+		return nil, err
+	}
+
 	name := providerName(m.cfg.Provider)
-	capabilities := providerCapabilities(m.cfg.Provider)
-	params := EncodeRequestParams{
-		ModelID:                  m.cfg.ModelID,
-		SupportsStructuredOutput: capabilities.SupportsStructuredOutput,
-		IncludeStreamUsage:       capabilities.SupportsStreamUsage,
-	}
-	if sanitizer, ok := m.cfg.Provider.(ToolSanitizer); ok {
-		params.SanitizeTools = sanitizer.SanitizeTools
-	}
-
-	cr, encodeWarnings, err := EncodeRequest(params, req, true)
-	if err != nil {
-		return nil, fmt.Errorf("%s: encode request: %w", name, err)
-	}
-
-	var body []byte
-	if rewriter, ok := m.cfg.Provider.(RequestRewriter); ok {
-		rawMap, mapErr := structToMap(cr)
-		if mapErr != nil {
-			return nil, fmt.Errorf("%s: marshal request to map: %w", name, mapErr)
-		}
-		rawMap, err = rewriter.RewriteRequest(req, rawMap)
-		if err != nil {
-			return nil, fmt.Errorf("%s: rewrite request: %w", name, err)
-		}
-		body, err = json.Marshal(rawMap)
-	} else {
-		body, err = json.Marshal(cr)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%s: marshal request: %w", name, err)
-	}
-
 	if m.clientErr != nil {
 		return nil, fmt.Errorf("%s: configure transport: %w", name, m.clientErr)
 	}
@@ -176,6 +149,43 @@ func (m *Model) Stream(
 			return DecodeSSEStream(ctx, reader, events, decodeParams)
 		},
 	), nil
+}
+
+func (m *Model) prepareRequest(req llm.Request, streaming bool) ([]byte, []aikit.Warning, error) {
+	name := providerName(m.cfg.Provider)
+	capabilities := providerCapabilities(m.cfg.Provider)
+	params := EncodeRequestParams{
+		ModelID:                  m.cfg.ModelID,
+		SupportsStructuredOutput: capabilities.SupportsStructuredOutput,
+		IncludeStreamUsage:       capabilities.SupportsStreamUsage,
+	}
+	if sanitizer, ok := m.cfg.Provider.(ToolSanitizer); ok {
+		params.SanitizeTools = sanitizer.SanitizeTools
+	}
+
+	cr, encodeWarnings, err := EncodeRequest(params, req, streaming)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: encode request: %w", name, err)
+	}
+
+	var body []byte
+	if rewriter, ok := m.cfg.Provider.(RequestRewriter); ok {
+		rawMap, mapErr := structToMap(cr)
+		if mapErr != nil {
+			return nil, nil, fmt.Errorf("%s: marshal request to map: %w", name, mapErr)
+		}
+		rawMap, err = rewriter.RewriteRequest(req, rawMap)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: rewrite request: %w", name, err)
+		}
+		body, err = json.Marshal(rawMap)
+	} else {
+		body, err = json.Marshal(cr)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: marshal request: %w", name, err)
+	}
+	return body, encodeWarnings, nil
 }
 
 func providerName(provider Compat) string {

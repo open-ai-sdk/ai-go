@@ -30,8 +30,9 @@ var ErrStreamConsumed = errors.New("ai: stream already fully consumed")
 // cannot wedge the source or the other views. Channel views (Stream/TextStream)
 // have no break signal; their consumers are expected to drain to completion.
 type StreamResult struct {
-	src   <-chan StepEvent
-	tools *ToolSet
+	src             <-chan StepEvent
+	tools           *ToolSet
+	initialMessages []Message
 
 	mu       sync.Mutex
 	branches []*streamBranch
@@ -58,6 +59,17 @@ func NewStreamResult(ch <-chan StepEvent) *StreamResult {
 // tool definitions required to build response.messages in Consume().
 func NewStreamResultWithTools(ch <-chan StepEvent, tools *ToolSet) *StreamResult {
 	return &StreamResult{src: ch, tools: tools, done: make(chan struct{})}
+}
+
+func (sr *StreamResult) withInitialMessages(messages []Message) *StreamResult {
+	if len(messages) == 0 {
+		return sr
+	}
+	sr.initialMessages = make([]Message, len(messages))
+	for i := range messages {
+		sr.initialMessages[i] = messages[i].Clone()
+	}
+	return sr
 }
 
 // register creates a new branch of the fan-out. When the source is already
@@ -213,7 +225,7 @@ func (sr *StreamResult) Consume() (*GenerateTextResult, error) {
 	sr.ensureStarted()
 	defer b.unregister(sr)
 
-	state := consumeState{result: &GenerateTextResult{}, tools: sr.tools}
+	state := consumeState{result: &GenerateTextResult{}, tools: sr.tools, initialMessages: sr.initialMessages}
 	for ev := range b.ch {
 		if terminal, terminalErr := state.consume(ev); terminal {
 			state.finishResponse()
@@ -228,14 +240,23 @@ type consumeState struct {
 	result             *GenerateTextResult
 	currentStep        *StepOutput
 	currentUsage       Usage
+	completedUsage     Usage
 	preludeToolResults []ToolResult
+	initialMessages    []Message
 	tools              *ToolSet
 }
 
 func (state *consumeState) finishResponse() {
-	state.result.Response = Response{Messages: responseMessagesWithPrelude(
+	generated := responseMessagesWithPrelude(
 		state.preludeToolResults, state.result.Steps, state.tools,
-	)}
+	)
+	state.result.Response = Response{Messages: generated}
+	messages := make([]Message, 0, len(state.initialMessages)+len(generated))
+	for i := range state.initialMessages {
+		messages = append(messages, state.initialMessages[i].Clone())
+	}
+	messages = append(messages, generated...)
+	state.result.Transcript = messages
 }
 
 func (state *consumeState) consume(ev StepEvent) (bool, error) {
@@ -256,13 +277,14 @@ func (state *consumeState) consume(ev StepEvent) (bool, error) {
 	case StepEventToolResult:
 		state.consumeToolResult(ev)
 	case StepEventUsage:
-		handleUsage(ev, state.result, state.currentStep, &state.currentUsage)
+		handleUsage(ev, state.result, state.currentStep, &state.currentUsage, state.completedUsage)
 	case StepEventSource:
 		handleSource(ev, state.result, state.currentStep)
 	case StepEventFileDelta:
 		handleFileDelta(ev, state.result, state.currentStep)
 	case StepEventStepEnd:
 		handleStepEnd(ev, state.result, state.currentStep, state.tools)
+		state.completedUsage.Accumulate(state.currentUsage)
 		state.currentStep = nil
 	case StepEventStructuredOutput:
 		state.result.StructuredOutput = ev.StructuredOutput
@@ -496,24 +518,15 @@ func handleUsage(
 	result *GenerateTextResult,
 	step *StepOutput,
 	current *Usage,
+	completed Usage,
 ) {
 	if event.Usage == nil {
 		return
 	}
-	result.Usage.InputTokens += event.Usage.InputTokens - current.InputTokens
-	result.Usage.InputTokenDetails.NoCacheTokens += event.Usage.InputTokenDetails.NoCacheTokens - current.InputTokenDetails.NoCacheTokens
-	result.Usage.InputTokenDetails.CacheReadTokens += event.Usage.InputTokenDetails.CacheReadTokens - current.InputTokenDetails.CacheReadTokens
-	result.Usage.InputTokenDetails.CacheWriteTokens += event.Usage.InputTokenDetails.CacheWriteTokens - current.InputTokenDetails.CacheWriteTokens
-	result.Usage.OutputTokens += event.Usage.OutputTokens - current.OutputTokens
-	result.Usage.OutputTokenDetails.TextTokens += event.Usage.OutputTokenDetails.TextTokens - current.OutputTokenDetails.TextTokens
-	result.Usage.OutputTokenDetails.ReasoningTokens += event.Usage.OutputTokenDetails.ReasoningTokens - current.OutputTokenDetails.ReasoningTokens
-	result.Usage.TotalTokens += event.Usage.TotalTokens - current.TotalTokens
-	if event.Usage.Raw != nil {
-		result.Usage.Raw = snapshotJSONMap(event.Usage.Raw)
-	}
 	*current = *snapshotUsage(event.Usage)
+	result.Usage = completed.Add(*current)
 	if step != nil {
-		step.Usage = *current
+		step.Usage = *snapshotUsage(current)
 	}
 }
 
@@ -553,6 +566,7 @@ func handleStepEnd(
 	if step == nil {
 		return
 	}
+	step.MessageID = event.MessageID
 	step.FinishReason = event.FinishReason
 	step.RawFinishReason = event.RawFinishReason
 	step.ProviderMetadata = event.ProviderMetadata
@@ -560,6 +574,7 @@ func handleStepEnd(
 	step.Response = Response{Messages: ResponseMessagesForStep(*step, tools)}
 	result.Steps = append(result.Steps, *step)
 	result.FinalStep = *step
+	result.MessageID = event.MessageID
 	result.Text = step.Text
 	result.Reasoning = step.Reasoning
 	result.FinishReason = event.FinishReason

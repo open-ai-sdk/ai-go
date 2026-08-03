@@ -26,6 +26,7 @@ const (
 
 type sseMessageStart struct {
 	Message struct {
+		ID    string `json:"id"`
 		Usage struct {
 			InputTokens              int `json:"input_tokens"`
 			OutputTokens             int `json:"output_tokens"`
@@ -96,6 +97,7 @@ func decodeSSEStream(
 	}
 
 	var eventType string
+	var messageID string
 	blocks := make(map[int]*blockState)
 
 	for {
@@ -119,6 +121,7 @@ func decodeSSEStream(
 			eventType,
 			frame.Data,
 			blocks,
+			&messageID,
 			send,
 			encodeWarnings,
 		) {
@@ -132,18 +135,19 @@ func decodeSSEStream(
 func dispatchSSEEvent(
 	eventType, data string,
 	blocks map[int]*blockState,
+	messageID *string,
 	send func(aikit.StreamEvent) bool,
 	encodeWarnings []aikit.Warning,
 ) bool {
 	switch eventType {
 	case eventMessageStart:
-		return handleMessageStart(data, send)
+		return handleMessageStart(data, messageID, send)
 	case eventContentBlockStart:
 		return handleContentBlockStart(data, blocks, send)
 	case eventContentBlockDelta:
 		return handleContentBlockDelta(data, blocks, send)
 	case eventMessageDelta:
-		return handleMessageDelta(data, send, encodeWarnings)
+		return handleMessageDelta(data, *messageID, send, encodeWarnings)
 	case eventError:
 		return handleError(data, send)
 	}
@@ -152,10 +156,12 @@ func dispatchSSEEvent(
 
 func handleMessageStart(
 	data string,
+	messageID *string,
 	send func(aikit.StreamEvent) bool,
 ) bool {
 	var msg sseMessageStart
 	if json.Unmarshal([]byte(data), &msg) == nil {
+		*messageID = msg.Message.ID
 		u := msg.Message.Usage
 		// Anthropic reports input_tokens as the non-cached prompt tokens; cache
 		// reads and writes are counted separately. The v7 InputTokens total is
@@ -244,6 +250,7 @@ func handleContentBlockDelta(
 
 func handleMessageDelta(
 	data string,
+	messageID string,
 	send func(aikit.StreamEvent) bool,
 	encodeWarnings []aikit.Warning,
 ) bool {
@@ -262,6 +269,7 @@ func handleMessageDelta(
 	}
 	return send(aikit.StreamEvent{
 		Type:            aikit.StreamEventFinish,
+		MessageID:       messageID,
 		FinishReason:    mapStopReason(msg.Delta.StopReason),
 		RawFinishReason: msg.Delta.StopReason,
 		Warnings:        encodeWarnings,

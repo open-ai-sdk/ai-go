@@ -24,6 +24,10 @@ func Complete(ctx context.Context, model LanguageModel, request CompletionReques
 	return llm.Complete(ctx, model, request)
 }
 
+func RawResponseAs[T any](response *CompletionResponse) (T, bool) {
+	return llm.RawResponseAs[T](response)
+}
+
 // Prompt sends one direct user prompt and returns its aggregated text.
 func Prompt(ctx context.Context, model LanguageModel, prompt string) (string, error) {
 	return llm.Prompt(ctx, model, prompt)

@@ -98,6 +98,7 @@ type GenerateTextRequest struct {
 
 // StepOutput holds the result of a single tool-loop step.
 type StepOutput struct {
+	MessageID string
 	Text      string
 	Reasoning string
 	// Content preserves assistant output parts in provider stream order,
@@ -122,6 +123,7 @@ type ToolCallOutput = aikit.ToolCallInfo
 
 // GenerateTextResult holds the full output of a GenerateText call.
 type GenerateTextResult struct {
+	MessageID string
 	Text      string
 	Reasoning string
 	Steps     []StepOutput
@@ -143,6 +145,10 @@ type GenerateTextResult struct {
 	StructuredOutput json.RawMessage
 	// Response contains messages for continuation.
 	Response Response
+	// Transcript contains the independently owned full conversation: initial
+	// request messages followed by every generated assistant/tool message.
+	// Response.Messages remains the continuation-only view for compatibility.
+	Transcript []Message
 }
 
 type (
@@ -155,6 +161,7 @@ type (
 // StepEndEvent is passed to the OnStepEnd callback after each step.
 type StepEndEvent struct {
 	StepNumber       int
+	MessageID        string
 	Text             string
 	Reasoning        string
 	Content          []ContentPart
@@ -171,6 +178,7 @@ type StepEndEvent struct {
 
 // EndEvent is passed to the OnEnd callback when the entire run completes.
 type EndEvent struct {
+	MessageID        string
 	Text             string
 	Reasoning        string
 	Steps            []StepOutput
@@ -183,6 +191,7 @@ type EndEvent struct {
 // ChunkEvent wraps a streaming engine event for the OnChunk callback.
 type ChunkEvent struct {
 	Type              string
+	MessageID         string
 	TextDelta         string
 	ReasoningDelta    string
 	ToolCallID        string
