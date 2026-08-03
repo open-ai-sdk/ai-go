@@ -12,20 +12,30 @@ import (
 
 // responsesRequest is the JSON body sent to the OpenAI Responses API POST /v1/responses.
 type responsesRequest struct {
-	Model              string            `json:"model"`
-	Input              []inputItem       `json:"input"`
-	Stream             bool              `json:"stream,omitempty"`
-	MaxOutputTokens    int               `json:"max_output_tokens,omitempty"`
-	Temperature        *float32          `json:"temperature,omitempty"`
-	TopP               *float32          `json:"top_p,omitempty"`
-	PreviousResponseID string            `json:"previous_response_id,omitempty"`
-	Reasoning          *reasoningConfig  `json:"reasoning,omitempty"`
-	Tools              []responsesTool   `json:"tools,omitempty"`
-	Text               *textConfig       `json:"text,omitempty"`
-	Store              *bool             `json:"store,omitempty"`
-	User               string            `json:"user,omitempty"`
-	Metadata           map[string]string `json:"metadata,omitempty"`
-	Include            []string          `json:"include,omitempty"`
+	Model              string              `json:"model"`
+	Input              []inputItem         `json:"input"`
+	Stream             bool                `json:"stream,omitempty"`
+	MaxOutputTokens    int                 `json:"max_output_tokens,omitempty"`
+	Temperature        *float32            `json:"temperature,omitempty"`
+	TopP               *float32            `json:"top_p,omitempty"`
+	PreviousResponseID string              `json:"previous_response_id,omitempty"`
+	Reasoning          *reasoningConfig    `json:"reasoning,omitempty"`
+	Tools              []responsesTool     `json:"tools,omitempty"`
+	Text               *textConfig         `json:"text,omitempty"`
+	Store              *bool               `json:"store,omitempty"`
+	User               string              `json:"user,omitempty"`
+	Metadata           map[string]string   `json:"metadata,omitempty"`
+	Include            []string            `json:"include,omitempty"`
+	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *promptCacheOptions `json:"prompt_cache_options,omitempty"`
+}
+
+type promptCacheOptions struct {
+	Mode PromptCacheMode `json:"mode"`
+}
+
+type promptCacheBreakpoint struct {
+	Mode string `json:"mode"`
 }
 
 type reasoningConfig struct {
@@ -70,8 +80,9 @@ type inputItem struct {
 type inputPart interface{ isInputPart() }
 
 type inputTextPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type                  string                 `json:"type"`
+	Text                  string                 `json:"text"`
+	PromptCacheBreakpoint *promptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
 }
 
 func (inputTextPart) isInputPart() {}
@@ -134,9 +145,12 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	if err := validatePDFDetail(opts.PDFDetail); err != nil {
 		return responsesRequest{}, nil, err
 	}
+	if err := validatePromptCacheOptions(req, opts); err != nil {
+		return responsesRequest{}, nil, err
+	}
 	var warnings []aikit.Warning
 
-	input, encWarnings, err := encodeInput(req, opts.PDFDetail)
+	input, encWarnings, err := encodeInput(req, opts.PDFDetail, opts.PromptCacheInstructions)
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
@@ -191,6 +205,12 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	if opts.Store != nil {
 		r.Store = opts.Store
 	}
+	if opts.PromptCacheKey != "" {
+		r.PromptCacheKey = opts.PromptCacheKey
+	}
+	if opts.PromptCacheMode != "" {
+		r.PromptCacheOptions = &promptCacheOptions{Mode: opts.PromptCacheMode}
+	}
 
 	// Tools: function tools + optional built-in web search.
 	tools, toolWarnings := encodeTools(req.Tools, opts)
@@ -211,14 +231,22 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 }
 
 // encodeInput converts system prompt + messages to Responses API input items.
-func encodeInput(req llm.Request, pdfDetail string) ([]inputItem, []aikit.Warning, error) {
+func encodeInput(
+	req llm.Request,
+	pdfDetail PDFDetail,
+	promptCacheInstructions bool,
+) ([]inputItem, []aikit.Warning, error) {
 	var items []inputItem
 	var warnings []aikit.Warning
 
 	if req.Instructions != "" {
+		instructionPart := inputTextPart{Type: "input_text", Text: req.Instructions}
+		if promptCacheInstructions {
+			instructionPart.PromptCacheBreakpoint = &promptCacheBreakpoint{Mode: PromptCacheModeExplicit}
+		}
 		items = append(items, inputItem{
 			Role:    "system",
-			Content: []inputPart{inputTextPart{Type: "input_text", Text: req.Instructions}},
+			Content: []inputPart{instructionPart},
 		})
 	}
 
@@ -231,6 +259,21 @@ func encodeInput(req llm.Request, pdfDetail string) ([]inputItem, []aikit.Warnin
 		items = append(items, encoded...)
 	}
 	return items, warnings, nil
+}
+
+func validatePromptCacheOptions(req llm.Request, opts ProviderOptions) error {
+	switch opts.PromptCacheMode {
+	case "", PromptCacheModeImplicit, PromptCacheModeExplicit:
+	default:
+		return fmt.Errorf(
+			"openai: prompt cache mode must be one of implicit or explicit, got %q",
+			opts.PromptCacheMode,
+		)
+	}
+	if opts.PromptCacheInstructions && req.Instructions == "" {
+		return fmt.Errorf("openai: prompt cache instructions requires non-empty Instructions")
+	}
+	return nil
 }
 
 func encodeMessage(m aikit.Message, pdfDetail string) ([]inputItem, []aikit.Warning, error) {

@@ -96,13 +96,24 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 		{Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0, ToolCallID: "call-1", ToolCallArgsDelta: `"Hanoi"}`},
 		{Type: aikit.StreamEventTextDelta, TextDelta: "after"},
 		{
-			Type:  aikit.StreamEventUsage,
-			Usage: &aikit.Usage{InputTokens: 3, InputTokenDetails: aikit.InputTokenDetails{CacheReadTokens: 1}},
+			Type: aikit.StreamEventUsage,
+			Usage: &aikit.Usage{
+				InputTokens: 3,
+				InputTokenDetails: aikit.InputTokenDetails{
+					NoCacheTokens:    1,
+					CacheReadTokens:  1,
+					CacheWriteTokens: 1,
+				},
+			},
 		},
 		{
 			Type: aikit.StreamEventUsage,
 			Usage: &aikit.Usage{
-				OutputTokens: 5, ToolUsePromptTokens: 2,
+				OutputTokens: 5, TotalTokens: 8, ToolUsePromptTokens: 2,
+				OutputTokenDetails: aikit.OutputTokenDetails{
+					TextTokens:      3,
+					ReasoningTokens: 2,
+				},
 				Raw: map[string]any{"provider": "test"},
 			},
 		},
@@ -122,8 +133,13 @@ func TestCompletionAggregatesOrderedRichMessage(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	if response.Text != "before after" || response.Reasoning != "think" || response.Usage.InputTokens != 3 ||
+		response.Usage.InputTokenDetails.NoCacheTokens != 1 ||
 		response.Usage.InputTokenDetails.CacheReadTokens != 1 ||
+		response.Usage.InputTokenDetails.CacheWriteTokens != 1 ||
 		response.Usage.OutputTokens != 5 ||
+		response.Usage.OutputTokenDetails.TextTokens != 3 ||
+		response.Usage.OutputTokenDetails.ReasoningTokens != 2 ||
+		response.Usage.TotalTokens != 8 ||
 		response.Usage.ToolUsePromptTokens != 2 ||
 		len(response.Sources) != 1 ||
 		len(response.Files) != 1 {

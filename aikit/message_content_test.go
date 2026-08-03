@@ -29,7 +29,7 @@ func TestValidateMessageRoleContentMatrix(t *testing.T) {
 			ContentPartTypeToolResult: true, ContentPartTypeToolApprovalResponse: true,
 		},
 		RoleAssistant: {
-			ContentPartTypeText: true, ContentPartTypeImage: true,
+			ContentPartTypeText: true, ContentPartTypeFile: true, ContentPartTypeImage: true,
 			ContentPartTypeToolCall: true, ContentPartTypeReasoning: true,
 		},
 		RoleTool: {ContentPartTypeToolResult: true},
@@ -47,6 +47,22 @@ func TestValidateMessageRoleContentMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestClonePreservesNilVersusEmptyBytes(t *testing.T) {
+	if cloned := (ContentPart{}).Clone(); cloned.Data != nil {
+		t.Fatalf("nil data became non-nil: %#v", cloned.Data)
+	}
+	cloned := (ContentPart{Data: make([]byte, 0)}).Clone()
+	if cloned.Data == nil || len(cloned.Data) != 0 {
+		t.Fatalf("non-nil empty data was not preserved: %#v", cloned.Data)
+	}
+	if media := ImageDataPart(make([]byte, 0), "image/png"); media.Data == nil {
+		t.Fatal("media constructor collapsed non-nil empty data")
+	}
+	if cloned := (ContentPart{ToolCallArgs: make(json.RawMessage, 0)}).Clone(); cloned.ToolCallArgs == nil {
+		t.Fatal("non-nil empty raw message became nil")
 	}
 }
 

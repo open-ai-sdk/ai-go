@@ -98,6 +98,7 @@ func decodeSSEStream(
 	var eventType string
 	var messageID string
 	blocks := make(map[int]*blockState)
+	warnings := append([]aikit.Warning(nil), encodeWarnings...)
 
 	for {
 		if ctx.Err() != nil {
@@ -122,7 +123,7 @@ func decodeSSEStream(
 			blocks,
 			&messageID,
 			send,
-			encodeWarnings,
+			&warnings,
 		) {
 			return ctx.Err()
 		}
@@ -136,17 +137,17 @@ func dispatchSSEEvent(
 	blocks map[int]*blockState,
 	messageID *string,
 	send func(aikit.StreamEvent) bool,
-	encodeWarnings []aikit.Warning,
+	warnings *[]aikit.Warning,
 ) bool {
 	switch eventType {
 	case eventMessageStart:
 		return handleMessageStart(data, messageID, send)
 	case eventContentBlockStart:
-		return handleContentBlockStart(data, blocks, send)
+		return handleContentBlockStart(data, blocks, send, warnings)
 	case eventContentBlockDelta:
 		return handleContentBlockDelta(data, blocks, send)
 	case eventMessageDelta:
-		return handleMessageDelta(data, *messageID, send, encodeWarnings)
+		return handleMessageDelta(data, *messageID, send, *warnings)
 	case eventError:
 		return handleError(data, send)
 	}
@@ -191,6 +192,7 @@ func handleContentBlockStart(
 	data string,
 	blocks map[int]*blockState,
 	send func(aikit.StreamEvent) bool,
+	warnings *[]aikit.Warning,
 ) bool {
 	var block sseContentBlockStart
 	if json.Unmarshal([]byte(data), &block) == nil {
@@ -207,6 +209,11 @@ func handleContentBlockStart(
 				ToolCallID:    block.ContentBlock.ID,
 				ToolCallName:  block.ContentBlock.Name,
 			})
+		}
+		switch block.ContentBlock.Type {
+		case "text", "tool_use", "thinking":
+		default:
+			*warnings = append(*warnings, unsupportedResponseBlockWarning(block.ContentBlock.Type))
 		}
 	}
 	return true

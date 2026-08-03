@@ -131,3 +131,28 @@ func TestEncodeRequest_AssistantWithText_HasContentParts(t *testing.T) {
 		t.Fatal("expected non-nil content for assistant message with text")
 	}
 }
+
+func TestEncodeRequest_DocumentUsesFileWarningPath(t *testing.T) {
+	req := ai.LanguageModelRequest{Messages: []ai.Message{{
+		Role: ai.RoleUser,
+		Content: []ai.ContentPart{
+			ai.TextPart("summarize"),
+			ai.DocumentFileIDPart("file-document", "application/pdf"),
+		},
+	}}}
+
+	encoded, warnings, err := EncodeRequest(EncodeRequestParams{ModelID: "test"}, req, false)
+	if err != nil {
+		t.Fatalf("EncodeRequest() error = %v", err)
+	}
+	if len(warnings) != 1 || warnings[0].Setting != "fileID" {
+		t.Fatalf("warnings = %#v, want fileID omission warning", warnings)
+	}
+	if len(encoded.Messages) != 1 {
+		t.Fatalf("messages = %#v", encoded.Messages)
+	}
+	content, ok := encoded.Messages[0]["content"].([]map[string]any)
+	if !ok || len(content) != 1 || content[0]["text"] != "summarize" {
+		t.Fatalf("content = %#v, want only retained text part", encoded.Messages[0]["content"])
+	}
+}

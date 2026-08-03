@@ -32,6 +32,25 @@ func TestPromptErrorPreservesCompletionAndAPIErrorChain(t *testing.T) {
 	}
 }
 
+func TestPromptErrorHistoryIncludesInstructions(t *testing.T) {
+	_, err := GenerateText(context.Background(), GenerateTextRequest{
+		Instructions: "system instruction",
+		Messages:     []Message{UserMessage("question")},
+		Tools: &ToolSet{Definitions: []ToolDefinition{{
+			Name: "lookup", ContextSchema: map[string]any{"required": []any{"tenant"}},
+		}}},
+	})
+	var promptErr *PromptError
+	if !errors.As(err, &promptErr) {
+		t.Fatalf("error = %T %v, want PromptError", err, err)
+	}
+	if len(promptErr.History) != 2 || promptErr.History[0].Role != RoleSystem ||
+		promptErr.History[0].Content[0].Text != "system instruction" ||
+		promptErr.History[1].Role != RoleUser {
+		t.Fatalf("history = %#v", promptErr.History)
+	}
+}
+
 func TestPromptErrorPartialAndHistoryAreIndependentSnapshots(t *testing.T) {
 	model := &toolThenStartErrorModel{}
 	initial := []Message{UserMessage("start")}

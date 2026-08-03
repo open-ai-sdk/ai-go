@@ -124,6 +124,38 @@ func TestEncodeNativeRequest(t *testing.T) {
 		assertEqual(t, resp["content"], "Sunny, 72°F")
 	})
 
+	t.Run("typed tool result keeps invalid JSON and selects image shape by model", func(t *testing.T) {
+		req := ai.LanguageModelRequest{Messages: []ai.Message{{
+			Role: ai.RoleTool,
+			Content: []ai.ContentPart{ai.RichToolResultPart(
+				"call_1",
+				"inspect",
+				ai.JSONToolResultContent(json.RawMessage(`{invalid`)),
+				ai.ImageToolResultContent([]byte("image"), "image/png"),
+			)},
+		}}}
+
+		gemini3 := encodeNativeRequestForModel("gemini-3.1-pro-preview", req)
+		functionResponse := gemini3.Contents[0].Parts[0].FunctionResponse
+		assertNotNilPtr(t, functionResponse)
+		response := functionResponse.Response.(map[string]any)
+		assertEqual(t, response["content"].(string), "{invalid")
+		assertEqual(t, len(functionResponse.Parts), 1)
+		assertNotNilPtr(t, functionResponse.Parts[0].InlineData)
+		assertEqual(t, functionResponse.Parts[0].InlineData.MediaType, "image/png")
+		assertEqual(t, functionResponse.Parts[0].InlineData.Data, "aW1hZ2U=")
+		assertEqual(t, len(gemini3.Contents[0].Parts), 1)
+
+		gemini25 := encodeNativeRequestForModel("gemini-2.5-flash", req)
+		legacyParts := gemini25.Contents[0].Parts
+		assertEqual(t, len(legacyParts), 3)
+		assertNotNilPtr(t, legacyParts[0].FunctionResponse)
+		assertEqual(t, len(legacyParts[0].FunctionResponse.Parts), 0)
+		assertNotNilPtr(t, legacyParts[1].InlineData)
+		assertEqual(t, legacyParts[1].InlineData.MediaType, "image/png")
+		assertEqual(t, legacyParts[2].Text, "Tool executed successfully and returned this image as a response")
+	})
+
 	t.Run("reasoning/thought parts with ThoughtSignature", func(t *testing.T) {
 		req := ai.LanguageModelRequest{
 			Messages: []ai.Message{

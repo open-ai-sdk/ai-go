@@ -185,11 +185,12 @@ func TestDecodeNativeSSE_UsageMapping(t *testing.T) {
 
 func TestNativeUsageToAIInfersMissingOutputWithSaturatingSubtraction(t *testing.T) {
 	usage := nativeUsageToAI(&nativeUsageMetadata{
-		PromptTokenCount: 12,
-		TotalTokenCount:  20,
+		PromptTokenCount:        12,
+		TotalTokenCount:         20,
+		ToolUsePromptTokenCount: 3,
 	})
-	if usage.OutputTokens != 8 {
-		t.Fatalf("OutputTokens = %d, want 8", usage.OutputTokens)
+	if usage.OutputTokens != 5 {
+		t.Fatalf("OutputTokens = %d, want 5", usage.OutputTokens)
 	}
 	if usage.TotalTokens != 20 {
 		t.Fatalf("TotalTokens = %d, want provider total 20", usage.TotalTokens)
@@ -198,10 +199,26 @@ func TestNativeUsageToAIInfersMissingOutputWithSaturatingSubtraction(t *testing.
 		t.Fatalf("raw candidatesTokenCount = %v, want provider value 0", got)
 	}
 
-	usage = nativeUsageToAI(&nativeUsageMetadata{PromptTokenCount: 12, TotalTokenCount: 10})
+	usage = nativeUsageToAI(&nativeUsageMetadata{
+		PromptTokenCount: 12, TotalTokenCount: 10, ToolUsePromptTokenCount: 3,
+	})
 	if usage.OutputTokens != 0 {
 		t.Fatalf("saturated OutputTokens = %d, want 0", usage.OutputTokens)
 	}
+}
+
+func TestDecodeNativeSSE_UnknownCandidatePartWarnsAtFinish(t *testing.T) {
+	sse := `data: {"candidates":[{"content":{"parts":[{"executableCode":{"language":"PYTHON","code":"print(1)"}},{"text":"answer"}],"role":"model"},"finishReason":"STOP"}]}` + "\n\n"
+	events := collectNativeEvents(nativeStreamFromString(sse))
+	for _, event := range events {
+		if event.Type == ai.StreamEventFinish {
+			if len(event.Warnings) != 1 || event.Warnings[0].Setting != "candidateContentPart" {
+				t.Fatalf("warnings = %#v, want unknown candidate-part warning", event.Warnings)
+			}
+			return
+		}
+	}
+	t.Fatal("expected finish event")
 }
 
 func TestDecodeNativeSSE_GroundingSources(t *testing.T) {

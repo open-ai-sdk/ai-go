@@ -23,6 +23,43 @@ func TestResponsesProviderOptionsAcceptJSONNumber(t *testing.T) {
 	}
 }
 
+func TestResponsesProviderOptionsEncodePromptCacheControls(t *testing.T) {
+	request, _, err := encodeRequest("gpt-5.6", ai.LanguageModelRequest{
+		Instructions: "stable instructions",
+		Messages:     []ai.Message{ai.UserMessage("changing question")},
+		ProviderOptions: map[string]any{
+			"openai": ProviderOptions{
+				PromptCacheKey:          "token-usage-example-v1",
+				PromptCacheMode:         PromptCacheModeExplicit,
+				PromptCacheInstructions: true,
+			},
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("encodeRequest() error = %v", err)
+	}
+	if request.PromptCacheKey != "token-usage-example-v1" ||
+		request.PromptCacheOptions == nil ||
+		request.PromptCacheOptions.Mode != PromptCacheModeExplicit {
+		t.Fatalf("prompt cache request = %#v", request)
+	}
+	part, ok := request.Input[0].Content[0].(inputTextPart)
+	if !ok || part.PromptCacheBreakpoint == nil || part.PromptCacheBreakpoint.Mode != PromptCacheModeExplicit {
+		t.Fatalf("instruction part = %#v", request.Input[0].Content[0])
+	}
+}
+
+func TestResponsesProviderOptionsRejectInvalidPromptCacheControls(t *testing.T) {
+	for _, request := range []ai.LanguageModelRequest{
+		{ProviderOptions: map[string]any{"openai": ProviderOptions{PromptCacheMode: "always"}}},
+		{ProviderOptions: map[string]any{"openai": ProviderOptions{PromptCacheInstructions: true}}},
+	} {
+		if _, _, err := encodeRequest("gpt-5.6", request, false); err == nil {
+			t.Fatalf("encodeRequest(%#v) error = nil", request.ProviderOptions)
+		}
+	}
+}
+
 func TestResponsesProviderOptionsAcceptPDFDetail(t *testing.T) {
 	request, _, err := encodeRequest("gpt-test", ai.LanguageModelRequest{
 		Messages: []ai.Message{{Role: ai.RoleUser, Content: []ai.ContentPart{

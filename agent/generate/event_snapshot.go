@@ -137,13 +137,7 @@ func snapshotToolResults(results []ToolResult) []ToolResult {
 
 func snapshotResponse(response Response) Response {
 	snapshot := response
-	if response.Messages == nil {
-		return snapshot
-	}
-	snapshot.Messages = make([]Message, len(response.Messages))
-	for i, message := range response.Messages {
-		snapshot.Messages[i] = message.Clone()
-	}
+	snapshot.Messages = cloneMessages(response.Messages)
 	return snapshot
 }
 

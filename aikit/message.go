@@ -317,7 +317,8 @@ func contentAllowedForRole(role Role, kind ContentPartType) bool {
 		}
 	case RoleAssistant:
 		switch kind {
-		case ContentPartTypeText, ContentPartTypeToolCall, ContentPartTypeReasoning, ContentPartTypeImage:
+		case ContentPartTypeText, ContentPartTypeToolCall, ContentPartTypeReasoning,
+			ContentPartTypeFile, ContentPartTypeImage:
 			return true
 		}
 	case RoleTool:
@@ -378,8 +379,20 @@ func (m Message) contentForRole(role Role) ([]ContentPart, error) {
 	return CloneContentParts(m.Content), nil
 }
 
-func cloneBytes(value []byte) []byte { return append([]byte(nil), value...) }
+func cloneBytes(value []byte) []byte {
+	if value == nil {
+		return nil
+	}
+	cloned := make([]byte, len(value))
+	copy(cloned, value)
+	return cloned
+}
 
 func cloneRawMessage(value json.RawMessage) json.RawMessage {
-	return append(json.RawMessage(nil), value...)
+	if value == nil {
+		return nil
+	}
+	cloned := make(json.RawMessage, len(value))
+	copy(cloned, value)
+	return cloned
 }

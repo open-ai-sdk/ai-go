@@ -133,3 +133,28 @@ func TestValuePreservesFastPathTypesAndNilShapes(t *testing.T) {
 		t.Fatal("fast-path byte mutation leaked to original")
 	}
 }
+
+func TestValueWithPointersClonesPointersAndPreservesAliases(t *testing.T) {
+	shared := map[string]any{"value": "original"}
+	pointer := &shared
+	input := map[string]any{"first": pointer, "second": pointer}
+
+	cloned := ValueWithPointers(input).(map[string]any)
+	first := cloned["first"].(*map[string]any)
+	second := cloned["second"].(*map[string]any)
+	if first == pointer {
+		t.Fatal("pointer clone still aliases the original pointer")
+	}
+	(*first)["value"] = "changed"
+	if got := (*second)["value"]; got != "changed" {
+		t.Fatalf("pointer alias value = %q, want changed", got)
+	}
+	if got := shared["value"]; got != "original" {
+		t.Fatalf("pointer clone mutation leaked to original: %q", got)
+	}
+
+	standard := Value(input).(map[string]any)
+	if standard["first"].(*map[string]any) != pointer {
+		t.Fatal("Value unexpectedly cloned a pointer")
+	}
+}

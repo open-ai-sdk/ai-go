@@ -126,6 +126,10 @@ if err != nil {
 
 fmt.Println(response.Text)
 fmt.Println(response.Usage.TotalTokens)
+fmt.Printf("cache-read=%d reasoning=%d\n",
+  response.Usage.InputTokenDetails.CacheReadTokens,
+  response.Usage.OutputTokenDetails.ReasoningTokens,
+)
 ```
 
 Instructions are separate from conversation messages. Prefer `Instructions`
@@ -357,7 +361,7 @@ for _, part := range response.Message.Content {
 
 | Field | Meaning |
 | --- | --- |
-| `InputTokens` | Total request/input tokens |
+| `InputTokens` | Provider-reported request/input tokens; cache counters are reported separately |
 | `InputTokenDetails.NoCacheTokens` | Input tokens not served from cache |
 | `InputTokenDetails.CacheReadTokens` | Tokens read from a provider-managed cache |
 | `InputTokenDetails.CacheWriteTokens` | Tokens written to a provider-managed cache |

@@ -300,6 +300,9 @@ func encodeAnthropicToolResult(part aikit.ContentPart) (any, []aikit.Warning) {
 			})
 		}
 	}
+	if len(content) == 0 && part.ToolResultOutput != "" {
+		return part.ToolResultOutput, warnings
+	}
 	return content, warnings
 }
 

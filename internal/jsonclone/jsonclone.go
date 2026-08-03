@@ -15,13 +15,15 @@ type visit struct {
 	capacity int
 }
 
+type reflectFallback func(reflect.Value, map[visit]reflect.Value) reflect.Value
+
 // Map clones a map and every JSON-like container reachable from its values.
 // Scalar values, functions, channels, structs, and pointers are copied as-is.
 func Map(values map[string]any) map[string]any {
 	if values == nil {
 		return nil
 	}
-	return cloneStringAnyMap(values, make(map[visit]reflect.Value))
+	return cloneStringAnyMap(values, make(map[visit]reflect.Value), cloneContainers)
 }
 
 // Value clones JSON-like map, slice, array, and interface containers while
@@ -30,18 +32,28 @@ func Value(value any) any {
 	if value == nil {
 		return nil
 	}
-	return cloneAny(value, make(map[visit]reflect.Value))
+	return cloneAny(value, make(map[visit]reflect.Value), cloneContainers)
 }
 
-func cloneAny(value any, seen map[visit]reflect.Value) any {
+// ValueWithPointers clones the same containers as Value and additionally
+// clones pointers reached through them. It is intended for programmatic schema
+// values that may contain pointers outside ordinary JSON data.
+func ValueWithPointers(value any) any {
+	if value == nil {
+		return nil
+	}
+	return cloneAny(value, make(map[visit]reflect.Value), cloneContainersAndPointers)
+}
+
+func cloneAny(value any, seen map[visit]reflect.Value, fallback reflectFallback) any {
 	if value == nil {
 		return nil
 	}
 	switch input := value.(type) {
 	case map[string]any:
-		return cloneStringAnyMap(input, seen)
+		return cloneStringAnyMap(input, seen, fallback)
 	case []any:
-		return cloneAnySlice(input, seen)
+		return cloneAnySlice(input, seen, fallback)
 	case json.RawMessage:
 		return cloneRawMessage(input, seen)
 	case []byte:
@@ -51,13 +63,14 @@ func cloneAny(value any, seen map[visit]reflect.Value) any {
 	case map[string]string:
 		return cloneStringMap(input, seen)
 	default:
-		return cloneValue(reflect.ValueOf(value), seen).Interface()
+		return fallback(reflect.ValueOf(value), seen).Interface()
 	}
 }
 
 func cloneStringAnyMap(
 	input map[string]any,
 	seen map[visit]reflect.Value,
+	fallback reflectFallback,
 ) map[string]any {
 	if input == nil {
 		return nil
@@ -73,12 +86,16 @@ func cloneStringAnyMap(
 	result := make(map[string]any, len(input))
 	seen[key] = reflect.ValueOf(result)
 	for name, value := range input {
-		result[name] = cloneAny(value, seen)
+		result[name] = cloneAny(value, seen, fallback)
 	}
 	return result
 }
 
-func cloneAnySlice(input []any, seen map[visit]reflect.Value) []any {
+func cloneAnySlice(
+	input []any,
+	seen map[visit]reflect.Value,
+	fallback reflectFallback,
+) []any {
 	if input == nil {
 		return nil
 	}
@@ -93,7 +110,7 @@ func cloneAnySlice(input []any, seen map[visit]reflect.Value) []any {
 	result := make([]any, len(input))
 	seen[key] = reflect.ValueOf(result)
 	for index, value := range input {
-		result[index] = cloneAny(value, seen)
+		result[index] = cloneAny(value, seen, fallback)
 	}
 	return result
 }
@@ -172,7 +189,32 @@ func cloneStringMap(input map[string]string, seen map[visit]reflect.Value) map[s
 	return result
 }
 
-func cloneValue(value reflect.Value, seen map[visit]reflect.Value) reflect.Value {
+func cloneContainers(value reflect.Value, seen map[visit]reflect.Value) reflect.Value {
+	return cloneReflect(value, seen, cloneContainers)
+}
+
+func cloneContainersAndPointers(value reflect.Value, seen map[visit]reflect.Value) reflect.Value {
+	if value.IsValid() && value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		key := identity(value)
+		if cloned, ok := seen[key]; ok {
+			return cloned
+		}
+		result := reflect.New(value.Type().Elem())
+		seen[key] = result
+		result.Elem().Set(cloneContainersAndPointers(value.Elem(), seen))
+		return result
+	}
+	return cloneReflect(value, seen, cloneContainersAndPointers)
+}
+
+func cloneReflect(
+	value reflect.Value,
+	seen map[visit]reflect.Value,
+	fallback reflectFallback,
+) reflect.Value {
 	if !value.IsValid() {
 		return value
 	}
@@ -182,7 +224,7 @@ func cloneValue(value reflect.Value, seen map[visit]reflect.Value) reflect.Value
 		if value.IsNil() {
 			return reflect.Zero(value.Type())
 		}
-		cloned := reflect.ValueOf(cloneAny(value.Interface(), seen))
+		cloned := reflect.ValueOf(cloneAny(value.Interface(), seen, fallback))
 		result := reflect.New(value.Type()).Elem()
 		result.Set(cloned)
 		return result
@@ -201,7 +243,7 @@ func cloneValue(value reflect.Value, seen map[visit]reflect.Value) reflect.Value
 		for iterator.Next() {
 			result.SetMapIndex(
 				iterator.Key(),
-				cloneValue(iterator.Value(), seen),
+				fallback(iterator.Value(), seen),
 			)
 		}
 		return result
@@ -217,14 +259,14 @@ func cloneValue(value reflect.Value, seen map[visit]reflect.Value) reflect.Value
 		result := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
 		seen[key] = result
 		for i := 0; i < value.Len(); i++ {
-			result.Index(i).Set(cloneValue(value.Index(i), seen))
+			result.Index(i).Set(fallback(value.Index(i), seen))
 		}
 		return result
 
 	case reflect.Array:
 		result := reflect.New(value.Type()).Elem()
 		for i := 0; i < value.Len(); i++ {
-			result.Index(i).Set(cloneValue(value.Index(i), seen))
+			result.Index(i).Set(fallback(value.Index(i), seen))
 		}
 		return result
 

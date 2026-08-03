@@ -122,3 +122,23 @@ func TestDynamicToolSchemaPreservesAliasesWithinClone(t *testing.T) {
 		t.Fatal("named typed nil slice became non-nil")
 	}
 }
+
+func TestDynamicToolSchemaClonesPointerContainers(t *testing.T) {
+	properties := map[string]any{"value": "original"}
+	pointer := &properties
+	dynamic, err := tool.NewDynamic(
+		"pointer-schema",
+		"Pointer-backed schema",
+		map[string]any{"properties": pointer},
+		func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	properties["value"] = "source-mutated"
+	cloned := dynamic.Describe().InputSchema["properties"].(*map[string]any)
+	if cloned == pointer || (*cloned)["value"] != "original" {
+		t.Fatalf("pointer-backed schema was not independently cloned: %#v", cloned)
+	}
+}

@@ -50,3 +50,28 @@ func TestCompleteRetainsNativeResponse(t *testing.T) {
 		t.Fatalf("raw = %#v, ok=%v", raw, ok)
 	}
 }
+
+func TestCompleteAllowsEmptyLengthFinishedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_length","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"length"}],"usage":{"prompt_tokens":4,"completion_tokens":8,"total_tokens":12}}`))
+	}))
+	defer server.Close()
+
+	model := openaicompat.NewModel(openaicompat.Config{
+		Provider: externalProvider{endpoint: server.URL + "/v1"}, ModelID: "test",
+	})
+	response, err := model.Complete(context.Background(), llm.Request{
+		Messages: []aikit.Message{aikit.UserMessage("hello")},
+	})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if response.FinishReason != aikit.FinishReasonLength || response.Text != "" ||
+		len(response.Message.Content) != 0 || response.Usage.TotalTokens != 12 {
+		t.Fatalf("response = %#v", response)
+	}
+	if raw, ok := llm.RawResponseAs[*openaicompat.ChatCompletionResponse](response); !ok || raw.ID != "chatcmpl_length" {
+		t.Fatalf("raw response = %#v, ok = %v", raw, ok)
+	}
+}

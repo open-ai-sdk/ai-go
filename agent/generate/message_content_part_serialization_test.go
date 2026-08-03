@@ -6,9 +6,15 @@ import (
 )
 
 func sharedContentPartRoundTrip(parts []ContentPart) []ContentPart {
-	engineParts := parts
-	publicParts := engineParts
-	return publicParts
+	encoded, err := json.Marshal(parts)
+	if err != nil {
+		panic(err)
+	}
+	var decoded []ContentPart
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		panic(err)
+	}
+	return decoded
 }
 
 // --- ContentPart constructors ---

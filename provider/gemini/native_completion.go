@@ -79,7 +79,7 @@ func (m *NativeLanguageModel) Complete(
 	if _, err := resolveProviderOptions(req.ProviderOptions); err != nil {
 		return nil, llm.WrapCompletionError(llm.CompletionErrorRequest, "complete", "gemini-native", err)
 	}
-	nativeReq := encodeNativeRequest(req)
+	nativeReq := encodeNativeRequestForModel(m.modelID, req)
 	opts := parseProviderOptions(req.ProviderOptions)
 	toolResult := encodeNativeTools(req.Tools, req.ToolChoice, opts)
 	nativeReq.Tools = toolResult.Tools
@@ -139,8 +139,18 @@ func normalizeGenerateContent(native *GenerateContentResponse) (*llm.CompletionR
 	message := aikit.Message{ID: native.ResponseID, Role: aikit.RoleAssistant}
 	var text, reasoning string
 	var files []llm.GeneratedFile
+	var warnings []aikit.Warning
 	toolIndex := 0
 	for _, part := range candidate.Content.Parts {
+		if isUnknownNativeResponsePart(
+			part.Text,
+			part.Thought,
+			part.FunctionCall != nil,
+			part.InlineData != nil,
+		) {
+			warnings = append(warnings, unknownCandidatePartWarning())
+			continue
+		}
 		if part.FunctionCall != nil {
 			message.Content = append(message.Content, aikit.ContentPart{
 				Type:       aikit.ContentPartTypeToolCall,
@@ -185,6 +195,7 @@ func normalizeGenerateContent(native *GenerateContentResponse) (*llm.CompletionR
 	response := &llm.CompletionResponse{
 		Message: message, MessageID: native.ResponseID, Text: text, Reasoning: reasoning,
 		FinishReason: finish, RawFinishReason: rawFinish, Files: files, RawResponse: native,
+		Warnings: warnings,
 	}
 	if native.UsageMetadata != nil {
 		u := native.UsageMetadata
@@ -201,6 +212,18 @@ func normalizeGenerateContent(native *GenerateContentResponse) (*llm.CompletionR
 		response.ProviderMetadata = map[string]any{"google": metadata}
 	}
 	return response, nil
+}
+
+func isUnknownNativeResponsePart(text string, thought *bool, hasFunctionCall, hasInlineData bool) bool {
+	return text == "" && thought == nil && !hasFunctionCall && !hasInlineData
+}
+
+func unknownCandidatePartWarning() aikit.Warning {
+	return aikit.Warning{
+		Type:    "unsupported-response-part",
+		Setting: "candidateContentPart",
+		Message: "gemini-native: unsupported candidate content part, skipping",
+	}
 }
 
 func nativeGoogleMetadata(

@@ -133,6 +133,9 @@ func emitOnEnd(cb *LifecycleCallbacks, steps []StepResultInfo, sr streamResult) 
 	if sr.finish != "" {
 		lastFinish = sr.finish
 	}
+	if sr.messageID != "" {
+		lastMessageID = sr.messageID
+	}
 	if sr.providerMeta != nil {
 		lastMeta = sr.providerMeta
 	}

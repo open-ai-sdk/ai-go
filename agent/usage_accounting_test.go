@@ -62,3 +62,15 @@ func TestEmitOnEndAddsEveryUsageCounter(t *testing.T) {
 		t.Fatal("OnEnd Usage.Raw aliases the final step")
 	}
 }
+
+func TestEmitOnEndUsesTerminalStreamMessageID(t *testing.T) {
+	var got EndEvent
+	emitOnEnd(
+		&LifecycleCallbacks{OnEnd: func(event EndEvent) { got = event }},
+		[]StepResultInfo{{MessageID: "older"}},
+		streamResult{messageID: "terminal"},
+	)
+	if got.MessageID != "terminal" {
+		t.Fatalf("MessageID = %q, want terminal", got.MessageID)
+	}
+}

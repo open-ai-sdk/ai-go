@@ -155,12 +155,13 @@ func normalizeChatCompletion(
 			ToolCallArgs: append(json.RawMessage(nil), call.Function.Arguments...),
 		})
 	}
-	if len(message.Content) == 0 {
+	finishReason := MapFinishReason(choice.FinishReason)
+	if len(message.Content) == 0 && finishReason != aikit.FinishReasonLength {
 		return nil, fmt.Errorf("chat completion returned no assistant content")
 	}
 	response := &llm.CompletionResponse{
 		Message: message, Text: text, Reasoning: reasoning,
-		FinishReason: MapFinishReason(choice.FinishReason), RawFinishReason: choice.FinishReason,
+		FinishReason: finishReason, RawFinishReason: choice.FinishReason,
 		Warnings: append([]aikit.Warning(nil), warnings...), RawResponse: native,
 	}
 	if native.Usage != nil {

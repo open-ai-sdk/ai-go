@@ -64,10 +64,7 @@ func (sr *StreamResult) withInitialMessages(messages []Message) *StreamResult {
 	if len(messages) == 0 {
 		return sr
 	}
-	sr.initialMessages = make([]Message, len(messages))
-	for i := range messages {
-		sr.initialMessages[i] = messages[i].Clone()
-	}
+	sr.initialMessages = cloneMessages(messages)
 	return sr
 }
 
@@ -250,12 +247,7 @@ func (state *consumeState) finishResponse() {
 		state.preludeToolResults, state.result.Steps, state.tools,
 	)
 	state.result.Response = Response{Messages: generated}
-	messages := make([]Message, 0, len(state.initialMessages)+len(generated))
-	for i := range state.initialMessages {
-		messages = append(messages, state.initialMessages[i].Clone())
-	}
-	messages = append(messages, generated...)
-	state.result.Transcript = messages
+	state.result.Transcript = transcriptMessages(state.initialMessages, generated)
 }
 
 func (state *consumeState) consume(ev StepEvent) (bool, error) {
@@ -401,14 +393,7 @@ func responseMessagesWithPrelude(
 ) []Message {
 	messages := make([]Message, 0, len(prelude)+len(steps))
 	for _, result := range prelude {
-		part := ToolResultPart(result.ID, result.Name, responseMessageToolOutput(result, tools))
-		part.ToolResultApprovalSignature = result.ApprovalSignature
-		part.ToolResultApprovalApproved = result.ApprovalApproved
-		part.ToolApprovalID = result.ApprovalID
-		messages = append(messages, Message{
-			Role:    RoleTool,
-			Content: []ContentPart{part},
-		})
+		messages = append(messages, responseMessageForToolResult(result, tools))
 	}
 	return append(messages, ResponseMessagesForSteps(steps, tools)...)
 }

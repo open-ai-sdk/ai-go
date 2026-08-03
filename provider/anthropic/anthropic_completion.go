@@ -99,6 +99,7 @@ func normalizeMessageResponse(
 	if native.Role != "" && native.Role != "assistant" {
 		return nil, fmt.Errorf("messages API returned role %q", native.Role)
 	}
+	warnings = append([]aikit.Warning(nil), warnings...)
 	message := aikit.Message{ID: native.ID, Role: aikit.RoleAssistant}
 	var text, reasoning string
 	for _, content := range native.Content {
@@ -124,14 +125,19 @@ func normalizeMessageResponse(
 				ToolCallName: content.Name,
 				ToolCallArgs: append(json.RawMessage(nil), content.Input...),
 			})
+		default:
+			warnings = append(warnings, unsupportedResponseBlockWarning(content.Type))
 		}
 	}
 	if len(message.Content) == 0 {
 		return nil, fmt.Errorf("messages API returned no assistant content")
 	}
 	usage := aikit.Usage{
-		InputTokens: native.Usage.InputTokens + native.Usage.CacheReadInputTokens +
-			native.Usage.CacheCreationInputTokens,
+		// Anthropic reports uncached input separately from cache reads and writes.
+		// Preserve each provider counter rather than folding cache activity into
+		// InputTokens; callers can then compare token categories consistently
+		// across direct completions.
+		InputTokens:  native.Usage.InputTokens,
 		OutputTokens: native.Usage.OutputTokens,
 		InputTokenDetails: aikit.InputTokenDetails{
 			NoCacheTokens: native.Usage.InputTokens, CacheReadTokens: native.Usage.CacheReadInputTokens,
@@ -148,4 +154,12 @@ func normalizeMessageResponse(
 		Usage: usage, FinishReason: mapStopReason(native.StopReason), RawFinishReason: native.StopReason,
 		Warnings: append([]aikit.Warning(nil), warnings...), RawResponse: native,
 	}, nil
+}
+
+func unsupportedResponseBlockWarning(blockType string) aikit.Warning {
+	return aikit.Warning{
+		Type:    "unsupported-response-part",
+		Setting: blockType,
+		Message: fmt.Sprintf("anthropic: unsupported response content block type %q, skipping", blockType),
+	}
 }

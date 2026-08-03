@@ -69,6 +69,37 @@ content, when `max_output_tokens` is exhausted during reasoning. In that case
 inspect `response.FinishReason`, usage, and `native.IncompleteDetails`; increase
 the output budget or reduce reasoning effort when visible output is required.
 
+## Prompt caching
+
+For GPT-5.6 and later Responses models, use `PromptCacheKey` with a stable,
+cacheable `Instructions` prefix. `PromptCacheInstructions` marks the end of
+that prefix; with explicit mode, changing user prompts after it do not replace
+the cache entry:
+
+```go
+options := openai.ProviderOptions{
+  PromptCacheKey:          "support-policy-v1",
+  PromptCacheMode:         openai.PromptCacheModeExplicit,
+  PromptCacheInstructions: true,
+}
+
+response, err := ai.NewCompletion(model, "What should this customer do next?").
+  Instructions(stablePolicyOver1024Tokens).
+  With(options).
+  Send(ctx)
+if err != nil {
+  return err
+}
+fmt.Println(response.Usage.InputTokenDetails.CacheReadTokens)
+fmt.Println(response.Usage.InputTokenDetails.CacheWriteTokens)
+```
+
+The marked prefix must contain at least 1,024 tokens and be identical across
+calls. Reuse the same cache key for matching prefixes. The first call normally
+writes cache data and later calls can read it; caching remains provider-managed,
+so a cache read is not guaranteed. See OpenAI's [prompt-caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
+for retention and billing details.
+
 ## Files and mixed output
 
 Upload files through the client because uploading is a provider operation, not

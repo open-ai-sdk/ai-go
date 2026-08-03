@@ -174,8 +174,8 @@ const (
 
 	ToolResultContentTypeText  = generate.ToolResultContentTypeText
 	ToolResultContentTypeFile  = generate.ToolResultContentTypeFile
-	ToolResultContentTypeJSON  = aikit.ToolResultContentTypeJSON
-	ToolResultContentTypeImage = aikit.ToolResultContentTypeImage
+	ToolResultContentTypeJSON  = generate.ToolResultContentTypeJSON
+	ToolResultContentTypeImage = generate.ToolResultContentTypeImage
 )
 
 var (

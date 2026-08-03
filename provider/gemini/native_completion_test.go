@@ -61,3 +61,21 @@ func TestNativeCompleteRetainsRawMessageIDAndUsage(t *testing.T) {
 		t.Fatalf("raw response aliases normalized metadata: %v", got)
 	}
 }
+
+func TestNormalizeGenerateContentWarnsForUnknownCandidatePart(t *testing.T) {
+	response, err := normalizeGenerateContent(&GenerateContentResponse{
+		Candidates: []GenerateContentCandidate{{
+			Content: &GenerateContent{Role: "model", Parts: []GenerateContentPart{
+				{Text: "answer"},
+				{},
+			}},
+			FinishReason: "STOP",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("normalizeGenerateContent() error = %v", err)
+	}
+	if len(response.Warnings) != 1 || response.Warnings[0].Setting != "candidateContentPart" {
+		t.Fatalf("warnings = %#v, want unknown candidate-part warning", response.Warnings)
+	}
+}

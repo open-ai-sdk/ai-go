@@ -1,6 +1,10 @@
 package generate
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/open-ai-sdk/ai-go/aikit"
+)
 
 // Response contains messages callers use to continue multi-step conversations.
 type Response struct {
@@ -42,23 +46,24 @@ func ResponseMessagesForStep(step StepOutput, tools *ToolSet) []Message {
 	}
 
 	for _, tr := range step.ToolResults {
-		part := ToolResultPart(tr.ID, tr.Name, responseMessageToolOutput(tr, tools))
-		if len(tr.Content) > 0 {
-			part.ToolResultContent = make([]ToolResultContent, len(tr.Content))
-			for i := range tr.Content {
-				part.ToolResultContent[i] = tr.Content[i].Clone()
-			}
-		}
-		part.ToolApprovalID = tr.ApprovalID
-		part.ToolResultApprovalSignature = tr.ApprovalSignature
-		part.ToolResultApprovalApproved = tr.ApprovalApproved
-		messages = append(messages, Message{
-			Role:    RoleTool,
-			Content: []ContentPart{part},
-		})
+		messages = append(messages, responseMessageForToolResult(tr, tools))
 	}
 
 	return messages
+}
+
+func responseMessageForToolResult(result ToolResult, tools *ToolSet) Message {
+	part := ToolResultPart(result.ID, result.Name, responseMessageToolOutput(result, tools))
+	if result.Content != nil {
+		part.ToolResultContent = make([]ToolResultContent, len(result.Content))
+		for i := range result.Content {
+			part.ToolResultContent[i] = result.Content[i].Clone()
+		}
+	}
+	part.ToolApprovalID = result.ApprovalID
+	part.ToolResultApprovalSignature = result.ApprovalSignature
+	part.ToolResultApprovalApproved = result.ApprovalApproved
+	return Message{Role: RoleTool, Content: []ContentPart{part}}
 }
 
 func containsContentType(parts []ContentPart, contentType ContentPartType) bool {
@@ -80,14 +85,28 @@ func toolCallContentIndex(parts []ContentPart, id string) int {
 }
 
 func cloneContentParts(parts []ContentPart) []ContentPart {
-	if parts == nil {
+	return aikit.CloneContentParts(parts)
+}
+
+func cloneMessages(messages []Message) []Message {
+	if messages == nil {
 		return nil
 	}
-	cloned := make([]ContentPart, len(parts))
-	for i, part := range parts {
-		cloned[i] = part.Clone()
+	cloned := make([]Message, len(messages))
+	for i := range messages {
+		cloned[i] = messages[i].Clone()
 	}
 	return cloned
+}
+
+func transcriptMessages(initial, generated []Message) []Message {
+	if initial == nil && generated == nil {
+		return nil
+	}
+	transcript := make([]Message, 0, len(initial)+len(generated))
+	transcript = append(transcript, cloneMessages(initial)...)
+	transcript = append(transcript, cloneMessages(generated)...)
+	return transcript
 }
 
 // ResponseMessagesForSteps converts all completed steps into continuation

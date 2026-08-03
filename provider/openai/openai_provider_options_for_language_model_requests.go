@@ -16,6 +16,15 @@ const (
 	PDFDetailHigh PDFDetail = "high"
 )
 
+// PromptCacheMode controls whether OpenAI creates an implicit cache breakpoint
+// or only uses explicitly marked prompt content.
+type PromptCacheMode = string
+
+const (
+	PromptCacheModeImplicit PromptCacheMode = "implicit"
+	PromptCacheModeExplicit PromptCacheMode = "explicit"
+)
+
 // ProviderOptions holds OpenAI-specific options passed via
 // GenerateTextRequest.ProviderOptions["openai"].
 //
@@ -67,6 +76,19 @@ type ProviderOptions struct {
 
 	// Metadata is arbitrary key-value metadata stored with the generation.
 	Metadata map[string]string `json:"metadata"`
+
+	// PromptCacheKey groups requests with the same reusable prompt prefix.
+	// Reuse the same key to improve cache-hit routing for GPT-5.6 and later.
+	PromptCacheKey string `json:"promptCacheKey"`
+
+	// PromptCacheMode selects OpenAI's implicit or explicit cache-breakpoint
+	// behavior. Empty uses the OpenAI default (implicit).
+	PromptCacheMode PromptCacheMode `json:"promptCacheMode"`
+
+	// PromptCacheInstructions marks the request Instructions text as an explicit
+	// cache breakpoint. It requires non-empty Instructions and is useful when
+	// they are a stable prefix followed by a changing user prompt.
+	PromptCacheInstructions bool `json:"promptCacheInstructions"`
 }
 
 // ProviderName identifies the key used in llm.Request.ProviderOptions.

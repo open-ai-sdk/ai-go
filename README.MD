@@ -93,10 +93,21 @@ if err != nil {
 	return err
 }
 fmt.Println(completion.Text)
+fmt.Printf("input=%d output=%d total=%d cached=%d reasoning=%d\\n",
+	completion.Usage.InputTokens,
+	completion.Usage.OutputTokens,
+	completion.Usage.TotalTokens,
+	completion.Usage.InputTokenDetails.CacheReadTokens,
+	completion.Usage.OutputTokenDetails.ReasoningTokens,
+)
 ```
 
 Direct completions do not execute tools. Use the `Message` in the result to
-build an explicit continuation. Inspect a native payload only when diagnosing
+build an explicit continuation. Their `Usage` is the one provider-call
+snapshot; it includes cache-read/cache-write, reasoning, and tool-prompt
+details when a provider reports them. Use `Usage.Add` to aggregate explicitly
+across separate calls. See [the completion token-usage reference](docs/core/completions.md#token-usage)
+for the complete field mapping. Inspect a native payload only when diagnosing
 provider-specific behavior:
 
 ```go

@@ -170,13 +170,13 @@ func encodeContentMessage(m aikit.Message) (map[string]any, []aikit.Warning, err
 		switch part.Type {
 		case aikit.ContentPartTypeText:
 			parts = append(parts, map[string]any{"type": "text", "text": part.Text})
-		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage:
+		case aikit.ContentPartTypeFile, aikit.ContentPartTypeImage, aikit.ContentPartTypeDocument:
 			encoded, w := encodeFilePart(part)
 			warnings = append(warnings, w...)
 			if encoded != nil {
 				parts = append(parts, encoded)
 			}
-		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeDocument, aikit.ContentPartTypeVideo:
+		case aikit.ContentPartTypeAudio, aikit.ContentPartTypeVideo:
 			return nil, nil, fmt.Errorf(
 				"openai-compatible: content part type %q is not supported by Chat Completions",
 				part.Type,

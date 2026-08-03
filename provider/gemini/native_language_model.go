@@ -82,7 +82,7 @@ func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-ch
 		return nil, err
 	}
 	// Build native request body.
-	nr := encodeNativeRequest(req)
+	nr := encodeNativeRequestForModel(m.modelID, req)
 
 	// Encode tools + toolConfig.
 	opts := parseProviderOptions(req.ProviderOptions)

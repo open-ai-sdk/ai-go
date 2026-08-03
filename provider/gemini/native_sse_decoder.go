@@ -71,8 +71,11 @@ func nativeUsageToAI(u *nativeUsageMetadata) *aikit.Usage {
 		noCache = 0
 	}
 	outputTokens := u.CandidatesTokenCount
-	if outputTokens == 0 && u.TotalTokenCount > u.PromptTokenCount {
-		outputTokens = u.TotalTokenCount - u.PromptTokenCount
+	if outputTokens == 0 {
+		outputTokens = u.TotalTokenCount - u.PromptTokenCount - u.ToolUsePromptTokenCount
+		if outputTokens < 0 {
+			outputTokens = 0
+		}
 	}
 	return &aikit.Usage{
 		InputTokens: u.PromptTokenCount,
@@ -147,6 +150,7 @@ func decodeNativeSSEStream(
 	var lastGoogleMeta map[string]any
 	toolCallIndex := 0
 	hasToolCalls := false
+	var warnings []aikit.Warning
 
 	for {
 		select {
@@ -180,6 +184,7 @@ func decodeNativeSSEStream(
 					&lastGoogleMeta,
 					&toolCallIndex,
 					&hasToolCalls,
+					&warnings,
 				)
 			}
 		}
@@ -195,6 +200,7 @@ func emitNativeChunkEvents(
 	lastGoogleMeta *map[string]any,
 	toolCallIndex *int,
 	hasToolCalls *bool,
+	warnings *[]aikit.Warning,
 ) {
 	if len(chunk.Candidates) > 0 {
 		cand := chunk.Candidates[0]
@@ -210,6 +216,15 @@ func emitNativeChunkEvents(
 		// 2. Content parts.
 		if cand.Content != nil {
 			for _, part := range cand.Content.Parts {
+				if isUnknownNativeResponsePart(
+					part.Text,
+					part.Thought,
+					part.FunctionCall != nil,
+					part.InlineData != nil,
+				) {
+					*warnings = append(*warnings, unknownCandidatePartWarning())
+					continue
+				}
 				if part.FunctionCall != nil {
 					*hasToolCalls = true
 					args := string(part.FunctionCall.Args)
@@ -274,6 +289,7 @@ func emitNativeChunkEvents(
 				FinishReason:     reason,
 				RawFinishReason:  raw,
 				ProviderMetadata: provMeta,
+				Warnings:         append([]aikit.Warning(nil), (*warnings)...),
 			}
 		}
 
