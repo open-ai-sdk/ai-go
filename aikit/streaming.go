@@ -21,10 +21,12 @@ type Stream[E any] interface {
 // concrete return while E stays bound for generic consumers.
 //
 // The cost is partial inference. A generic helper over these interfaces infers
-// the implementer but not E or S, so its callers must name them:
+// the implementer but not E or S, so its callers must name them — for a helper
+// declared as
 //
-//	drain[aikit.StreamEvent, *llm.StreamingResponse](ctx, handle, "hello")
+//	func drain[E any, S Stream[E], P StreamingPrompt[E, S]](ctx context.Context, p P, prompt string) (S, error)
 //
+// a call reads drain[StreamEvent, *llm.StreamingResponse](ctx, handle, "hi").
 // Direct method calls are unaffected.
 type StreamingPrompt[E any, S Stream[E]] interface {
 	StreamPrompt(ctx context.Context, prompt string) (S, error)

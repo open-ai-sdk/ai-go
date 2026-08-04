@@ -118,6 +118,53 @@ func FuzzToolCallFoldGateMatchesUngatedValidity(f *testing.F) {
 	})
 }
 
+// The benchmark below documents the cost but never runs in CI, which uses
+// `go test -race ./...` with no -bench. This is the guard that does run.
+//
+// It asserts the invariant directly rather than inferring it. Each whole-buffer
+// json.Valid pass is O(len(args)); doing one per delta is what made the fold
+// quadratic. Counting those passes is deterministic — no timing, no allocation
+// heuristics — and a revert to validate-every-delta fails it immediately.
+//
+// Timing and allocation were both tried first and both are the wrong
+// instrument: the compiler elides the []byte(string) copy, so an ungated fold
+// burns seconds of CPU rescanning while allocating almost nothing.
+func TestToolCallFoldValidatesOncePerCompletedValue(t *testing.T) {
+	const deltaSize = 20
+	arguments := `{"data":"` + strings.Repeat("x", 256<<10) + `"}`
+	deltas := chunkString(arguments, deltaSize)
+
+	var fold ToolCallFold
+	for _, delta := range deltas {
+		fold.Add(StreamEvent{Type: StreamEventToolCallDelta, ToolCallArgsDelta: delta})
+	}
+	if !fold.Completed()[0].Complete {
+		t.Fatal("arguments never completed")
+	}
+
+	// A streamed JSON object returns to depth zero exactly once, at its closing
+	// brace, so exactly one validation should have run across all the deltas.
+	if got := fold.drafts[0].validations; got != 1 {
+		t.Fatalf("json.Valid ran %d times over %d deltas, want 1 — the structural gate "+
+			"is not suppressing whole-buffer revalidation", got, len(deltas))
+	}
+}
+
+// Nested structure returns to depth zero only at the outermost close, so
+// nesting must not multiply validations either.
+func TestToolCallFoldGateHoldsForNestedArguments(t *testing.T) {
+	arguments := `{"a":{"b":{"c":[1,2,3]}},"d":"` + strings.Repeat("y", 4096) + `"}`
+	deltas := chunkString(arguments, 8)
+
+	var fold ToolCallFold
+	for _, delta := range deltas {
+		fold.Add(StreamEvent{Type: StreamEventToolCallDelta, ToolCallArgsDelta: delta})
+	}
+	if got := fold.drafts[0].validations; got != 1 {
+		t.Fatalf("json.Valid ran %d times over %d deltas, want 1", got, len(deltas))
+	}
+}
+
 // Accumulating n deltas must stay linear. A fold that concatenates strings and
 // rescans the whole buffer per delta is quadratic in both, and it runs on the
 // consumer's goroutine while a model streams a large tool argument.

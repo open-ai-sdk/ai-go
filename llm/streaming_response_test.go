@@ -94,14 +94,15 @@ func wantRichResponse() *llm.CompletionResponse {
 				{Type: aikit.ContentPartTypeFile, Data: []byte("png-bytes"), MediaType: "image/png"},
 			},
 		},
-		MessageID:       "msg-1",
-		Text:            "hello",
-		Reasoning:       "think",
-		Usage:           aikit.Usage{InputTokens: 11, OutputTokens: 4, TotalTokens: 11},
-		FinishReason:    aikit.FinishReasonToolCalls,
-		RawFinishReason: "tool_calls",
-		// The two usage events merge rather than sum: the second report's zero
-		// input count must not clobber the first.
+		MessageID: "msg-1",
+		Text:      "hello",
+		Reasoning: "think",
+		// The two usage events merge rather than sum: the second report carries
+		// only OutputTokens, and its zero input count must not clobber the 11
+		// from the first.
+		Usage:            aikit.Usage{InputTokens: 11, OutputTokens: 4, TotalTokens: 11},
+		FinishReason:     aikit.FinishReasonToolCalls,
+		RawFinishReason:  "tool_calls",
 		ProviderMetadata: map[string]any{"openai": "meta"},
 		Warnings:         []aikit.Warning{{Type: "other", Message: "careful"}},
 		Sources: []aikit.Source{

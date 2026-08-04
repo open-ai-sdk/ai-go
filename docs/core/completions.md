@@ -148,9 +148,10 @@ A direct completion follows a predictable path:
    fallback path folds normalized `ai.StreamEvent` values into the response.
 5. Tool calls are returned to the caller and are never executed automatically.
 
-`Build` stops after step 1. Calling `Stream` explicitly always exposes the
-normalized event channel. `Send` performs the native-or-stream selection and
-returns any tool calls described in step 5 to the application.
+`Build` stops after step 1. `StreamSend` always takes the stream path and
+exposes the normalized events as they arrive, alongside the same aggregate.
+`Send` performs the native-or-stream selection and returns any tool calls
+described in step 5 to the application.
 
 ### Request builder
 
@@ -271,23 +272,24 @@ returns, so choosing one no longer costs you the other.
 ```go
 stream, err := ai.NewCompletion(model, "Explain Go interfaces").StreamSend(ctx)
 if err != nil {
-  return err
+	return err
 }
 
 for event, err := range stream.Events() {
-  if err != nil {
-    return err
-  }
-  if event.Type == ai.StreamEventTextDelta {
-    fmt.Print(event.TextDelta)
-  }
+	if err != nil {
+		return err
+	}
+	if event.Type == ai.StreamEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
 }
 
 response, err := stream.Response()
 if err != nil {
-  return err
+	return err
 }
 fmt.Printf("\n%d tokens\n", response.Usage.TotalTokens)
+return nil
 ```
 
 The stream may contain text, reasoning, tool-call argument fragments, usage,

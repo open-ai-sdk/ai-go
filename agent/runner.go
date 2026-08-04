@@ -323,6 +323,12 @@ func (r Runner) sequence(
 		completed := false
 		defer func() {
 			cancel()
+			if !completed && runErr == nil {
+				// A panic or runtime.Goexit in the consumer's range body unwinds
+				// through here without reaching any exit branch. Result must not
+				// then report an abort with a nil error.
+				runErr = context.Canceled
+			}
 			stream.err = runErr
 			if completed {
 				stream.state = StreamCompleted

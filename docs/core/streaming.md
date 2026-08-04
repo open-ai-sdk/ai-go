@@ -50,6 +50,7 @@ for event, err := range stream.Events() {
 		fmt.Print(event.TextDelta)
 	}
 }
+return nil
 ```
 
 Three differences to note while migrating:
@@ -314,10 +315,14 @@ which erases the concrete type and forces every caller to type-assert before it
 can reach `Response()` or `Result()`.
 
 The cost is real and worth knowing before you write such a helper: **inference
-is partial**. The implementer is inferred; `E` and `S` are not.
+is partial**. The implementer is inferred; `E` and `S` are not, so callers name
+them:
 
 ```go
-drain[aikit.StreamEvent, *llm.StreamingResponse](ctx, handle, "hello")
+_, err := docAcceptAnythingStreamable[aikit.StreamEvent, *llm.StreamingResponse](
+	ctx, llm.Streaming(model), "Explain Go channels",
+)
+return err
 ```
 
 Direct method calls pay nothing. Use the free functions —

@@ -52,6 +52,10 @@ type foldedToolCall struct {
 	depth    int
 	inString bool
 	escaped  bool
+	// validations counts whole-buffer json.Valid passes. Each one is O(len),
+	// so the gate is only doing its job while this stays small relative to the
+	// delta count; a test asserts that.
+	validations int
 }
 
 // Add integrates one StreamEventToolCallDelta and reports whether it opened a
@@ -116,6 +120,7 @@ func (c *foldedToolCall) appendArgs(delta string) {
 	if !c.scanBalances(delta) {
 		return
 	}
+	c.validations++
 	c.draft.Complete = json.Valid([]byte(c.args.String()))
 }
 

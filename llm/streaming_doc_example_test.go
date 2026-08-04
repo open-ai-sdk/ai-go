@@ -40,6 +40,33 @@ func docStreamOneModelCall(ctx context.Context, model llm.Model) error {
 	return nil
 }
 
+// docMigratedStreamLoop is the "After:" half of the migration snippet — the one
+// an upgrading consumer copies, so it is the one that most needs to compile.
+func docMigratedStreamLoop(ctx context.Context, model llm.Model) error {
+	stream, err := llm.NewCompletion(model, "Explain Go channels").StreamSend(ctx)
+	if err != nil {
+		return err
+	}
+	for event, err := range stream.Events() {
+		if err != nil {
+			return err
+		}
+		if event.Type == aikit.StreamEventTextDelta {
+			fmt.Print(event.TextDelta)
+		}
+	}
+	return nil
+}
+
+// docNameTypeArgumentsExplicitly is the partial-inference snippet: a generic
+// helper over the streaming interfaces infers the implementer but not E or S.
+func docNameTypeArgumentsExplicitly(ctx context.Context, model llm.Model) error {
+	_, err := docAcceptAnythingStreamable[aikit.StreamEvent, *llm.StreamingResponse](
+		ctx, llm.Streaming(model), "Explain Go channels",
+	)
+	return err
+}
+
 // docStreamPromptAndChat is the "Prompt and chat" snippet.
 func docStreamPromptAndChat(ctx context.Context, model llm.Model, history []aikit.Message) error {
 	stream, err := llm.StreamChat(ctx, model, "And in one sentence?", history...)
@@ -104,6 +131,12 @@ func TestDocumentedModelStreamSnippetsRun(t *testing.T) {
 
 	if err := docStreamOneModelCall(ctx, &countingStreamModel{events: richEvents()}); err != nil {
 		t.Errorf("docStreamOneModelCall() error = %v", err)
+	}
+	if err := docMigratedStreamLoop(ctx, &countingStreamModel{events: richEvents()}); err != nil {
+		t.Errorf("docMigratedStreamLoop() error = %v", err)
+	}
+	if err := docNameTypeArgumentsExplicitly(ctx, &countingStreamModel{events: richEvents()}); err != nil {
+		t.Errorf("docNameTypeArgumentsExplicitly() error = %v", err)
 	}
 	if err := docStreamPromptAndChat(ctx, &countingStreamModel{events: richEvents()}, history); err != nil {
 		t.Errorf("docStreamPromptAndChat() error = %v", err)

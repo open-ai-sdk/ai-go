@@ -169,6 +169,7 @@ reducer already ran behind `Stream`.
 ```go
 stream, err := assistant.Runner().
 	Prompt("Explain Go channels").
+	MaxTurns(4).
 	StreamRun(ctx)
 if err != nil {
 	return err
@@ -187,7 +188,8 @@ result, err := stream.Result()
 if err != nil {
 	return err
 }
-fmt.Println(len(result.Steps), "steps")
+fmt.Println(len(result.Steps), result.Usage.TotalTokens)
+return nil
 ```
 
 `Result()` reports `agent.ErrStreamNotDrained` until the sequence ends, and

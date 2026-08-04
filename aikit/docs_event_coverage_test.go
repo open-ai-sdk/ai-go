@@ -5,7 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"strings"
+	"regexp"
 	"testing"
 )
 
@@ -25,7 +25,10 @@ func TestStreamingDocsMentionEveryEventConstant(t *testing.T) {
 		{"step_event.go", "StepEventType"},
 	} {
 		for _, name := range constantsOfType(t, source.file, source.enum) {
-			if !strings.Contains(text, name) {
+			// Whole-word, so StepEventToolCall does not count as coverage for
+			// StepEventToolCallDelta.
+			mention := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
+			if !mention.MatchString(text) {
 				t.Errorf("%s declares %s but %s never mentions it", source.file, name, docPath)
 			}
 		}

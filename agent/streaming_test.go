@@ -247,6 +247,35 @@ func TestStreamRunBreakBeforeDoneAborts(t *testing.T) {
 	}
 }
 
+// A range body that unwinds without reaching a normal exit — a panic, or the
+// Goexit a t.Fatal inside a range performs — must not report an abort with a
+// nil error, which would read as success.
+func TestStreamRunAbortedByUnwindCarriesAnError(t *testing.T) {
+	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{richRunScript()}}
+	stream, err := mustRunnerAgent(t, model).Runner().Prompt("q").StreamRun(context.Background())
+	if err != nil {
+		t.Fatalf("StreamRun() error = %v", err)
+	}
+
+	func() {
+		defer func() { _ = recover() }()
+		for range stream.Events() {
+			panic("consumer exploded")
+		}
+	}()
+
+	if stream.State() != agent.StreamAborted {
+		t.Errorf("State() = %v, want StreamAborted", stream.State())
+	}
+	result, resultErr := stream.Result()
+	if resultErr == nil {
+		t.Fatal("Result() error = nil after an aborted range, want a cancellation error")
+	}
+	if result == nil {
+		t.Error("Result() = nil, want the partial aggregate")
+	}
+}
+
 func TestStreamRunIsSingleUseAndKeepsTheFirstRangeAggregate(t *testing.T) {
 	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{richRunScript()}}
 	stream, err := mustRunnerAgent(t, model).Runner().Prompt("q").StreamRun(context.Background())

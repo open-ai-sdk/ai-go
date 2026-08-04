@@ -44,15 +44,17 @@ var (
 // A StreamingResponse is owned by a single goroutine. Events bodies run in the
 // consumer's goroutine and that is where the aggregate is written, so calling
 // Response, State, or Close from another goroutine is a data race rather than a
-// supported call. Response returns the internal aggregate, not a copy.
+// supported call — cancel the context passed to StreamSend instead. Response
+// returns the internal aggregate, not a copy.
 type StreamingResponse struct {
 	model   Model
 	request CompletionRequest
+	parent  context.Context
 
-	// ctx and cancel are established at construction, not at start: Close may
-	// be called from a goroutine that never ranges, and a cancel func written
-	// by the ranging goroutine would be a race on the one field Close needs.
-	// Deriving a context opens nothing, so lazy start is unaffected.
+	// ctx and cancel are derived in start, not at construction. Deriving them
+	// eagerly would register a child on a cancellable parent that a response
+	// which is never ranged and never closed keeps alive — a leak for exactly
+	// the case lazy start exists to make free.
 	ctx      context.Context
 	cancel   context.CancelFunc
 	events   <-chan aikit.StreamEvent
@@ -70,12 +72,10 @@ type StreamingResponse struct {
 }
 
 func newStreamingResponse(ctx context.Context, model Model, request CompletionRequest) *StreamingResponse {
-	child, cancel := context.WithCancel(ctx)
 	return &StreamingResponse{
 		model:     model,
 		request:   request,
-		ctx:       child,
-		cancel:    cancel,
+		parent:    ctx,
 		result:    &CompletionResponse{Message: aikit.Message{Role: aikit.RoleAssistant}},
 		toolParts: make(map[int]int),
 	}
@@ -164,17 +164,20 @@ func (s *StreamingResponse) Response() (*CompletionResponse, error) {
 // goroutine that owns the response.
 func (s *StreamingResponse) State() StreamState { return s.state }
 
-// Close releases a response that is never ranged, and makes a later Events
-// yield ErrStreamUsed. Ranging to the end or breaking out already releases the
-// provider stream, so Close is then a no-op.
+// Close makes a later Events yield ErrStreamUsed and cancels the provider call
+// if one is in flight. Ranging to the end or breaking out already releases the
+// stream, so Close is then a no-op, and a response that was never ranged has
+// nothing to release — the point of Close there is to retire it so nothing
+// starts a call later.
 //
-// Close touches only the single-use flag and the cancel func, both established
-// before any goroutine can observe the response, so it is the one method that
-// is safe to call from a goroutine other than the one ranging Events. Response,
-// State, and the aggregate are not.
+// Close belongs to the owning goroutine, like Response and State. It is not an
+// out-of-band cancel handle for a range running elsewhere; cancel the context
+// passed to StreamSend for that.
 func (s *StreamingResponse) Close() error {
 	s.used.Store(true)
-	s.cancel()
+	if s.cancel != nil {
+		s.cancel()
+	}
 	return nil
 }
 
@@ -185,6 +188,7 @@ func (s *StreamingResponse) start() error {
 		return s.startErr
 	}
 	s.started = true
+	s.ctx, s.cancel = context.WithCancel(s.parent)
 
 	stream, err := s.model.Stream(s.ctx, s.request)
 	if err != nil {
