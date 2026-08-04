@@ -10,10 +10,9 @@ import (
 	"github.com/open-ai-sdk/ai-go/tool"
 )
 
-type CompletionObjectResult[T any] struct {
-	Object   T
-	Response *llm.CompletionResponse
-}
+// CompletionObjectResult is the decoded value and provider response from one
+// direct structured completion.
+type CompletionObjectResult[T any] = llm.CompletionObjectResult[T]
 
 // CompleteObject performs exactly one model call and decodes its text as T.
 // It never enters the Agent runtime or executes tools.

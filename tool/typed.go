@@ -27,7 +27,7 @@ type Typed[Args any, Output any] interface {
 // The definition is captured when Adapt is called. Input JSON is decoded into
 // Args before Call runs, and Output follows the same text, JSON, rich-output,
 // and error behavior as [New]. Register the returned tool with [NewSet].
-func Adapt[Args any, Output any](typed Typed[Args, Output]) (*Tool, error) {
+func Adapt[Args, Output any](typed Typed[Args, Output]) (*Tool, error) {
 	if isNilTyped(typed) {
 		return nil, fmt.Errorf("tool.Adapt: nil typed tool")
 	}
