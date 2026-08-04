@@ -79,7 +79,9 @@ func docStreamPromptAndChat(ctx context.Context, model llm.Model, history []aiki
 		if err != nil {
 			return err
 		}
-		fmt.Print(event.TextDelta)
+		if event.Type == aikit.StreamEventTextDelta {
+			fmt.Print(event.TextDelta)
+		}
 	}
 	return nil
 }

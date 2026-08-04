@@ -26,10 +26,14 @@ type ToolCallDraft struct {
 // Three rules resolve provider disagreement, each chosen against the in-repo
 // decoders:
 //
-//   - Arguments stop accumulating once they parse as valid JSON. A provider
-//     that re-sends complete arguments would otherwise concatenate them into
-//     invalid JSON and fail the call. Incrementally streamed JSON is not valid
-//     until its closing token, so the gate cannot fire early on it.
+//   - Arguments stop accumulating once a complete JSON object or array has
+//     arrived. A provider that re-sends complete arguments would otherwise
+//     concatenate them into invalid JSON and fail the call. Incrementally
+//     streamed JSON is not valid until its closing token, so the gate cannot
+//     fire early. Root scalars are deliberately never completed: they have no
+//     closing token, so a valid prefix is indistinguishable from a finished
+//     value. Function arguments are objects on every provider, so this costs
+//     nothing real.
 //   - The first non-empty thought signature wins. The signature belongs to the
 //     call as announced.
 //   - A non-empty ID or name on a later delta overwrites the current one.
@@ -120,8 +124,33 @@ func (c *foldedToolCall) appendArgs(delta string) {
 	if !c.scanBalances(delta) {
 		return
 	}
+	args := c.args.String()
+	if !startsStructured(args) {
+		// A root scalar has no closing token, so a valid prefix cannot be told
+		// apart from a finished value: "123" parses while the provider is still
+		// sending "45", and completing there would truncate the arguments.
+		// Only structured values can be recognized as finished — which costs
+		// nothing in practice, because every provider requires function
+		// arguments to be a JSON object.
+		return
+	}
 	c.validations++
-	c.draft.Complete = json.Valid([]byte(c.args.String()))
+	c.draft.Complete = json.Valid([]byte(args))
+}
+
+// startsStructured reports whether args opens a JSON object or array, ignoring
+// leading whitespace.
+func startsStructured(args string) bool {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case ' ', '\t', '\r', '\n':
+		case '{', '[':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // scanBalances advances the structural state over delta and reports whether the

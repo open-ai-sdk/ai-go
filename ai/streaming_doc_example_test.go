@@ -34,7 +34,7 @@ func docFacadeStreamSend(ctx context.Context, model ai.LanguageModel) error {
 }
 
 func TestDocumentedFacadeSnippetsRun(t *testing.T) {
-	if err := docFacadeStreamSend(context.Background(), facadeStreamModel{}); err != nil {
+	if err := docFacadeStreamSend(context.Background(), &facadeStreamModel{}); err != nil {
 		t.Errorf("docFacadeStreamSend() error = %v", err)
 	}
 }

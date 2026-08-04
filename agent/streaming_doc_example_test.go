@@ -76,7 +76,9 @@ func docStreamAgentPrompt(ctx context.Context, assistant *agent.Agent, history [
 		if err != nil {
 			return err
 		}
-		fmt.Print(event.TextDelta)
+		if event.Type == aikit.StepEventTextDelta {
+			fmt.Print(event.TextDelta)
+		}
 	}
 	_, err = stream.Result()
 	return err

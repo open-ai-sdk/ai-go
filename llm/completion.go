@@ -7,6 +7,10 @@ import (
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
+// errNilCompletionModel is the one wording every entrypoint reports when no
+// model is bound, so Send, StreamSend, and StreamCompletion cannot drift apart.
+var errNilCompletionModel = errors.New("llm: completion model is required")
+
 // CompletionRequest is the normalized input for one direct model call.
 // It is an alias of Request so provider implementations have one canonical
 // request contract.
@@ -179,7 +183,7 @@ func (b CompletionRequestBuilder) StreamSend(ctx context.Context) (*StreamingRes
 	if b.model == nil {
 		return nil, &CompletionError{
 			Kind: CompletionErrorKindRequest, Operation: "stream",
-			Cause: errors.New("completion model is required"),
+			Cause: errNilCompletionModel,
 		}
 	}
 	return newStreamingResponse(ctx, b.model, b.Build()), nil
@@ -190,12 +194,7 @@ func (b CompletionRequestBuilder) StreamSend(ctx context.Context) (*StreamingRes
 // error are returned together.
 func (b CompletionRequestBuilder) Send(ctx context.Context) (*CompletionResponse, error) {
 	if b.model == nil {
-		return nil, NewCompletionError(
-			CompletionErrorKindRequest,
-			"send",
-			"",
-			errors.New("llm: completion model is required"),
-		)
+		return nil, NewCompletionError(CompletionErrorKindRequest, "send", "", errNilCompletionModel)
 	}
 	if model, ok := b.model.(CompletionModel); ok {
 		response, err := model.Complete(ctx, b.Build())

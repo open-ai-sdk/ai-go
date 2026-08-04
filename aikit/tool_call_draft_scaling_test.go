@@ -6,10 +6,34 @@ import (
 	"testing"
 )
 
-// The structural gate must pick exactly the deltas a json.Valid-per-delta fold
-// would pick. If it ever diverges, Complete fires at the wrong moment and
-// arguments are either truncated or over-appended.
-func TestToolCallFoldGateMatchesUngatedValidity(t *testing.T) {
+// referenceFold is the fold's intended semantics written the obvious, slow way:
+// accumulate every delta, and after each one stop only once a complete JSON
+// object or array has arrived. It is the oracle the optimized implementation is
+// checked against.
+//
+// A plain json.Valid-per-delta fold is deliberately NOT the oracle. It shares
+// the defect the structured check exists to remove: a root scalar streamed as
+// "123" then "45" parses after the first delta, so an ungated fold stops there
+// and silently truncates the arguments to "123".
+func referenceFold(deltas []string) (args string, complete bool) {
+	var accumulated strings.Builder
+	for _, delta := range deltas {
+		if complete || delta == "" {
+			continue
+		}
+		accumulated.WriteString(delta)
+		current := accumulated.String()
+		if startsStructured(current) && json.Valid([]byte(current)) {
+			complete = true
+		}
+	}
+	return accumulated.String(), complete
+}
+
+// The optimized fold must agree with the reference on both the final arguments
+// and the delta on which Complete flips. Divergence means arguments are either
+// truncated or over-appended.
+func TestToolCallFoldMatchesReferenceSemantics(t *testing.T) {
 	streams := []string{
 		`{"q":"hello"}`,
 		`{"a":{"b":[1,2,{"c":"}]"}]}}`,
@@ -23,36 +47,52 @@ func TestToolCallFoldGateMatchesUngatedValidity(t *testing.T) {
 		`null`,
 		`{"unterminated":`,
 		`{"trailing":1}  `,
+		`  {"leading":1}`,
 	}
-	for _, complete := range streams {
+	for _, payload := range streams {
 		for _, size := range []int{1, 3, 7} {
-			t.Run(complete+"/"+string(rune('0'+size)), func(t *testing.T) {
-				deltas := chunkString(complete, size)
+			t.Run(payload+"/"+string(rune('0'+size)), func(t *testing.T) {
+				deltas := chunkString(payload, size)
 
 				var fold ToolCallFold
-				var ungated strings.Builder
-				for step, delta := range deltas {
-					event := StreamEvent{Type: StreamEventToolCallDelta, ToolCallArgsDelta: delta}
-
-					wantComplete := false
-					if !foldComplete(&fold) {
-						ungated.WriteString(delta)
-						wantComplete = ungated.Len() > 0 && json.Valid([]byte(ungated.String()))
-					} else {
-						wantComplete = true
-					}
-
-					fold.Add(event)
+				for step := range deltas {
+					fold.Add(StreamEvent{
+						Type: StreamEventToolCallDelta, ToolCallArgsDelta: deltas[step],
+					})
+					_, wantComplete := referenceFold(deltas[:step+1])
 					if got := foldComplete(&fold); got != wantComplete {
-						t.Fatalf("after delta %d (%q): Complete = %v, ungated fold = %v",
-							step, delta, got, wantComplete)
+						t.Fatalf("after delta %d (%q): Complete = %v, reference = %v",
+							step, deltas[step], got, wantComplete)
 					}
 				}
-				if got := fold.Completed()[0].Args; got != ungated.String() {
-					t.Errorf("Args = %q, ungated fold = %q", got, ungated.String())
+
+				wantArgs, _ := referenceFold(deltas)
+				if got := fold.Completed()[0].Args; got != wantArgs {
+					t.Errorf("Args = %q, reference = %q", got, wantArgs)
 				}
 			})
 		}
+	}
+}
+
+// A root scalar has no closing token, so no prefix of it may be treated as a
+// finished value. Completing on the first parsable prefix would hand the tool
+// "123" when the model sent 12345.
+func TestToolCallFoldNeverCompletesRootScalars(t *testing.T) {
+	for _, payload := range []string{`12345`, `true`, `null`, `"a bare string"`} {
+		t.Run(payload, func(t *testing.T) {
+			var fold ToolCallFold
+			for _, delta := range chunkString(payload, 2) {
+				fold.Add(StreamEvent{Type: StreamEventToolCallDelta, ToolCallArgsDelta: delta})
+			}
+			draft := fold.Completed()[0]
+			if draft.Complete {
+				t.Errorf("Complete = true for the root scalar %s", payload)
+			}
+			if draft.Args != payload {
+				t.Errorf("Args = %q, want the whole payload %q", draft.Args, payload)
+			}
+		})
 	}
 }
 
@@ -72,9 +112,9 @@ func chunkString(value string, size int) []string {
 
 // The table above is hand-picked, so it can only find defects someone thought
 // of. This searches for the one that matters: any split of any byte string
-// where the gated fold and an ungated json.Valid-per-delta fold disagree about
-// when the arguments completed.
-func FuzzToolCallFoldGateMatchesUngatedValidity(f *testing.F) {
+// where the optimized fold and the reference semantics disagree about the
+// arguments or about when they completed.
+func FuzzToolCallFoldMatchesReferenceSemantics(f *testing.F) {
 	f.Add(`{"q":"hello"}`, 3)
 	f.Add(`{"escaped":"quote \" then \\"}`, 1)
 	f.Add(`{"brackets_in_string":"{[}]"}`, 2)
@@ -88,32 +128,28 @@ func FuzzToolCallFoldGateMatchesUngatedValidity(f *testing.F) {
 		if size < 1 || size > 64 || len(payload) > 4096 {
 			t.Skip()
 		}
-		var fold ToolCallFold
-		var ungated strings.Builder
-		ungatedComplete := false
+		deltas := chunkString(payload, size)
+		wantArgs, wantComplete := referenceFold(deltas)
 
-		for _, delta := range chunkString(payload, size) {
-			if !ungatedComplete && delta != "" {
-				ungated.WriteString(delta)
-				ungatedComplete = ungated.Len() > 0 && json.Valid([]byte(ungated.String()))
-			}
+		var fold ToolCallFold
+		for _, delta := range deltas {
 			fold.Add(StreamEvent{Type: StreamEventToolCallDelta, ToolCallArgsDelta: delta})
 		}
 
 		drafts := fold.Completed()
 		if len(drafts) == 0 {
-			if ungated.Len() != 0 {
-				t.Fatalf("gated fold produced no draft for %q", payload)
+			if wantArgs != "" {
+				t.Fatalf("fold produced no draft for %q", payload)
 			}
 			return
 		}
-		if drafts[0].Complete != ungatedComplete {
-			t.Fatalf("payload %q size %d: Complete = %v, ungated = %v (args %q)",
-				payload, size, drafts[0].Complete, ungatedComplete, drafts[0].Args)
+		if drafts[0].Complete != wantComplete {
+			t.Fatalf("payload %q size %d: Complete = %v, reference = %v (args %q)",
+				payload, size, drafts[0].Complete, wantComplete, drafts[0].Args)
 		}
-		if drafts[0].Args != ungated.String() {
-			t.Fatalf("payload %q size %d: Args = %q, ungated = %q",
-				payload, size, drafts[0].Args, ungated.String())
+		if drafts[0].Args != wantArgs {
+			t.Fatalf("payload %q size %d: Args = %q, reference = %q",
+				payload, size, drafts[0].Args, wantArgs)
 		}
 	})
 }

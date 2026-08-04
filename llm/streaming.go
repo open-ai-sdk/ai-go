@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"errors"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
@@ -58,7 +57,7 @@ func (m ModelStream) StreamCompletion(
 	if m.model == nil {
 		return CompletionRequestBuilder{}, &CompletionError{
 			Kind: CompletionErrorKindRequest, Operation: "stream",
-			Cause: errors.New("completion model is required"),
+			Cause: errNilCompletionModel,
 		}
 	}
 	return NewCompletion(m.model, "").Messages(history...).Prompt(prompt), nil

@@ -115,7 +115,9 @@ for event, err := range stream.Events() {
 	if err != nil {
 		return err
 	}
-	fmt.Print(event.TextDelta)
+	if event.Type == aikit.StreamEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
 }
 return nil
 ```
@@ -220,7 +222,9 @@ for event, err := range stream.Events() {
 	if err != nil {
 		return err
 	}
-	fmt.Print(event.TextDelta)
+	if event.Type == aikit.StepEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
 }
 _, err = stream.Result()
 return err
