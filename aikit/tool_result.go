@@ -3,6 +3,8 @@ package aikit
 import (
 	"encoding/json"
 	"errors"
+
+	"github.com/open-ai-sdk/ai-go/internal/jsonclone"
 )
 
 const (
@@ -11,6 +13,27 @@ const (
 	ToolResultContentTypeJSON  = "json"
 	ToolResultContentTypeImage = "image"
 )
+
+// ToolResultDisposition is the single outcome classification for a call.
+type ToolResultDisposition string
+
+const (
+	ToolResultSuccess ToolResultDisposition = "success"
+	ToolResultError   ToolResultDisposition = "error"
+	ToolResultDenied  ToolResultDisposition = "denied"
+	ToolResultRefused ToolResultDisposition = "refused"
+	ToolResultSkipped ToolResultDisposition = "skipped"
+)
+
+// Valid reports whether the disposition is one of the defined outcomes.
+func (d ToolResultDisposition) Valid() bool {
+	switch d {
+	case ToolResultSuccess, ToolResultError, ToolResultDenied, ToolResultRefused, ToolResultSkipped:
+		return true
+	default:
+		return false
+	}
+}
 
 // ToolResultContent represents a single content part in a tool result.
 type ToolResultContent struct {
@@ -81,19 +104,23 @@ type ToolResult struct {
 	ApprovalRequestSignature string
 	// Error retains typed tool failure classification for agent and wire
 	// adapters. Output remains the model-visible raw string.
-	Error   error `json:"-"`
-	Content []ToolResultContent
+	Error       error `json:"-"`
+	Content     []ToolResultContent
+	Disposition ToolResultDisposition
+	// Metadata is host-only metadata. It is intentionally excluded from JSON
+	// and provider history serialization.
+	Metadata map[string]any `json:"-"`
 }
 
 // Clone returns an independently owned copy of the tool result's structured content.
 func (r ToolResult) Clone() ToolResult {
-	if r.Content == nil {
-		return r
+	if r.Content != nil {
+		content := r.Content
+		r.Content = make([]ToolResultContent, len(r.Content))
+		for i := range content {
+			r.Content[i] = content[i].Clone()
+		}
 	}
-	content := r.Content
-	r.Content = make([]ToolResultContent, len(r.Content))
-	for i := range content {
-		r.Content[i] = content[i].Clone()
-	}
+	r.Metadata = jsonclone.Map(r.Metadata)
 	return r
 }

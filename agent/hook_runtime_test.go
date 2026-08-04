@@ -38,6 +38,34 @@ func hookDynamicTool(
 	return value
 }
 
+func TestHookScratchpadIsRunLocalAndStable(t *testing.T) {
+	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("ok", "done")}}
+	var observed string
+	hook := agent.HookFuncs{
+		Name: "scratchpad",
+		BeforeCompletionFunc: func(_ context.Context, hc agent.HookContext, _ llm.Request) (agent.CompletionAction, error) {
+			hc.Store("request", "one")
+			agent.ScratchpadUpdate[int](hc, "count", func(value int, present bool) (int, bool) {
+				return value + 1, true
+			})
+			return agent.CompletionAction{Kind: agent.CompletionContinue}, nil
+		},
+		StreamEventFunc: func(_ context.Context, hc agent.HookContext, event aikit.StepEvent) error {
+			if event.Type == aikit.StepEventTextDelta {
+				observed, _ = agent.ScratchpadGet[string](hc, "request")
+			}
+			return nil
+		},
+	}
+	built := mustRunnerAgent(t, model, func(builder agent.Builder) agent.Builder { return builder.Hook(hook) })
+	if _, err := built.Runner().Prompt("go").Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if observed != "one" {
+		t.Fatalf("scratchpad value = %q", observed)
+	}
+}
+
 func TestRunnerHooksUseStableContextAndPerTurnCompletionPatches(t *testing.T) {
 	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
 		{

@@ -168,11 +168,19 @@ func (s *Set) Invoke(
 			Cause:    errors.New("nil tool set"),
 		}
 	}
-	snapshot, err := s.Snapshot()
-	if err != nil {
-		return nil, &ExecutionError{ToolName: name, Cause: err}
+	if invoker, ok := s.invokers[name]; ok {
+		return invoker.Invoke(ctx, input)
 	}
-	return snapshot.Invoke(ctx, name, input)
+	return nil, &NoSuchToolError{ToolName: name, AvailableTools: Snapshot{definitions: s.definitions}.names()}
+}
+
+// InvokeResult dispatches through the rich capability when supplied, adapting
+// legacy invokers at the released raw-JSON boundary otherwise.
+func (s *Set) InvokeResult(ctx context.Context, name string, input json.RawMessage) (ExecutionResult, error) {
+	if s == nil {
+		return ExecutionResult{}, &ExecutionError{ToolName: name, Cause: errors.New("nil tool set")}
+	}
+	return Snapshot{definitions: s.definitions, index: s.index, invokers: s.invokers}.InvokeResult(ctx, name, input)
 }
 
 // Definitions returns independent copies of the snapshot's definitions.
@@ -211,6 +219,22 @@ func (s Snapshot) Invoke(
 		ToolName:       name,
 		AvailableTools: s.names(),
 	}
+}
+
+// InvokeResult invokes the exact captured rich or legacy path.
+func (s Snapshot) InvokeResult(ctx context.Context, name string, input json.RawMessage) (ExecutionResult, error) {
+	invoker, ok := s.invokers[name]
+	if !ok {
+		return ExecutionResult{}, &NoSuchToolError{ToolName: name, AvailableTools: s.names()}
+	}
+	if rich, ok := invoker.(ResultInvokable); ok {
+		return rich.InvokeResult(ctx, input)
+	}
+	raw, err := invoker.Invoke(ctx, input)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return ResultFromLegacy(raw), nil
 }
 
 func (s *Set) activeDefinitions() []aikit.ToolDefinition {

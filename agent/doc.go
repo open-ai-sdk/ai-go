@@ -6,5 +6,7 @@
 // The package owns no conversation store. Requests, tool results, and approval
 // decisions are carried by values supplied to a Runner, so a caller can
 // suspend a request and resume later from message history without retaining
-// server-side agent state.
+// server-side agent state. Hooks are ordered, run-local lifecycle extensions;
+// their HookContext scratchpad is safe for parallel tool callbacks but is not
+// a substitute for tool authorization.
 package agent

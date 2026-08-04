@@ -163,12 +163,12 @@ turn-budget exhaustion yields the committed step and tool-result events, then
 returns the same `*agent.MaxTurnsError`; it does not emit a successful done
 event.
 
-## Hooks on one run
+## Next: Hooks
 
 Hooks registered with `Builder.Hook` are copied into every Runner. A hook added
 with `Runner.Hook` is appended only for that invocation. Hooks execute
-synchronously in registration order and may patch, rewrite, retry, skip, or
-stop their specific lifecycle stage.
+synchronously in registration order. See [Hooks](/core/hooks) for event,
+patch, scratchpad, and security-boundary details.
 
 See [Streaming](/core/streaming) for the difference between direct model and
 Agent event streams, [Structured output](/core/structured-output) for final

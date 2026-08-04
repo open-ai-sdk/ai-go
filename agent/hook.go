@@ -18,10 +18,11 @@ type Hook interface {
 
 // HookContext is stable for one run and is passed by value to hooks.
 type HookContext struct {
-	RunID     string
-	Turn      int
-	Streaming bool
-	AgentID   string
+	RunID      string
+	Turn       int
+	Streaming  bool
+	AgentID    string
+	scratchpad *scratchpad
 }
 
 // HookError identifies a lifecycle hook failure while preserving its cause.
@@ -54,6 +55,21 @@ type RequestPatch struct {
 	ProviderOptions map[string]any
 	ActiveTools     []string
 	Settings        *llm.CallSettings
+	ToolChoice      *aikit.ToolChoice
+}
+
+// ToolResultEvent presents immutable execution facts separately from the
+// running model presentation. Rewriters may change Presentation only.
+type ToolResultEvent struct {
+	Raw          aikit.ToolResult
+	Presentation aikit.ToolResult
+}
+
+// ToolResultHook is the rich post-tool capability. AfterTool remains
+// supported for existing pre-release hooks.
+type ToolResultHook interface {
+	Hook
+	OnToolResult(context.Context, HookContext, ToolResultEvent) (ToolResultAction, error)
 }
 
 type CompletionActionKind uint8
@@ -153,9 +169,17 @@ type HookFuncs struct {
 	BeforeCompletionFunc func(context.Context, HookContext, llm.Request) (CompletionAction, error)
 	BeforeToolFunc       func(context.Context, HookContext, aikit.ToolCallInfo) (ToolCallAction, error)
 	AfterToolFunc        func(context.Context, HookContext, aikit.ToolResult) (ToolResultAction, error)
+	ToolResultFunc       func(context.Context, HookContext, ToolResultEvent) (ToolResultAction, error)
 	InvalidToolCallFunc  func(context.Context, HookContext, aikit.RepairToolCallInput) (InvalidToolCallAction, error)
 	StreamEventFunc      func(context.Context, HookContext, aikit.StepEvent) error
 	RunFinishedFunc      func(context.Context, HookContext, *Result, error)
+}
+
+func (h HookFuncs) OnToolResult(ctx context.Context, hc HookContext, event ToolResultEvent) (ToolResultAction, error) {
+	if h.ToolResultFunc == nil {
+		return ToolResultAction{Kind: ToolResultKeep}, nil
+	}
+	return h.ToolResultFunc(ctx, hc, ToolResultEvent{Raw: event.Raw.Clone(), Presentation: event.Presentation.Clone()})
 }
 
 func (h HookFuncs) HookName() string { return h.Name }
@@ -258,6 +282,20 @@ func callAfterTool(
 		}
 	}()
 	return hook.AfterTool(ctx, hc, result)
+}
+
+func callToolResult(
+	hook ToolResultHook,
+	ctx context.Context,
+	hc HookContext,
+	event ToolResultEvent,
+) (action ToolResultAction, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = panicError(value)
+		}
+	}()
+	return hook.OnToolResult(ctx, hc, event)
 }
 
 func callInvalidTool(
@@ -379,8 +417,35 @@ func (r *run) afterTool(result *aikit.ToolResult) (*aikit.ToolResult, error) {
 	if r.hookErr != nil {
 		return nil, r.hookErr
 	}
+	raw := result.Clone()
 	effective := result.Clone()
 	for _, hook := range r.hooks {
+		if capability, ok := hook.(ToolResultHook); ok {
+			event := ToolResultEvent{Raw: raw.Clone(), Presentation: effective.Clone()}
+			action, err := callToolResult(capability, r.ctx, r.hookContext, event)
+			if err != nil {
+				return nil, hookFailure(hook, "after_tool", err)
+			}
+			switch action.Kind {
+			case ToolResultKeep:
+			case ToolResultRewrite:
+				rewritten := action.Result.Clone()
+				if rewritten.ID == "" {
+					rewritten.ID = effective.ID
+				}
+				if rewritten.Name == "" {
+					rewritten.Name = effective.Name
+				}
+				if rewritten.Args == "" {
+					rewritten.Args = effective.Args
+				}
+				effective = rewritten
+			case ToolResultStop:
+				return nil, hookStopped(hook, "after_tool", action.Reason)
+			default:
+				return nil, toolResultActionError(hook, action.Kind)
+			}
+		}
 		capability, ok := hook.(AfterToolHook)
 		if !ok {
 			continue

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"github.com/open-ai-sdk/ai-go/tool"
@@ -145,7 +146,7 @@ func skippedToolResult(tc toolCallState, reason string) *ToolResult {
 	if reason == "" {
 		reason = "tool call skipped by hook"
 	}
-	return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: reason}
+	return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: reason, Disposition: aikit.ToolResultSkipped}
 }
 
 // executeToolCallsParallel processes tool calls concurrently, bounded by
@@ -464,7 +465,7 @@ func executeApprovedToolCall(
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.arguments", Value: tc.args})
 	}
-	result := executeToolCall(toolCtx, tools, tc, def)
+	result := executeToolCallForRun(r, toolCtx, tools, tc, def)
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.output", Value: result.Output})
 	}
@@ -507,6 +508,12 @@ func toolResultHistoryMessage(result *ToolResult, modelOutput string) Message {
 		result.ID, result.Name, modelOutput, result.ApprovalSignature, result.ApprovalApproved,
 	)
 	message.Content[0].ToolApprovalID = result.ApprovalID
+	if result.Content != nil {
+		message.Content[0].ToolResultContent = make([]aikit.ToolResultContent, len(result.Content))
+		for i := range result.Content {
+			message.Content[0].ToolResultContent[i] = result.Content[i].Clone()
+		}
+	}
 	return message
 }
 
@@ -514,7 +521,7 @@ func invalidToolResult(tc toolCallState, err error) *ToolResult {
 	output := invalidToolCallOutput(tc, err)
 	return &ToolResult{
 		ID: tc.id, Name: tc.name, Args: tc.args, Output: output,
-		ModelOutput: output, ModelOutputSet: true, Error: err,
+		ModelOutput: output, ModelOutputSet: true, Error: err, Disposition: aikit.ToolResultError,
 	}
 }
 
@@ -546,5 +553,6 @@ func deniedToolResult(
 			Reason:   reason,
 			Cause:    cause,
 		},
+		Disposition: aikit.ToolResultDenied,
 	}
 }

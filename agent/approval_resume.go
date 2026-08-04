@@ -397,7 +397,7 @@ func executeReservedToolCall(
 			err = errors.Join(err, fmt.Errorf("agent: complete approval capability: %w", completeErr))
 		}
 	}()
-	result = executeToolCall(r.ctx, tools, tc, definition)
+	result = executeToolCallForRun(r, r.ctx, tools, tc, definition)
 	return result, nil
 }
 

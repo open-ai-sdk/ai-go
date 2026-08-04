@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
@@ -42,6 +43,10 @@ type run struct {
 	hookContext  HookContext
 	hookMu       sync.Mutex
 	hookErr      error
+	// These are the prepared request values for the current model turn. They
+	// are snapshotted into every invocation context before a tool starts.
+	toolsContext   aikit.ToolsContext
+	runtimeContext aikit.RuntimeContext
 }
 
 func (r *run) reserveModelCall() error {

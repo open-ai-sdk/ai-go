@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/internal/jsonclone"
 	"github.com/open-ai-sdk/ai-go/tool"
 )
 
@@ -199,7 +201,7 @@ func invalidToolCallOutput(tc toolCallState, err error) string {
 		return fmt.Sprintf(`{"error":%q}`, fmt.Sprintf("invalid JSON arguments for tool %q", invalidArgsErr.ToolName))
 	}
 
-	return fmt.Sprintf(`{"error":%q}`, err.Error())
+	return tool.Details(classifyToolError(tc.name, err)).ModelOutput.ModelText()
 }
 
 func toolDefinitionNames(tools *ToolSet) []string {
@@ -232,7 +234,24 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 // this call — the default (zero) leaves ctx as the caller's, since agent
 // tools may legitimately run for minutes and an SDK-imposed default would be
 // a silent behavior change.
-func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState, def ToolDefinition) *ToolResult {
+func executeToolCallForRun(
+	r *run,
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+) *ToolResult {
+	return executeToolCallWithContexts(ctx, tools, tc, def, r.toolsContext, r.runtimeContext)
+}
+
+func executeToolCallWithContexts(
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+	toolsContext aikit.ToolsContext,
+	runtimeContext aikit.RuntimeContext,
+) *ToolResult {
 	result := &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args}
 	if tools == nil {
 		result.Error = &tool.ExecutionError{
@@ -240,23 +259,52 @@ func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState, def 
 			Cause:    errors.New("no executor"),
 		}
 		result.Output = fmt.Sprintf(`{"error":"no executor for tool %q"}`, tc.name)
+		result.Disposition = aikit.ToolResultError
 		return result
 	}
-	// Inject tool call ID into context so downstream code (e.g. approval managers) can correlate.
+	// Inject independently owned per-tool/run context and call identity while
+	// preserving parent cancellation/deadline semantics.
 	execCtx := tool.WithToolCallID(ctx, tc.id)
+	if runtimeContext != nil {
+		clonedRuntime := aikit.RuntimeContext(jsonclone.Map(map[string]any(runtimeContext)))
+		execCtx = tool.WithRuntimeContext(execCtx, clonedRuntime)
+	}
+	if value, ok := toolsContext[tc.name]; ok {
+		clonedToolContext := jsonclone.Value(value)
+		execCtx = tool.WithToolContext(execCtx, clonedToolContext)
+	}
 	if def.Timeout > 0 {
 		var cancel context.CancelFunc
 		execCtx, cancel = context.WithTimeout(execCtx, def.Timeout)
 		defer cancel()
 	}
-	output, err := tools.Invoke(execCtx, tc.name, json.RawMessage(tc.args))
+	execution, err := tools.InvokeResult(execCtx, tc.name, json.RawMessage(tc.args))
 	if err != nil {
 		result.Error = classifyToolError(tc.name, err)
-		result.Output = fmt.Sprintf(`{"error":%q}`, err.Error())
+		details := tool.Details(result.Error)
+		result.Content = details.ModelOutput.Parts()
+		result.Output = details.ModelOutput.ModelText()
+		result.Metadata = nil
+		result.Disposition = dispositionForError(details)
 	} else {
-		result.Output = string(output)
+		result.Content = execution.Output.Parts()
+		result.Output = execution.Output.ModelText()
+		result.Metadata = execution.Clone().Metadata
+		result.Disposition = aikit.ToolResultSuccess
 	}
 	return result
+}
+
+func dispositionForError(details tool.ErrorDetails) aikit.ToolResultDisposition {
+	if details.Refusal {
+		return aikit.ToolResultRefused
+	}
+	switch details.Kind {
+	case tool.ErrorKindDenied:
+		return aikit.ToolResultDenied
+	default:
+		return aikit.ToolResultError
+	}
 }
 
 func classifyToolError(toolName string, err error) error {

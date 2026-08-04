@@ -8,10 +8,11 @@ individual helper function.
   model handles, capabilities, and mixed-modality output.
 - [Completions](/core/completions) — provider-neutral language-model requests
   and responses.
-- [Tools](/core/tools) — typed tools, execution, and approvals.
 - [Agents](/core/agents) — reusable immutable model, tool, and policy defaults.
 - [Agent Runner](/core/agent-runner) — ordered input, per-run overrides,
-  multi-turn execution, results, and hooks.
+  multi-turn execution and results.
+- [Hooks](/core/hooks) — run-local lifecycle steering and observation.
+- [Tools](/core/tools) — typed tools, rich execution results, and approvals.
 - [Streaming](/core/streaming) — normalized model and Agent Runner events.
 - [Structured output](/core/structured-output) — schema-backed Go values.
 - [Embeddings](/core/embeddings) — single and batched vector generation.

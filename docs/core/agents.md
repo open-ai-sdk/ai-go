@@ -113,5 +113,5 @@ result, err := assistant.Runner().
 ```
 
 See [Agent Runner](/core/agent-runner) for ordered input, per-run overrides,
-multi-turn budgets, results, hooks, and streaming. See [Tools](/core/tools) for
-tool construction and approval behavior.
+multi-turn budgets, results, and streaming. Next, see [Hooks](/core/hooks),
+then [Tools](/core/tools) for construction and approval behavior.

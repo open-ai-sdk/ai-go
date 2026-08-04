@@ -326,6 +326,9 @@ func (r *run) executeToolStep(
 	completedSteps *[]StepResultInfo,
 	stepSpan tracing.Span,
 ) bool {
+	// The prepared request is the only source of per-turn tool context.
+	r.toolsContext = cloneMap(req.ToolsContext)
+	r.runtimeContext = cloneMap(req.RuntimeContext)
 	toolCalls := acc.completed()
 	preparedToolCalls := prepareToolCalls(r, params.Tools, params.RepairToolCall, req, toolCalls)
 	*history = append(

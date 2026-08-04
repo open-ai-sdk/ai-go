@@ -104,6 +104,13 @@ func TestToolSetFromClient_CreatesInvokableRemoteTool(t *testing.T) {
 	if string(output) != "first\nsecond" {
 		t.Fatalf("output = %q, want raw string output %q", output, "first\nsecond")
 	}
+	rich, err := set.InvokeResult(context.Background(), canonical, json.RawMessage(`{"query":"sdk"}`))
+	if err != nil {
+		t.Fatalf("InvokeResult: %v", err)
+	}
+	if parts := rich.Output.Parts(); len(parts) != 2 || parts[0].Text != "first" || parts[1].Text != "second" {
+		t.Fatalf("rich parts = %#v", parts)
+	}
 	if transport.calledName != "search" {
 		t.Fatalf("remote name = %q, want %q", transport.calledName, "search")
 	}

@@ -293,7 +293,7 @@ func (r Runner) sequence(
 		if reducer == nil {
 			reducer = newResultReducer(r.initialTranscript(), r.config.tools)
 		}
-		hookContext := HookContext{RunID: runID, Turn: 1, Streaming: streaming, AgentID: r.config.id}
+		hookContext := params.HookContext
 		var runErr error
 		defer func() {
 			cancel()
@@ -468,7 +468,7 @@ func (r Runner) runParams(ctx context.Context, runID string, streaming bool) (ru
 		Tracer: r.config.tracer, TraceContent: r.config.traceContent,
 		Hooks: append([]Hook(nil), r.config.hooks...),
 		HookContext: HookContext{
-			RunID: runID, Streaming: streaming, AgentID: r.config.id,
+			RunID: runID, Streaming: streaming, AgentID: r.config.id, scratchpad: newScratchpad(),
 		},
 	}, nil
 }
@@ -490,6 +490,9 @@ func applyRequestPatch(request llm.Request, patch RequestPatch) llm.Request {
 	}
 	if patch.Settings != nil {
 		request.Settings = cloneCallSettings(*patch.Settings)
+	}
+	if patch.ToolChoice != nil {
+		request.ToolChoice = cloneToolChoice(patch.ToolChoice)
 	}
 	if patch.ActiveTools != nil {
 		active := make(map[string]struct{}, len(patch.ActiveTools))

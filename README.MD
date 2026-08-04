@@ -163,8 +163,11 @@ if err != nil { // duplicate names are rejected
 }
 ```
 
-Native and MCP-discovered tools use the same `tool.Set` path. Tool input, execution, missing-tool,
-and policy-denial failures are typed and support `errors.Is`/`errors.As`.
+Native and MCP-discovered tools use the same `tool.Set` path. `ResultInvokable`
+adds ordered text/JSON/image output and host-only metadata without changing the
+released raw `Invokable.Invoke` API. Tool input, execution, missing-tool, and
+policy-denial failures are typed and support `errors.Is`/`errors.As`; safe
+model feedback never includes arbitrary operator cause text.
 
 ### Reusable Agents
 
@@ -226,8 +229,9 @@ for event, err := range events {
 The `iter.Seq2[aikit.StepEvent, error]` is single-use and single-owner. Breaking iteration cancels
 and releases work owned by the run. Use `Runner.Run` for aggregation; there are no fan-out or late
 stream views. See [the Agent guide](docs/core/agents.md) for reusable configuration and
-[Agent Runner](docs/core/agent-runner.md) for ordered messages, hooks, approvals, and complete result
-semantics.
+[Agent Runner](docs/core/agent-runner.md) for ordered messages and complete result
+semantics, then [Hooks](docs/core/hooks.md) and [Tools](docs/core/tools.md) for
+lifecycle steering, rich output, context, and approvals.
 
 ## Chat server quickstart
 
@@ -296,7 +300,7 @@ v7 chunk types, fields, finish-reason spellings, and `data: [DONE]` framing are 
 | `agent` | Agent Builder, immutable Agent, per-run Runner, results, hooks, approvals, and multi-turn execution |
 | `aikit` | Messages, events, usage, finish reasons, warnings, and error vocabulary; standard library plus approved internal JSON cloning |
 | `llm` | Model contracts, request builder, typed provider options, embeddings, and images |
-| `tool` | Typed/dynamic tools, schema derivation, immutable ordered registry, typed errors, and tool context |
+| `tool` | Typed/dynamic tools, rich canonical results, safe typed errors, immutable registry, and tool context |
 | `transport` | Provider HTTP policy, retry, SSE reading, cancellation, and API error mapping |
 | `provider/*` | Provider-specific constructors and wire codecs |
 | `aisdk` | Frozen AI SDK v7 chunks, SSE framing, UI-message conversion, invariants, and approval signatures |

@@ -78,8 +78,8 @@ func TestExecuteToolCallsParallel_SiblingFailure_OthersComplete(t *testing.T) {
 	if results["ok-2"].Output != `{"tool":"ok-2"}` {
 		t.Errorf(`ok-2 output = %q, want {"tool":"ok-2"}`, results["ok-2"].Output)
 	}
-	if results["fail"].Output != `{"error":"boom"}` {
-		t.Errorf(`fail output = %q, want {"error":"boom"}`, results["fail"].Output)
+	if results["fail"].Output != "Tool execution failed." {
+		t.Errorf("fail output = %q, want safe execution feedback", results["fail"].Output)
 	}
 	if !errors.Is(results["fail"].Error, tool.ErrExecution) {
 		t.Errorf("fail error = %v, want tool.ErrExecution", results["fail"].Error)

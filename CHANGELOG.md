@@ -9,6 +9,21 @@ that module and adapts OpenTelemetry to the new `agent.Tracer` contract.
 
 ## Unreleased
 
+### Hooks and rich tools
+
+- Tools now support additive `ResultInvokable`/`ExecutionResult` rich results.
+  `Invokable.Invoke` remains source-compatible. Text, explicit JSON, and image
+  content retain their type and order; metadata is host-only.
+- Tool failures now use safe model-facing `tool.Details` output. Error causes
+  remain available to operators through `errors.Is`/`errors.As` and are no
+  longer copied into provider history by default.
+- Tool invocation receives isolated request `ToolsContext`, `RuntimeContext`,
+  and a tool-call ID. MCP discovery now has context-aware paginated snapshot
+  constructors and preserves mixed result content without placeholders.
+- Hooks gain a run-local race-safe scratchpad, request tool-choice patching,
+  and `ToolResultHook`, which separates raw execution facts from the mutable
+  model presentation. Hooks remain a pre-release API following `v0.0.24`.
+
 This is a clean break in the Go API. The AI SDK v7 UI-message-stream wire contract remains
 compatible with `ai@7.0.35` and is exercised by the conformance and Playwright suites.
 

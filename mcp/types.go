@@ -1,5 +1,7 @@
 package mcp
 
+import "encoding/json"
+
 // SupportedProtocolVersions lists all MCP protocol versions this client accepts.
 var SupportedProtocolVersions = []string{
 	LatestProtocolVersion,
@@ -66,8 +68,10 @@ type ListToolsResult struct {
 
 // CallToolResult is the server's response to a tools/call request.
 type CallToolResult struct {
-	Content []ContentPart `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
+	Content           []ContentPart   `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	Meta              map[string]any  `json:"_meta,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
 }
 
 // ContentPart is a single piece of content within a tool result.
@@ -76,4 +80,22 @@ type ContentPart struct {
 	Text      string `json:"text,omitempty"`     // for type "text"
 	Data      string `json:"data,omitempty"`     // for type "image" (base64)
 	MediaType string `json:"mimeType,omitempty"` // for type "image"
+	// JSON retains structured/future variants without converting them to a
+	// lossy string placeholder. It contains an independently owned raw block.
+	JSON json.RawMessage `json:"-"`
 }
+
+// UnmarshalJSON preserves the original block in addition to known fields.
+func (p *ContentPart) UnmarshalJSON(value []byte) error {
+	type wire ContentPart
+	var decoded wire
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return err
+	}
+	*p = ContentPart(decoded)
+	p.JSON = append(json.RawMessage(nil), value...)
+	return nil
+}
+
+// Clone returns an independently owned content block.
+func (p ContentPart) Clone() ContentPart { p.JSON = append(json.RawMessage(nil), p.JSON...); return p }

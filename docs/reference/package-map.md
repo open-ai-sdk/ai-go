@@ -10,7 +10,7 @@ providers.
 | `agent` | Agent Builder, immutable Agent, per-run Runner, results, hooks, approvals, and multi-turn execution |
 | `aikit` | Dependency-free messages, content, step/stream events, usage, warnings, and errors |
 | `llm` | Model contracts, direct completion builder, normalized requests, provider options, embeddings, and images |
-| `tool` | Typed/dynamic tools, schemas, immutable ordered registry, typed errors, and execution context |
+| `tool` | Typed/dynamic tools, canonical rich results, safe errors, immutable registry, and execution context |
 | `transport` | Provider HTTP policy, retries, SSE reading, cancellation, and API error mapping |
 | `provider/*` | Provider-specific constructors and wire codecs |
 | `aisdk` | Frozen AI SDK v7 chunks, SSE framing, leaf-event conversion, and approval signatures |
@@ -35,8 +35,9 @@ Applications that need to mock an Agent should define the narrow local
 interface their code consumes.
 
 The conceptual documentation follows the same dependency order: direct
-[Completions](/core/completions) and [Tools](/core/tools), reusable
-[Agents](/core/agents), then per-invocation [Agent Runner](/core/agent-runner).
+[Completions](/core/completions), then [Agents](/core/agents),
+[Agent Runner](/core/agent-runner), [Hooks](/core/hooks), and
+[Tools](/core/tools).
 
 The [README](https://github.com/open-ai-sdk/ai-go#readme) and Go package
 documentation remain the canonical API references. This site focuses on the

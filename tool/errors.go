@@ -1,10 +1,72 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 )
+
+// ErrorKind is a stable, safe-to-present classification of a tool failure.
+type ErrorKind string
+
+const (
+	ErrorKindInput     ErrorKind = "input"
+	ErrorKindExecution ErrorKind = "execution"
+	ErrorKindDenied    ErrorKind = "denied"
+	ErrorKindNotFound  ErrorKind = "not_found"
+	ErrorKindCancelled ErrorKind = "cancelled"
+	ErrorKindTimeout   ErrorKind = "timeout"
+	ErrorKindOther     ErrorKind = "other"
+)
+
+// ErrorDetails contains an optional application classification and a safe
+// model presentation. Causes intentionally remain in the Go error chain.
+type ErrorDetails struct {
+	Kind        ErrorKind
+	Retryable   *bool
+	Code        string
+	HTTPStatus  int
+	Refusal     bool
+	ModelOutput Output
+}
+
+// DetailedError lets applications provide safe tool-error presentation.
+type DetailedError interface {
+	error
+	ToolErrorDetails() ErrorDetails
+}
+
+// Details normalizes a tool error without including arbitrary cause text in
+// model-visible content.
+func Details(err error) ErrorDetails {
+	if err == nil {
+		return ErrorDetails{}
+	}
+	var detailed DetailedError
+	if errors.As(err, &detailed) {
+		return detailed.ToolErrorDetails()
+	}
+	if errors.Is(err, context.Canceled) {
+		return ErrorDetails{Kind: ErrorKindCancelled, ModelOutput: Text("Tool execution was cancelled.")}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ErrorDetails{Kind: ErrorKindTimeout, ModelOutput: Text("Tool execution timed out.")}
+	}
+	if errors.Is(err, ErrInput) {
+		return ErrorDetails{Kind: ErrorKindInput, ModelOutput: Text("Tool input was invalid.")}
+	}
+	if errors.Is(err, ErrDenied) {
+		return ErrorDetails{Kind: ErrorKindDenied, ModelOutput: Text("Tool execution was denied.")}
+	}
+	if errors.Is(err, ErrNoSuchTool) {
+		return ErrorDetails{Kind: ErrorKindNotFound, ModelOutput: Text("The requested tool is unavailable.")}
+	}
+	if errors.Is(err, ErrExecution) {
+		return ErrorDetails{Kind: ErrorKindExecution, ModelOutput: Text("Tool execution failed.")}
+	}
+	return ErrorDetails{Kind: ErrorKindOther, ModelOutput: Text("Tool execution failed.")}
+}
 
 var (
 	// ErrInput matches invalid or unsupported tool input.
