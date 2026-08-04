@@ -41,9 +41,6 @@ func Stream(
 	}
 	body := resp.Body
 	go func() {
-		if body != nil {
-			defer body.Close()
-		}
 		runDecoderBody(ctx, body, decode, raw)
 	}()
 	go relayStream(ctx, raw, out)
@@ -65,7 +62,18 @@ func runDecoderBody(
 		return
 	}
 
-	defer CloseOnCancel(ctx, body)()
+	// Close the response body before raw is closed. This guarantees consumers
+	// that have observed the returned stream closing also observe that the body
+	// has been released, including when cancellation happens before decoding
+	// begins.
+	var closeOnce sync.Once
+	closeBody := func() {
+		closeOnce.Do(func() {
+			_ = body.Close()
+		})
+	}
+	defer closeBody()
+	defer CloseOnCancel(ctx, closerFunc(closeBody))()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			emitRaw(raw, aikit.StreamEvent{
@@ -83,6 +91,13 @@ func runDecoderBody(
 		err = ctxErr
 	}
 	emitRaw(raw, aikit.StreamEvent{Type: aikit.StreamEventError, Error: err})
+}
+
+type closerFunc func()
+
+func (fn closerFunc) Close() error {
+	fn()
+	return nil
 }
 
 func relayStream(

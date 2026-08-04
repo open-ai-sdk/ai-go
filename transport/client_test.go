@@ -187,6 +187,9 @@ func TestClient_DoStreamOwnsSuccessfulResponseBody(t *testing.T) {
 	default:
 		t.Fatal("successful streaming response body was not closed")
 	}
+	if count := body.closes(); count != 1 {
+		t.Fatalf("body Close calls = %d, want 1", count)
+	}
 }
 
 func TestClient_DoStreamClosesErrorResponseBody(t *testing.T) {

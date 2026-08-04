@@ -132,7 +132,6 @@ func (c *Client) DoStream(
 	out := make(chan aikit.StreamEvent, defaultStreamBuffer)
 	raw := make(chan aikit.StreamEvent, defaultStreamBuffer)
 	go func() {
-		defer body.Close()
 		runDecoderBody(ctx, body, decode, raw)
 	}()
 	go relayStream(ctx, raw, out)
