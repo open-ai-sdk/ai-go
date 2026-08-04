@@ -188,12 +188,52 @@ func (e *encoder) Encode(ev aikit.StepEvent) ([]uistream.Frame, error) {
 		if ev.ToolResult == nil {
 			return nil, nil
 		}
-		return e.chunks(item("tool-output-available", map[string]any{"toolCallId": ev.ToolResult.ID, "output": ev.ToolResult.Output}))
+		o := []struct {
+			typ string
+			f   map[string]any
+		}{}
+		if ev.ToolResult.ID != "" && !e.started[ev.ToolResult.ID] {
+			e.started[ev.ToolResult.ID] = true
+			var input any
+			if json.Unmarshal([]byte(ev.ToolResult.Args), &input) != nil {
+				input = map[string]string{"raw": ev.ToolResult.Args}
+			}
+			o = append(o, item("tool-input-available", map[string]any{"toolCallId": ev.ToolResult.ID, "toolName": ev.ToolResult.Name, "input": input}))
+		}
+		o = append(o, item("tool-output-available", map[string]any{"toolCallId": ev.ToolResult.ID, "output": ev.ToolResult.Output}))
+		return e.chunks(o...)
+	case aikit.StepEventToolApprovalRequest:
+		approvalID := ev.ApprovalID
+		if approvalID == "" {
+			approvalID = ev.ToolCallID
+		}
+		f := map[string]any{"approvalId": approvalID, "toolCallId": ev.ToolCallID, "toolName": ev.ToolCallName, "args": ev.ToolCallArgsDelta}
+		if ev.ApprovalIsAutomatic {
+			f["isAutomatic"] = true
+		}
+		if ev.ApprovalSignature != "" {
+			f["signature"] = ev.ApprovalSignature
+		}
+		return e.chunks(item("tool-approval-request", f))
+	case aikit.StepEventToolOutputDenied:
+		return e.chunks(item("tool-output-denied", map[string]any{"toolCallId": ev.ToolCallID}))
+	case aikit.StepEventToolCallInvalid:
+		return e.chunks(item("tool-input-error", map[string]any{"toolCallId": ev.ToolCallID, "toolName": ev.ToolCallName, "errorText": fmt.Sprintf("invalid JSON arguments for tool %q", ev.ToolCallName)}))
 	case aikit.StepEventStepEnd:
 		o := e.blockEnd()
 		o = append(o, item("finish-step", map[string]any{}))
-		e.finish = string(ev.FinishReason)
-		if e.finish == "" {
+		switch ev.FinishReason {
+		case aikit.FinishReasonStop:
+			e.finish = "stop"
+		case aikit.FinishReasonToolCalls:
+			e.finish = "tool-calls"
+		case aikit.FinishReasonLength:
+			e.finish = "length"
+		case aikit.FinishReasonContentFilter:
+			e.finish = "content-filter"
+		case aikit.FinishReasonError:
+			e.finish = "error"
+		default:
 			e.finish = "other"
 		}
 		return e.chunks(o...)
@@ -229,16 +269,7 @@ func (e *encoder) Finish(err error) ([]uistream.Frame, error) {
 type decoder struct{}
 
 func (decoder) Decode(r io.Reader) (uistream.Request, error) {
-	raw := new(struct {
-		ID             string `json:"id"`
-		MessageID      string `json:"messageId"`
-		Trigger        string `json:"trigger"`
-		Body, Metadata map[string]any
-		Messages       []struct {
-			Role, Content string
-			Parts         []struct{ Type, Text string } `json:"parts"`
-		} `json:"messages"`
-	})
+	raw := new(envelope)
 	d := json.NewDecoder(r)
 	if err := d.Decode(&raw); err != nil {
 		return uistream.Request{}, err
@@ -253,14 +284,7 @@ func (decoder) Decode(r io.Reader) (uistream.Request, error) {
 		}
 		return uistream.Request{}, err
 	}
-	msgs := make([]aikit.Message, 0, len(raw.Messages))
-	for _, m := range raw.Messages {
-		txt := m.Content
-		if len(m.Parts) > 0 {
-			txt = m.Parts[0].Text
-		}
-		msgs = append(msgs, aikit.Message{Role: aikit.Role(m.Role), Content: []aikit.ContentPart{{Type: aikit.ContentPartTypeText, Text: txt}}})
-	}
+	msgs := toAIMessages(raw.Messages)
 	id := ""
 	if raw.Trigger == "regenerate-message" {
 		id = raw.MessageID
@@ -269,6 +293,113 @@ func (decoder) Decode(r io.Reader) (uistream.Request, error) {
 		id = newMessageID()
 	}
 	return uistream.Request{Messages: msgs, MessageID: id, ID: raw.ID, Body: raw.Body, Metadata: raw.Metadata, Trigger: raw.Trigger}, nil
+}
+
+type envelope struct {
+	ID        string            `json:"id"`
+	Messages  []envelopeMessage `json:"messages"`
+	Body      map[string]any    `json:"body,omitempty"`
+	Metadata  map[string]any    `json:"metadata,omitempty"`
+	Trigger   string            `json:"trigger,omitempty"`
+	MessageID string            `json:"messageId,omitempty"`
+}
+type envelopeMessage struct {
+	Role    string         `json:"role"`
+	Content string         `json:"content,omitempty"`
+	Parts   []envelopePart `json:"parts,omitempty"`
+}
+type envelopeApproval struct {
+	ID        string `json:"id"`
+	Approved  *bool  `json:"approved,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Signature string `json:"signature,omitempty"`
+}
+type envelopePart struct {
+	Type       string            `json:"type"`
+	Text       string            `json:"text,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	MediaType  string            `json:"mediaType,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	FileID     string            `json:"fileId,omitempty"`
+	Data       []byte            `json:"data,omitempty"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	ToolName   string            `json:"toolName,omitempty"`
+	Input      json.RawMessage   `json:"input,omitempty"`
+	Output     any               `json:"output,omitempty"`
+	ErrorText  string            `json:"errorText,omitempty"`
+	State      string            `json:"state,omitempty"`
+	Approval   *envelopeApproval `json:"approval,omitempty"`
+}
+
+func toAIMessages(in []envelopeMessage) []aikit.Message {
+	out := make([]aikit.Message, 0, len(in))
+	for _, m := range in {
+		parts := toParts(m.Parts)
+		if len(m.Parts) == 0 {
+			parts = []aikit.ContentPart{aikit.TextPart(m.Content)}
+		}
+		if len(parts) > 0 {
+			out = append(out, aikit.Message{Role: aikit.Role(m.Role), Content: parts})
+		}
+		for _, p := range m.Parts {
+			if p.State == "approval-responded" && p.Approval != nil && p.Approval.Approved != nil {
+				out = append(out, aikit.Message{Role: aikit.RoleUser, Content: []aikit.ContentPart{aikit.ToolApprovalResponsePart(p.Approval.ID, p.Approval.Signature, *p.Approval.Approved, p.Approval.Reason)}})
+			}
+		}
+	}
+	return out
+}
+func toParts(in []envelopePart) []aikit.ContentPart {
+	out := make([]aikit.ContentPart, 0, len(in))
+	for _, p := range in {
+		switch p.Type {
+		case "text":
+			out = append(out, aikit.TextPart(p.Text))
+		case "image", "file":
+			part := aikit.ContentPart{Type: aikit.ContentPartTypeFile, MediaType: p.MediaType, Filename: p.Name}
+			if p.Type == "image" && part.MediaType == "" {
+				part.MediaType = "image"
+			}
+			if p.FileID != "" {
+				part.FileID = p.FileID
+			} else if len(p.Data) > 0 {
+				part.Data = p.Data
+			} else {
+				part.FileURL = p.URL
+			}
+			out = append(out, part)
+		default:
+			if p.Type != "tool-invocation" && p.Type != "dynamic-tool" && !(len(p.Type) > 5 && p.Type[:5] == "tool-") {
+				continue
+			}
+			name := p.ToolName
+			if name == "" && len(p.Type) > 5 {
+				name = p.Type[5:]
+			}
+			call := aikit.ContentPart{Type: aikit.ContentPartTypeToolCall, ToolCallID: p.ToolCallID, ToolCallName: name, ToolCallArgs: p.Input}
+			if p.Approval != nil {
+				call.ToolApprovalID = p.Approval.ID
+				call.ToolApprovalSignature = p.Approval.Signature
+			}
+			switch p.State {
+			case "call", "partial-call", "input-streaming", "input-available", "approval-requested", "approval-responded":
+				out = append(out, call)
+			case "result", "output-available", "output-denied", "output-error":
+				out = append(out, call)
+				encoded := p.ErrorText
+				if p.State != "output-error" {
+					if s, ok := p.Output.(string); ok {
+						encoded = s
+					} else if p.Output != nil {
+						b, _ := json.Marshal(p.Output)
+						encoded = string(b)
+					}
+				}
+				out = append(out, aikit.ToolResultPart(p.ToolCallID, name, encoded))
+			}
+		}
+	}
+	return out
 }
 func newMessageID() string {
 	var b [8]byte

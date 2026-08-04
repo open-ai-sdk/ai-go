@@ -13,6 +13,7 @@ import (
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/aisdk"
 	"github.com/open-ai-sdk/ai-go/uistream"
+	"github.com/open-ai-sdk/ai-go/uistream/ainode"
 )
 
 // RunFunc starts an agent run for the messages decoded from a v7 chat request.
@@ -25,13 +26,7 @@ type RunFunc func(
 
 // Handler returns an http.Handler for v7 chat POSTs.
 func Handler(run RunFunc) http.Handler {
-	// Keep the mature v7 path byte-for-byte stable while HandlerFor provides
-	// the extensibility seam. The AI Node adapter is intentionally available to
-	// callers that opt in to the protocol-parameterized path.
-	if run == nil {
-		panic("aisdkhttp: nil RunFunc")
-	}
-	return legacyHandler(run)
+	return HandlerFor(ainode.Protocol(), run)
 }
 
 func legacyHandler(run RunFunc) http.Handler {
