@@ -1,6 +1,9 @@
 package tool
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 type strictChild struct {
 	Value string `json:"value,omitempty"`
@@ -27,6 +30,25 @@ func TestStrictSchemaIsNullableAndStrictAtEveryObject(t *testing.T) {
 	child := properties["children"].(map[string]any)["items"].(map[string]any)
 	if child["additionalProperties"] != false {
 		t.Fatalf("nested child schema is not strict: %#v", child)
+	}
+	childProperties := child["properties"].(map[string]any)
+	if got := childProperties["value"].(map[string]any)["type"]; !equalJSON(got, []any{"string", "null"}) {
+		t.Fatalf("child.value.type = %#v", got)
+	}
+	if got := child["required"].([]string); len(got) != 1 || got[0] != "value" {
+		t.Fatalf("child.required = %#v", got)
+	}
+}
+
+func TestStrictSchemaRejectsNestedCustomJSONDecoding(t *testing.T) {
+	type output struct {
+		CreatedAt time.Time `json:"created_at"`
+	}
+	_, err := StrictSchema[output]()
+	const want = "output field \"created_at\" has unsupported type time.Time: " +
+		"custom JSON encoding is not a schema"
+	if err == nil || err.Error() != want {
+		t.Fatalf("StrictSchema() error = %v", err)
 	}
 }
 

@@ -31,11 +31,7 @@ func CompleteObject[T any](
 	response, err := Complete(ctx, model, request)
 	result := CompletionObjectResult[T]{Response: response}
 	if err != nil {
-		return result, &StructuredOutputError{
-			Kind:   StructuredOutputErrorKindPrompt,
-			Reason: "completion failed",
-			Cause:  err,
-		}
+		return result, err
 	}
 	if response == nil {
 		return result, &StructuredOutputError{Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty"}

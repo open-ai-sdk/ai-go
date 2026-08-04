@@ -79,3 +79,10 @@ func TestExternalProviderUsesOnlyPublicSurface(t *testing.T) {
 		)
 	}
 }
+
+func TestModelWithoutCapabilitiesDefaultsToNativeSchemaFull(t *testing.T) {
+	model := openaicompat.NewModel(openaicompat.Config{Provider: externalProvider{}})
+	if got := model.NativeSchemaSupport(); got != llm.NativeSchemaFull {
+		t.Fatalf("NativeSchemaSupport() = %v, want %v", got, llm.NativeSchemaFull)
+	}
+}

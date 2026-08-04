@@ -77,8 +77,8 @@ func (m *NativeLanguageModel) ModelID() string { return m.modelID }
 
 // NativeSchemaSupport is separate from generic tool support because Gemini's
 // native API rejects response schemas together with function declarations.
-func (*NativeLanguageModel) NativeSchemaSupport() llm.NativeSchemaSupport {
-	return llm.NativeSchemaSuppressesTools
+func (m *NativeLanguageModel) NativeSchemaSupport() llm.NativeSchemaSupport {
+	return geminiNativeSchemaSupport(m.modelID)
 }
 
 // Stream sends a streaming request to the native Gemini API and returns a

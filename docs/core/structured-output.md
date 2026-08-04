@@ -41,8 +41,8 @@ application.
 | --- | --- | --- | --- |
 | OpenAI Responses | Yes | Yes | Uses `text.format` JSON Schema |
 | OpenAI Chat | Yes | Yes | Uses `response_format` JSON Schema |
-| Gemini OpenAI-compatible | Yes | Yes | Output schema is normalized for Gemini |
-| Gemini native | Yes | No | Native API rejects schema plus function declarations |
+| Gemini 3 (OpenAI-compatible or native) | Yes | Yes | Model-specific capability permits schemas with function declarations |
+| Gemini before 3 (OpenAI-compatible or native) | Yes | No | Native schema cannot be combined with function declarations |
 | Anthropic supported Claude 4.1/4.5+ IDs | Yes | Yes | Uses `output_config.format` |
 | Unknown or older Anthropic IDs | No | — | Fails locally with a structured-output error |
 | Generic OpenAI-compatible model | Configured by provider | Depends on provider | Set the provider capability explicitly |

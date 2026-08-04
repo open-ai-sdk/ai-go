@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"github.com/open-ai-sdk/ai-go/llm"
@@ -95,33 +94,44 @@ func emitStructuredOutput(
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})
 	}
-	return emitStructuredOutputValue(r, sr.text, request.Output)
+	return emitStructuredOutputResult(r, sr, request.Output)
 }
 
-// emitStructuredOutputValue validates and publishes the structured value that
-// was already produced by the final assistant turn. Keeping this path free of
-// provider I/O avoids a redundant model call and prevents the JSON payload from
-// becoming a second assistant step or a text delta.
+// parseStructuredOutput is retained for package-level stream tests. Runtime
+// structured-output acceptance uses llm.ValidStructuredJSON.
+func parseStructuredOutput(content string) json.RawMessage {
+	return llm.FirstJSONValue(content)
+}
+
+// emitStructuredOutputValue validates and publishes text collected from the
+// structured-output model call. It performs no provider I/O itself.
 func emitStructuredOutputValue(r *run, raw string, output *OutputSchema) bool {
+	return emitStructuredOutputEvent(r, raw, output, StepEvent{})
+}
+
+func emitStructuredOutputResult(r *run, result streamResult, output *OutputSchema) bool {
+	return emitStructuredOutputEvent(r, result.text, output, StepEvent{
+		MessageID:        result.messageID,
+		Usage:            snapshotUsage(result.usage),
+		FinishReason:     result.finish,
+		RawFinishReason:  result.rawFinish,
+		ProviderMetadata: snapshotJSONMap(result.providerMeta),
+		Warnings:         append([]Warning(nil), result.warnings...),
+	})
+}
+
+func emitStructuredOutputEvent(r *run, raw string, output *OutputSchema, event StepEvent) bool {
 	if output == nil || output.Type == "text" {
 		return true
 	}
-	if strings.TrimSpace(raw) == "" {
-		r.emitError(&StructuredOutputError{Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty"})
-		return false
-	}
-	parsed := parseStructuredOutput(raw)
-	if parsed == nil {
-		r.emitError(
-			&StructuredOutputError{Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON"},
-		)
-		return false
-	}
-	if err := validateStructuredOutput(parsed, output); err != nil {
+	parsed, err := llm.ValidStructuredJSON(raw, output)
+	if err != nil {
 		r.emitError(err)
 		return false
 	}
-	return r.emitObserved(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
+	event.Type = StepEventStructuredOutput
+	event.StructuredOutput = parsed
+	return r.emitObserved(event)
 }
 
 // consumeStructuredStreamSilent collects the one exceptional finishing call
@@ -140,14 +150,6 @@ func consumeStructuredStreamSilent(
 		case event, ok := <-events:
 			if !ok {
 				return result, false
-			}
-			if event.Type == StreamEventError {
-				span.RecordError(event.Error)
-				r.emitError(&StructuredOutputError{
-					Kind:   StructuredOutputErrorKindPrompt,
-					Reason: "prompt failed", Cause: event.Error,
-				})
-				return result, true
 			}
 			switch event.Type {
 			case StreamEventTextDelta:
@@ -173,9 +175,4 @@ func consumeStructuredStreamSilent(
 			}
 		}
 	}
-}
-
-// parseStructuredOutput extracts valid JSON from content, stripping markdown fences if present.
-func parseStructuredOutput(content string) json.RawMessage {
-	return llm.FirstJSONValue(content)
 }

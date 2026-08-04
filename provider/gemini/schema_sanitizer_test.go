@@ -35,3 +35,42 @@ func TestSanitizeToolSchemas(t *testing.T) {
 		t.Error("type should be preserved")
 	}
 }
+
+func TestSanitizeMapOnlyRewritesNullableTypeUnions(t *testing.T) {
+	tests := []struct {
+		name  string
+		type_ []any
+		want  any
+		null  bool
+	}{
+		{name: "null first", type_: []any{"null", "string"}, want: "string", null: true},
+		{name: "null last", type_: []any{"string", "null"}, want: "string", null: true},
+		{name: "non-null union", type_: []any{"string", "number"}, want: []any{"string", "number"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := sanitizeMap(map[string]any{"type": test.type_})
+			nullable, _ := got["nullable"].(bool)
+			if !equalSchemaValue(got["type"], test.want) || nullable != test.null {
+				t.Fatalf("sanitizeMap() = %#v", got)
+			}
+		})
+	}
+}
+
+func equalSchemaValue(left, right any) bool {
+	leftSlice, leftOK := left.([]any)
+	rightSlice, rightOK := right.([]any)
+	if leftOK || rightOK {
+		if !leftOK || !rightOK || len(leftSlice) != len(rightSlice) {
+			return false
+		}
+		for i := range leftSlice {
+			if leftSlice[i] != rightSlice[i] {
+				return false
+			}
+		}
+		return true
+	}
+	return left == right
+}

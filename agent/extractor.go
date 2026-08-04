@@ -54,10 +54,9 @@ type Extractor[T any] struct {
 
 // ExtractionResult is the decoded output and observability data for an extract.
 type ExtractionResult[T any] struct {
-	Object          T
-	Usage           aikit.Usage
-	Attempts        int
-	OutputToolCalls int
+	Object   T
+	Usage    aikit.Usage
+	Attempts int
 }
 
 // ExtractionError retains metering information when all attempts fail.
@@ -70,6 +69,9 @@ type ExtractionError struct {
 
 func (e *ExtractionError) Error() string {
 	if e == nil {
+		return "agent: extraction failed"
+	}
+	if e.Cause == nil {
 		return "agent: extraction failed"
 	}
 	return "agent: extraction failed: " + e.Cause.Error()
@@ -141,7 +143,14 @@ func (e *Extractor[T]) ExtractWithHistory(
 		if response != nil {
 			result.Usage.Accumulate(response.Usage)
 		}
-		if err == nil && response != nil {
+		if err == nil && response == nil {
+			err = &StructuredOutputError{
+				Kind:   StructuredOutputErrorKindEmpty,
+				Path:   "$",
+				Reason: "model returned no response",
+			}
+		}
+		if err == nil {
 			result.Object, err = llm.DecodeStructured[T](
 				response.Text,
 				&llm.OutputSchema{Type: "object", Schema: e.schema},
@@ -152,6 +161,10 @@ func (e *Extractor[T]) ExtractWithHistory(
 		}
 		last = err
 		var structured *StructuredOutputError
+		var completion *llm.CompletionError
+		if errors.As(err, &completion) && completion.Retryable() {
+			continue
+		}
 		if !errors.As(err, &structured) || structured.Kind == StructuredOutputErrorKindPrompt {
 			break
 		}

@@ -28,6 +28,9 @@ func strictSchemaValue(input reflect.Type, path []string, active map[reflect.Typ
 	for input.Kind() == reflect.Pointer {
 		input = input.Elem()
 	}
+	if input == timeType || implementsCustomJSONDecoding(input) {
+		return nil, strictUnsupportedOutputType(input, path)
+	}
 	if input.Kind() == reflect.Struct {
 		return strictStructSchema(input, path, active)
 	}
@@ -102,7 +105,8 @@ func strictSchemaField(
 	if err != nil {
 		return "", nil, false, err
 	}
-	optional := field.Type.Kind() == reflect.Pointer || jsonTagHasOption(field, "omitempty")
+	optional := field.Type.Kind() == reflect.Pointer ||
+		jsonTagHasOption(field, "omitempty") || jsonTagHasOption(field, "omitzero")
 	if optional {
 		makeNullable(property)
 	}
@@ -113,6 +117,14 @@ func strictSchemaField(
 		return "", nil, false, err
 	}
 	return name, property, true, nil
+}
+
+func strictUnsupportedOutputType(input reflect.Type, path []string) error {
+	const reason = "custom JSON encoding is not a schema"
+	if len(path) == 0 {
+		return fmt.Errorf("output type %s is unsupported: %s", input, reason)
+	}
+	return fmt.Errorf("output field %q has unsupported type %s: %s", strings.Join(path, "."), input, reason)
 }
 
 func addStrictEnum(property map[string]any, field reflect.StructField, path []string, optional bool) error {

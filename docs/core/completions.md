@@ -12,7 +12,7 @@ The completion APIs cover one provider model call:
 | `ai.Prompt` | Aggregated text | 1 | Never |
 | `ai.Chat` | Aggregated text with supplied history | 1 | Never |
 | `ai.NewCompletion` / `ai.Complete` | Complete normalized assistant response | 1 | Never |
-| `ai.CompleteObject[T]` | Typed object and normalized response | 1 | Never |
+| `ai.NewTypedCompletion[T]` | Typed object and normalized response | 1 | Never |
 
 Use the highest-level API that preserves the control your application needs.
 Choose a completion when the application owns conversation state, tool
@@ -551,7 +551,7 @@ cause remains available to `errors.Is` and `errors.As`, including typed
 - Use `ai.Chat` when you already have history and only need the next text.
 - Use `ai.NewCompletion` when you need rich content, streaming, usage, tools,
   provider options, or manual continuation.
-- Use `ai.CompleteObject[T]` for one typed, schema-constrained direct call.
+- Use `ai.NewTypedCompletion[T]` for one typed, schema-constrained direct call.
 
 For tool execution and multi-step generation, continue to
 [Agents](/core/agents).

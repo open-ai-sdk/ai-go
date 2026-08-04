@@ -34,3 +34,24 @@ func TestEncodeRequestRejectsUnsupportedStructuredOutput(t *testing.T) {
 		t.Fatalf("error = %T %v", err, err)
 	}
 }
+
+func TestSupportsStructuredOutputMatchesModelIDsExactly(t *testing.T) {
+	tests := []struct {
+		modelID string
+		want    bool
+	}{
+		{modelID: "claude-sonnet-4-5", want: true},
+		{modelID: "claude-sonnet-4-5-20250514", want: true},
+		{modelID: "prefix-claude-sonnet-4-5", want: false},
+		{modelID: "claude-sonnet-4-5-preview", want: false},
+		{modelID: "claude-mythos-5", want: false},
+		{modelID: "claude-3-haiku", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.modelID, func(t *testing.T) {
+			if got := (&LanguageModel{modelID: test.modelID}).supportsStructuredOutput(); got != test.want {
+				t.Fatalf("supportsStructuredOutput() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/llm"
@@ -25,17 +26,20 @@ type Config struct {
 // Use [NewNativeLanguageModel] for grounding, citations, or multimodal output.
 type LanguageModel = openaicompat.Model
 
-type compatBackend struct{ baseURL string }
+type compatBackend struct {
+	baseURL string
+	modelID string
+}
 
 func (b compatBackend) BaseURL() string { return b.baseURL }
 func (compatBackend) AuthHeader(key string) (string, string) {
 	return "Authorization", "Bearer " + key
 }
 func (compatBackend) ProviderName() string { return "gemini" }
-func (compatBackend) Capabilities() openaicompat.CapabilityFlags {
+func (b compatBackend) Capabilities() openaicompat.CapabilityFlags {
 	return openaicompat.CapabilityFlags{
 		SupportsStructuredOutput: true,
-		NativeSchema:             llm.NativeSchemaFull,
+		NativeSchema:             geminiNativeSchemaSupport(b.modelID),
 		SupportsStreamUsage:      true,
 	}
 }
@@ -108,8 +112,16 @@ func NewLanguageModel(modelID string, config Config) *LanguageModel {
 		baseURL = defaultBaseURL
 	}
 	return openaicompat.NewModel(openaicompat.Config{
-		Provider: compatBackend{baseURL: baseURL}, ModelID: modelID,
+		Provider: compatBackend{baseURL: baseURL, modelID: modelID}, ModelID: modelID,
 		APIKey: config.APIKey, Timeout: config.Timeout,
 		ChunkTimeout: config.ChunkTimeout, HTTPClient: config.HTTPClient,
 	})
+}
+
+func geminiNativeSchemaSupport(modelID string) llm.NativeSchemaSupport {
+	modelID = strings.ToLower(modelID)
+	if modelID == "gemini-3" || strings.HasPrefix(modelID, "gemini-3-") {
+		return llm.NativeSchemaFull
+	}
+	return llm.NativeSchemaSuppressesTools
 }

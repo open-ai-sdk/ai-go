@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -15,6 +16,7 @@ type extractionTestValue struct {
 type extractionModel struct {
 	calls     int
 	responses []string
+	errs      []error
 }
 
 func (*extractionModel) ModelID() string { return "extractor-test" }
@@ -26,6 +28,10 @@ func (m *extractionModel) Stream(_ context.Context, request llm.Request) (<-chan
 			Reason: "missing strict output schema",
 		}
 	}
+	if len(m.errs) > m.calls && m.errs[m.calls] != nil {
+		m.calls++
+		return nil, m.errs[m.calls-1]
+	}
 	text := m.responses[m.calls]
 	m.calls++
 	events := make(chan aikit.StreamEvent, 3)
@@ -34,6 +40,33 @@ func (m *extractionModel) Stream(_ context.Context, request llm.Request) (<-chan
 	events <- aikit.StreamEvent{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonStop}
 	close(events)
 	return events, nil
+}
+
+func TestExtractorRetriesRetryableProviderFailures(t *testing.T) {
+	model := &extractionModel{
+		responses: []string{"", `{"name":"Ada"}`},
+		errs:      []error{aikit.NewAPIError("test", 503, nil)},
+	}
+	extractor, err := NewExtractor[extractionTestValue](model, WithExtractorRetries(1))
+	if err != nil {
+		t.Fatalf("NewExtractor() error = %v", err)
+	}
+	result, err := extractor.ExtractWithUsage(context.Background(), "extract a name")
+	if err != nil {
+		t.Fatalf("ExtractWithUsage() error = %v", err)
+	}
+	if result.Object.Name != "Ada" || result.Attempts != 2 || model.calls != 2 {
+		t.Fatalf("result = %#v, calls = %d", result, model.calls)
+	}
+}
+
+func TestExtractionErrorWithoutCauseDoesNotPanic(t *testing.T) {
+	if got := (&ExtractionError{}).Error(); got != "agent: extraction failed" {
+		t.Fatalf("Error() = %q", got)
+	}
+	if !errors.Is((&ExtractionError{Cause: context.Canceled}), context.Canceled) {
+		t.Fatal("ExtractionError did not retain its cause")
+	}
 }
 
 func TestExtractorRetriesAndAccumulatesUsage(t *testing.T) {

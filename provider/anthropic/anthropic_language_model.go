@@ -212,11 +212,27 @@ func (m *LanguageModel) supportsStructuredOutput() bool {
 		"claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-5",
 		"claude-opus-4-5", "claude-haiku-4-5", "claude-opus-4-1",
 	} {
-		if strings.Contains(m.modelID, model) {
+		if modelIDMatches(m.modelID, model) {
 			return true
 		}
 	}
 	return false
+}
+
+func modelIDMatches(modelID, supported string) bool {
+	if modelID == supported {
+		return true
+	}
+	suffix := strings.TrimPrefix(modelID, supported)
+	if len(suffix) != 9 || suffix[0] != '-' {
+		return false
+	}
+	for _, char := range suffix[1:] {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // NativeSchemaSupport exposes the per-model structured-output capability.

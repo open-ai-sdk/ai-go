@@ -94,6 +94,9 @@ func (m *Model) ModelID() string { return m.cfg.ModelID }
 // NativeSchemaSupport reports the configured backend's native structured-output
 // capability without exposing the backend implementation.
 func (m *Model) NativeSchemaSupport() llm.NativeSchemaSupport {
+	if _, ok := m.cfg.Provider.(CapabilityProvider); !ok {
+		return llm.NativeSchemaFull
+	}
 	return providerCapabilities(m.cfg.Provider).NativeSchema
 }
 

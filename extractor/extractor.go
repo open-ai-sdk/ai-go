@@ -54,10 +54,9 @@ type Extractor[T any] struct{ inner *agent.Extractor[T] }
 
 // Result contains one extracted object and its billed usage.
 type Result[T any] struct {
-	Object          T
-	Usage           aikit.Usage
-	Attempts        int
-	OutputToolCalls int
+	Object   T
+	Usage    aikit.Usage
+	Attempts int
 }
 
 // ExtractionError is returned after every configured attempt fails.
@@ -81,10 +80,9 @@ func (e *Extractor[T]) ExtractWithHistory(
 
 func resultOf[T any](value agent.ExtractionResult[T], err error) (Result[T], error) {
 	return Result[T]{
-		Object:          value.Object,
-		Usage:           value.Usage,
-		Attempts:        value.Attempts,
-		OutputToolCalls: value.OutputToolCalls,
+		Object:   value.Object,
+		Usage:    value.Usage,
+		Attempts: value.Attempts,
 	}, err
 }
 

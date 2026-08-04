@@ -12,11 +12,15 @@ type testPerson struct {
 	Name string `json:"name"`
 }
 
-type testModel struct{ instructions string }
+type testModel struct {
+	instructions string
+	output       *llm.OutputSchema
+}
 
 func (*testModel) ModelID() string { return "extractor-test" }
 func (m *testModel) Stream(_ context.Context, request llm.Request) (<-chan aikit.StreamEvent, error) {
 	m.instructions = request.Instructions
+	m.output = request.Output
 	ch := make(chan aikit.StreamEvent, 2)
 	ch <- aikit.StreamEvent{Type: aikit.StreamEventTextDelta, TextDelta: `{"name":"Ada"}`}
 	ch <- aikit.StreamEvent{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonStop}
@@ -36,5 +40,8 @@ func TestBuilderAppliesInstructionsAndContext(t *testing.T) {
 	}
 	if result.Object.Name != "Ada" || model.instructions != "Extract a person.\n\nContext:\nNames use title case." {
 		t.Fatalf("result=%#v instructions=%q", result, model.instructions)
+	}
+	if model.output == nil || model.output.Schema == nil {
+		t.Fatalf("Build() did not forward a strict output schema: %#v", model.output)
 	}
 }

@@ -15,18 +15,8 @@ import (
 // schema-invalid value.
 func DecodeStructured[T any](text string, output *OutputSchema) (T, error) {
 	var value T
-	if strings.TrimSpace(text) == "" {
-		return value, &StructuredOutputError{Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty"}
-	}
-	raw := FirstJSONValue(text)
-	if raw == nil {
-		return value, &StructuredOutputError{
-			Kind:   StructuredOutputErrorKindJSONDecode,
-			Path:   "$",
-			Reason: "is invalid JSON",
-		}
-	}
-	if err := ValidateStructuredOutput(raw, output); err != nil {
+	raw, err := ValidStructuredJSON(text, output)
+	if err != nil {
 		return value, err
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -38,6 +28,26 @@ func DecodeStructured[T any](text string, output *OutputSchema) (T, error) {
 		}
 	}
 	return value, nil
+}
+
+// ValidStructuredJSON extracts and validates the first JSON value in model
+// text according to output.
+func ValidStructuredJSON(text string, output *OutputSchema) (json.RawMessage, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty"}
+	}
+	raw := FirstJSONValue(text)
+	if raw == nil {
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindJSONDecode,
+			Path:   "$",
+			Reason: "is invalid JSON",
+		}
+	}
+	if err := ValidateStructuredOutput(raw, output); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 // FirstJSONValue returns the first complete JSON value embedded in text.

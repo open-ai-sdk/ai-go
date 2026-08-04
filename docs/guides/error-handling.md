@@ -69,7 +69,7 @@ as `*tool.InputError`, `*tool.ExecutionError`, `*tool.DeniedError`, or
 
 `*llm.StructuredOutputError` distinguishes prompt failure, JSON decoding, empty
 output, and schema validation; it is re-exported from `agent` and `ai` for
-source compatibility. `CompleteObject`, `RunObject`, and `Extractor` all use
+source compatibility. `NewTypedCompletion`, `RunObject`, and `Extractor` all use
 the same parse → validate → decode pipeline. An `Extractor` that exhausts its
 configured retries returns `*agent.ExtractionError`, including attempts and
 usage accumulated across failed attempts. Keep the normalized response or
