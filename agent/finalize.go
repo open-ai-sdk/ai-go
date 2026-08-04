@@ -31,10 +31,6 @@ func buildAssistantToolCallMessage(messageID, text, reasoning string, calls []to
 	return Message{ID: messageID, Role: "assistant", Content: parts}
 }
 
-func buildToolResultMessage(toolCallID, toolName, output string) Message {
-	return buildToolResultMessageWithApproval(toolCallID, toolName, output, "", false)
-}
-
 func buildToolResultMessageWithApproval(
 	toolCallID, toolName, output, signature string,
 	approved bool,

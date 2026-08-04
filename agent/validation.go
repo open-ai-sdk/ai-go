@@ -57,6 +57,11 @@ func prepareToolCalls(
 				preparedCall.controlErr = hookErr
 			} else {
 				switch action.Kind {
+				case InvalidToolCallFail:
+					preparedCall.controlErr = err
+				case InvalidToolCallRetry:
+					// Keep invalidErr so execution emits a model-visible invalid
+					// result. The driver then spends the next model turn retrying.
 				case InvalidToolCallRepair:
 					preparedCall.tc = applyToolCallRepair(fixed, action.Repaired)
 					preparedCall.def, preparedCall.invalidErr = validateToolCall(stepTools, preparedCall.tc)

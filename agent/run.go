@@ -234,7 +234,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error 
 	// on a follow-up call) or surface the partial result.
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
-	if !emitStructuredOutput(r, lastModel, lastRequest, history) {
+	if !emitStructuredOutput(r, params, lastModel, lastRequest, history, completedSteps) {
 		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
@@ -272,7 +272,7 @@ func finishTextStep(
 		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
 		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	})
-	if !emitStructuredOutput(r, model, req, history) {
+	if !emitStructuredOutput(r, params, model, req, history, completedSteps) {
 		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
@@ -418,7 +418,7 @@ func (r *run) executeToolStep(
 	if params.StopWhen != nil {
 		stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
 		if params.StopWhen(step+1, stopResult) {
-			if !emitStructuredOutput(r, model, req, *history) {
+			if !emitStructuredOutput(r, params, model, req, *history, *completedSteps) {
 				return true
 			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })

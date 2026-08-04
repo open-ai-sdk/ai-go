@@ -38,9 +38,13 @@ func executeToolCalls(
 			}) {
 				return toolNames, stepToolCalls, stepToolResults, r.stopError()
 			}
-			errOutput := invalidToolCallOutput(tc, preparedCall.invalidErr)
-			*history = append(*history, buildToolResultMessage(tc.id, tc.name, errOutput))
+			result := invalidToolResult(tc, preparedCall.invalidErr)
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			*history = append(*history, toolResultHistoryMessage(result, result.ModelOutput))
 			toolNames = append(toolNames, tc.name)
+			stepToolResults = append(stepToolResults, *result)
 			continue
 		}
 
@@ -193,10 +197,7 @@ func executeToolCallsParallel(
 		if preparedCall.invalidErr != nil {
 			results[i] = indexedResult{
 				tc: tc, valid: false,
-				result: &ToolResult{
-					ID: tc.id, Name: tc.name, Args: tc.args,
-					Output: invalidToolCallOutput(tc, preparedCall.invalidErr),
-				},
+				result: invalidToolResult(tc, preparedCall.invalidErr),
 			}
 			continue
 		}
@@ -319,10 +320,14 @@ func executeToolCallsParallel(
 				ToolCallName:      res.tc.name,
 				ToolCallArgsDelta: res.tc.args,
 			}) {
-				res.controlErr = r.stopError()
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
 			}
-			*history = append(*history, buildToolResultMessage(res.tc.id, res.tc.name, res.result.Output))
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			*history = append(*history, toolResultHistoryMessage(res.result, res.result.ModelOutput))
 			toolNames = append(toolNames, res.tc.name)
+			stepToolResults = append(stepToolResults, *res.result)
 			continue
 		}
 
@@ -503,6 +508,14 @@ func toolResultHistoryMessage(result *ToolResult, modelOutput string) Message {
 	)
 	message.Content[0].ToolApprovalID = result.ApprovalID
 	return message
+}
+
+func invalidToolResult(tc toolCallState, err error) *ToolResult {
+	output := invalidToolCallOutput(tc, err)
+	return &ToolResult{
+		ID: tc.id, Name: tc.name, Args: tc.args, Output: output,
+		ModelOutput: output, ModelOutputSet: true, Error: err,
+	}
 }
 
 func updateLatestToolCallArgs(history *[]Message, toolCallID, args string) {

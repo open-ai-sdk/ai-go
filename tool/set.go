@@ -11,20 +11,18 @@ import (
 )
 
 // Set is an immutable ordered registry of tool definitions and their exact
-// execution paths. Construct sets with NewSet or NewSetFromExecutor.
+// invokers. Construct sets with NewSet.
 type Set struct {
 	definitions []aikit.ToolDefinition
-	executor    Executor
 	index       map[string]int
 	invokers    map[string]Invokable
 }
 
 // Snapshot is an immutable, run-scoped view of a Set. It keeps definitions in
-// registration order and binds them to the exact invokers/executor captured at
-// snapshot time.
+// registration order and binds them to the exact invokers captured at snapshot
+// time.
 type Snapshot struct {
 	definitions []aikit.ToolDefinition
-	executor    Executor
 	index       map[string]int
 	invokers    map[string]Invokable
 }
@@ -47,21 +45,12 @@ func NewSet(tools ...Invokable) (*Set, error) {
 		definitions = append(definitions, definition)
 		invokers[definition.Name] = candidate
 	}
-	return newImmutableSet(definitions, invokers, nil)
-}
-
-// NewSetFromExecutor adapts a named string executor into an ordered Set.
-func NewSetFromExecutor(
-	definitions []aikit.ToolDefinition,
-	executor Executor,
-) (*Set, error) {
-	return newImmutableSet(definitions, nil, executor)
+	return newImmutableSet(definitions, invokers)
 }
 
 func newImmutableSet(
 	definitions []aikit.ToolDefinition,
 	invokers map[string]Invokable,
-	executor Executor,
 ) (*Set, error) {
 	cloned := cloneDefinitions(definitions)
 	index, err := indexDefinitions(cloned)
@@ -74,7 +63,6 @@ func newImmutableSet(
 	}
 	return &Set{
 		definitions: cloned,
-		executor:    executor,
 		index:       index,
 		invokers:    boundInvokers,
 	}, nil
@@ -104,7 +92,6 @@ func (s *Set) Snapshot() (Snapshot, error) {
 	}
 	return Snapshot{
 		definitions: definitions,
-		executor:    s.activeExecutor(),
 		index:       index,
 		invokers:    invokers,
 	}, nil
@@ -124,7 +111,6 @@ func (s *Set) Clone() *Set {
 	cloned, err := newImmutableSet(
 		snapshot.definitions,
 		snapshot.invokers,
-		snapshot.executor,
 	)
 	if err != nil {
 		return nil
@@ -161,9 +147,7 @@ func (s *Set) Lookup(name string) (aikit.ToolDefinition, bool) {
 	return cloneDefinition(s.definitions[i]), true
 }
 
-// Invoker returns the exact typed invoker registered for name. Executor-backed
-// sets intentionally return false because their execution path is the captured
-// Executor rather than an Invokable.
+// Invoker returns the exact typed invoker registered for name.
 func (s *Set) Invoker(name string) (Invokable, bool) {
 	if s == nil {
 		return nil, false
@@ -181,7 +165,7 @@ func (s *Set) Invoke(
 	if s == nil {
 		return nil, &ExecutionError{
 			ToolName: name,
-			Cause:    errors.New("no executor"),
+			Cause:    errors.New("nil tool set"),
 		}
 	}
 	snapshot, err := s.Snapshot()
@@ -189,15 +173,6 @@ func (s *Set) Invoke(
 		return nil, &ExecutionError{ToolName: name, Cause: err}
 	}
 	return snapshot.Invoke(ctx, name, input)
-}
-
-// Execute implements Executor without changing the raw-string output contract.
-func (s *Set) Execute(
-	ctx context.Context,
-	name, argsJSON string,
-) (string, error) {
-	output, err := s.Invoke(ctx, name, json.RawMessage(argsJSON))
-	return string(output), err
 }
 
 // Definitions returns independent copies of the snapshot's definitions.
@@ -232,31 +207,6 @@ func (s Snapshot) Invoke(
 	if invoker, ok := s.invokers[name]; ok {
 		return invoker.Invoke(ctx, input)
 	}
-	registered := false
-	if len(s.definitions) > 0 {
-		if _, ok := s.index[name]; !ok {
-			return nil, &NoSuchToolError{
-				ToolName:       name,
-				AvailableTools: s.names(),
-			}
-		}
-		registered = true
-	}
-	if s.executor != nil {
-		output, err := s.executor.Execute(ctx, name, string(input))
-		if err != nil {
-			// Executor is the compatibility seam for existing integrations.
-			// Preserve its error value and presentation exactly.
-			return nil, err
-		}
-		return json.RawMessage(output), nil
-	}
-	if registered {
-		return nil, &ExecutionError{
-			ToolName: name,
-			Cause:    errors.New("no executor"),
-		}
-	}
 	return nil, &NoSuchToolError{
 		ToolName:       name,
 		AvailableTools: s.names(),
@@ -265,10 +215,6 @@ func (s Snapshot) Invoke(
 
 func (s *Set) activeDefinitions() []aikit.ToolDefinition {
 	return cloneDefinitions(s.definitions)
-}
-
-func (s *Set) activeExecutor() Executor {
-	return s.executor
 }
 
 func indexDefinitions(definitions []aikit.ToolDefinition) (map[string]int, error) {
@@ -303,8 +249,6 @@ func (s Snapshot) names() []string {
 	}
 	return names
 }
-
-var _ Executor = (*Set)(nil)
 
 func isNilInvokable(candidate Invokable) bool {
 	value := reflect.ValueOf(candidate)

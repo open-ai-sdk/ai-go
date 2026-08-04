@@ -11,15 +11,22 @@ import (
 // emitStructuredOutput makes a final constrained LLM call when an OutputSchema
 // is configured. It returns false when the run was cancelled or the provider
 // failed, in which case the caller must not emit OnEnd or Done.
-func emitStructuredOutput(r *run, model Model, request Request, history []Message) bool {
+func emitStructuredOutput(
+	r *run,
+	params runConfig,
+	model Model,
+	request Request,
+	history []Message,
+	completedSteps []StepResultInfo,
+) bool {
 	if request.Output == nil || request.Output.Type == "text" {
 		return true
 	}
+	step := r.modelCalls
 	if err := r.reserveModelCall(); err != nil {
 		r.emitError(err)
 		return false
 	}
-
 	msgs := make([]Message, len(history)+1)
 	copy(msgs, history)
 	msgs[len(history)] = Message{
@@ -35,7 +42,17 @@ func emitStructuredOutput(r *run, model Model, request Request, history []Messag
 		ToolsContext:    request.ToolsContext,
 		RuntimeContext:  request.RuntimeContext,
 	}
-
+	r.hookContext.Turn = step + 1
+	if !r.emitObserved(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
+		return false
+	}
+	applyPrepareStep(params, step, completedSteps, &model, &req)
+	var err error
+	req, err = r.beforeCompletion(req)
+	if err != nil {
+		r.emitError(err)
+		return false
+	}
 	// Bind the structured-output call to a child context so it is released when
 	// this function returns (including an early return on consumer cancellation).
 	ctx, cancel := context.WithCancel(r.ctx)
@@ -53,7 +70,7 @@ func emitStructuredOutput(r *run, model Model, request Request, history []Messag
 	modelCtx, span := r.tracer.Start(ctx, "ai.model_call", startAttrs...)
 	defer span.End()
 	if r.traceContent {
-		span.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(msgs)})
+		span.SetAttributes(tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(req.Messages)})
 	}
 
 	eventCh, err := model.Stream(modelCtx, req)
@@ -73,34 +90,23 @@ func emitStructuredOutput(r *run, model Model, request Request, history []Messag
 		return false
 	}
 
-	var b strings.Builder
-	for {
-		select {
-		case <-r.ctx.Done():
-			return false
-		case ev, ok := <-eventCh:
-			if !ok {
-				goto complete
-			}
-			if ev.Type == StreamEventTextDelta {
-				b.WriteString(ev.TextDelta)
-			}
-			if ev.Type == StreamEventError {
-				span.RecordError(ev.Error)
-				r.emitError(&StructuredOutputError{
-					Kind: StructuredOutputErrorKindPrompt, Reason: "prompt failed", Cause: ev.Error,
-				})
-				return false
-			}
-		}
+	sr, interrupted := consumeStructuredStream(r, eventCh, params.Callbacks, span)
+	if interrupted {
+		return false
 	}
-
-complete:
 	if r.traceContent {
-		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: b.String()})
+		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})
 	}
+	if !r.emitObserved(StepEvent{
+		Type: StepEventStepEnd, StepNumber: step, MessageID: sr.messageID,
+		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
+		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
+	}) {
+		return false
+	}
+	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
 
-	raw := b.String()
+	raw := sr.text
 	if strings.TrimSpace(raw) == "" {
 		r.emitError(&StructuredOutputError{
 			Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty",
@@ -119,6 +125,36 @@ complete:
 		return false
 	}
 	return r.emitObserved(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
+}
+
+func consumeStructuredStream(
+	r *run,
+	events <-chan StreamEvent,
+	callbacks *lifecycleCallbacks,
+	span tracing.Span,
+) (streamResult, bool) {
+	var result streamResult
+	for {
+		select {
+		case <-r.ctx.Done():
+			return result, true
+		case event, ok := <-events:
+			if !ok {
+				return result, false
+			}
+			if event.Type == StreamEventError {
+				span.RecordError(event.Error)
+				r.emitError(&StructuredOutputError{
+					Kind:   StructuredOutputErrorKindPrompt,
+					Reason: "prompt failed", Cause: event.Error,
+				})
+				return result, true
+			}
+			if applyStreamEvent(r, event, &result, nil, callbacks) {
+				return result, true
+			}
+		}
+	}
 }
 
 // parseStructuredOutput extracts valid JSON from content, stripping markdown fences if present.

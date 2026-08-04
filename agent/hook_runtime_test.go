@@ -367,3 +367,102 @@ func TestRunnerToolHooksRewriteSkipAndRepair(t *testing.T) {
 		}
 	})
 }
+
+func TestRunFinishedHooksReceiveIndependentResultSnapshots(t *testing.T) {
+	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+		runnerTextEvents("answer-1", "original"),
+	}}
+	var secondText string
+	built := mustRunnerAgent(t, model, func(builder agent.Builder) agent.Builder {
+		return builder.
+			Hook(agent.HookFuncs{
+				Name: "mutator",
+				RunFinishedFunc: func(_ context.Context, _ agent.HookContext, result *agent.Result, _ error) {
+					result.Text = "mutated"
+					result.Transcript[0].Content[0].Text = "mutated"
+				},
+			}).
+			Hook(agent.HookFuncs{
+				Name: "observer",
+				RunFinishedFunc: func(_ context.Context, _ agent.HookContext, result *agent.Result, _ error) {
+					secondText = result.Text
+				},
+			})
+	})
+
+	result, err := built.Runner().Prompt("question").Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Text != "original" || secondText != "original" {
+		t.Fatalf(
+			"result text = %q, second hook text = %q; want independent originals",
+			result.Text,
+			secondText,
+		)
+	}
+	if result.Transcript[0].Content[0].Text != "question" {
+		t.Fatalf("caller transcript was mutated: %#v", result.Transcript)
+	}
+}
+
+func TestInvalidToolCallRetryConsumesAnotherModelTurn(t *testing.T) {
+	model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
+		{
+			{
+				Type: aikit.StreamEventToolCallDelta, ToolCallIndex: 0,
+				ToolCallID: "bad-1", ToolCallName: "missing", ToolCallArgsDelta: `{}`,
+			},
+			{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonToolCalls},
+		},
+		runnerTextEvents("answer-2", "recovered"),
+	}}
+	tools := mustHookToolSet(t, hookDynamicTool(
+		t,
+		"actual",
+		func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{}`), nil
+		},
+	))
+	built := mustRunnerAgent(t, model, func(builder agent.Builder) agent.Builder {
+		return builder.Tools(tools).MaxTurns(2).Hook(agent.HookFuncs{
+			Name: "retry-invalid",
+			InvalidToolCallFunc: func(
+				context.Context,
+				agent.HookContext,
+				aikit.RepairToolCallInput,
+			) (agent.InvalidToolCallAction, error) {
+				return agent.InvalidToolCallAction{Kind: agent.InvalidToolCallRetry}, nil
+			},
+		})
+	})
+
+	result, err := built.Runner().Prompt("retry").Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Text != "recovered" || len(model.requestSnapshots()) != 2 {
+		t.Fatalf(
+			"result = %#v, model calls = %d; want recovered after two turns",
+			result,
+			len(model.requestSnapshots()),
+		)
+	}
+	requests := model.requestSnapshots()
+	modelToolOutput := requests[1].Messages[len(requests[1].Messages)-1].Content[0].ToolResultOutput
+	var transcriptToolOutput string
+	for _, message := range result.Transcript {
+		for _, part := range message.Content {
+			if part.Type == aikit.ContentPartTypeToolResult && part.ToolResultID == "bad-1" {
+				transcriptToolOutput = part.ToolResultOutput
+			}
+		}
+	}
+	if transcriptToolOutput == "" || transcriptToolOutput != modelToolOutput {
+		t.Fatalf(
+			"retry tool output diverged: transcript=%q model=%q",
+			transcriptToolOutput,
+			modelToolOutput,
+		)
+	}
+}

@@ -452,18 +452,59 @@ func cloneStep(value Step) Step {
 	value.Usage = aikit.Usage{}.Add(value.Usage)
 	value.ProviderMetadata = jsonclone.Map(value.ProviderMetadata)
 	value.Warnings = append([]aikit.Warning(nil), value.Warnings...)
-	value.Sources = append([]aikit.Source(nil), value.Sources...)
-	if value.Files != nil {
-		files := make([]GeneratedFile, len(value.Files))
-		for i := range value.Files {
-			files[i] = GeneratedFile{
-				Data:      append([]byte(nil), value.Files[i].Data...),
-				MediaType: value.Files[i].MediaType,
-			}
-		}
-		value.Files = files
-	}
+	value.Sources = cloneSources(value.Sources)
+	value.Files = cloneGeneratedFiles(value.Files)
 	return value
+}
+
+func cloneResult(value *Result) *Result {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Steps = make([]Step, len(value.Steps))
+	for i := range value.Steps {
+		cloned.Steps[i] = cloneStep(value.Steps[i])
+	}
+	cloned.FinalStep = cloneStep(value.FinalStep)
+	cloned.ToolResults = cloneToolResults(value.ToolResults)
+	cloned.PendingApprovals = append([]PendingApproval(nil), value.PendingApprovals...)
+	for i := range cloned.PendingApprovals {
+		cloned.PendingApprovals[i].Args = append(json.RawMessage(nil), value.PendingApprovals[i].Args...)
+	}
+	cloned.Usage = aikit.Usage{}.Add(value.Usage)
+	cloned.ProviderMetadata = jsonclone.Map(value.ProviderMetadata)
+	cloned.Warnings = append([]aikit.Warning(nil), value.Warnings...)
+	cloned.Sources = cloneSources(value.Sources)
+	cloned.Files = cloneGeneratedFiles(value.Files)
+	cloned.StructuredOutput = append(json.RawMessage(nil), value.StructuredOutput...)
+	cloned.Transcript = cloneMessages(value.Transcript)
+	return &cloned
+}
+
+func cloneSources(values []aikit.Source) []aikit.Source {
+	if values == nil {
+		return nil
+	}
+	cloned := append([]aikit.Source(nil), values...)
+	for i := range cloned {
+		cloned[i].ProviderMetadata = jsonclone.Map(values[i].ProviderMetadata)
+	}
+	return cloned
+}
+
+func cloneGeneratedFiles(values []GeneratedFile) []GeneratedFile {
+	if values == nil {
+		return nil
+	}
+	cloned := make([]GeneratedFile, len(values))
+	for i := range values {
+		cloned[i] = GeneratedFile{
+			Data:      append([]byte(nil), values[i].Data...),
+			MediaType: values[i].MediaType,
+		}
+	}
+	return cloned
 }
 
 func cloneToolResults(values []aikit.ToolResult) []aikit.ToolResult {

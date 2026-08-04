@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/tool"
 )
 
@@ -45,24 +44,20 @@ func TestNewSetRejectsTypedNilTool(t *testing.T) {
 	}
 }
 
-type recordingExecutor struct {
-	calls []string
-}
-
-func (e *recordingExecutor) Execute(
-	_ context.Context,
-	name, _ string,
-) (string, error) {
-	e.calls = append(e.calls, name)
-	return "ok", nil
-}
-
-func TestExecutorSetEnforcesRegisteredNames(t *testing.T) {
-	executor := &recordingExecutor{}
-	set, err := tool.NewSetFromExecutor(
-		[]aikit.ToolDefinition{{Name: "allowed"}},
-		executor,
+func TestSetEnforcesRegisteredNames(t *testing.T) {
+	allowed, err := tool.NewDynamic(
+		"allowed",
+		"Allowed tool",
+		map[string]any{"type": "object"},
+		func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			t.Fatal("blocked invocation reached registered tool")
+			return nil, nil
+		},
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := tool.NewSet(allowed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,25 +68,5 @@ func TestExecutorSetEnforcesRegisteredNames(t *testing.T) {
 		json.RawMessage(`{}`),
 	); !errors.Is(err, tool.ErrNoSuchTool) {
 		t.Fatalf("blocked invocation error = %v, want ErrNoSuchTool", err)
-	}
-	if len(executor.calls) != 0 {
-		t.Fatalf("executor calls = %v, want none", executor.calls)
-	}
-}
-
-func TestRegisteredToolWithoutExecutorIsExecutionError(t *testing.T) {
-	set, err := tool.NewSetFromExecutor(
-		[]aikit.ToolDefinition{{Name: "known"}},
-		nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := set.Invoke(
-		context.Background(),
-		"known",
-		json.RawMessage(`{}`),
-	); !errors.Is(err, tool.ErrExecution) {
-		t.Fatalf("known invocation error = %v, want ErrExecution", err)
 	}
 }

@@ -299,13 +299,51 @@ func TestRunnerStructuredOutputConsumesTurnBudget(t *testing.T) {
 	if len(oneTurnModel.requestSnapshots()) != 1 {
 		t.Fatalf("one-turn model calls = %d, want 1", len(oneTurnModel.requestSnapshots()))
 	}
+	streamModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", "draft")}}
+	streamAgent := mustRunnerAgent(
+		t,
+		streamModel,
+		func(builder agent.Builder) agent.Builder { return builder.Output(output) },
+	)
+	sequence, err := streamAgent.Runner().Prompt("answer as JSON").Stream(context.Background())
+	if err != nil {
+		t.Fatalf("one-turn structured Stream() error = %v", err)
+	}
+	stepStarts := 0
+	for event := range sequence {
+		if event.Type == aikit.StepEventStepStart {
+			stepStarts++
+		}
+	}
+	if stepStarts != 1 {
+		t.Fatalf("exhausted structured run emitted %d step starts, want 1", stepStarts)
+	}
 
 	twoTurnModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
 		runnerTextEvents("answer", "draft"),
 		runnerTextEvents("structured", `{"ok":true}`),
 	}}
+	var preparedTurns []int
+	var hookTurns []int
 	twoTurn := mustRunnerAgent(t, twoTurnModel, func(builder agent.Builder) agent.Builder {
-		return builder.Output(output).MaxTurns(2)
+		return builder.
+			Output(output).
+			MaxTurns(2).
+			PrepareStep(func(info llm.PrepareStepContext) *llm.PrepareStepResult {
+				preparedTurns = append(preparedTurns, info.StepNumber)
+				return nil
+			}).
+			Hook(agent.HookFuncs{
+				Name: "turn-counter",
+				BeforeCompletionFunc: func(
+					_ context.Context,
+					hookContext agent.HookContext,
+					_ llm.Request,
+				) (agent.CompletionAction, error) {
+					hookTurns = append(hookTurns, hookContext.Turn)
+					return agent.CompletionAction{Kind: agent.CompletionContinue}, nil
+				},
+			})
 	})
 	result, err := twoTurn.Runner().Prompt("answer as JSON").Run(context.Background())
 	if err != nil {
@@ -313,6 +351,10 @@ func TestRunnerStructuredOutputConsumesTurnBudget(t *testing.T) {
 	}
 	if string(result.StructuredOutput) != `{"ok":true}` || len(twoTurnModel.requestSnapshots()) != 2 {
 		t.Fatalf("structured result/calls = (%s, %d)", result.StructuredOutput, len(twoTurnModel.requestSnapshots()))
+	}
+	if len(result.Steps) != 2 || !reflect.DeepEqual(preparedTurns, []int{0, 1}) ||
+		!reflect.DeepEqual(hookTurns, []int{1, 2}) {
+		t.Fatalf("structured lifecycle = steps:%d prepare:%v hooks:%v", len(result.Steps), preparedTurns, hookTurns)
 	}
 	requests := twoTurnModel.requestSnapshots()
 	if requests[1].Output == nil || len(requests[1].Tools) != 0 {

@@ -372,6 +372,20 @@ func (r Runner) validate() error {
 	if err := validateActiveTools(r.config); err != nil {
 		return &RunError{Field: "ActiveTools", Err: err}
 	}
+	if err := validateOutputConfiguration(r.config.output); err != nil {
+		return &RunError{Field: "Output", Err: err}
+	}
+	for name, policy := range r.config.toolApproval {
+		if policy == nil {
+			return &RunError{Field: "ToolApproval[" + name + "]", Err: errNilApprovalPolicy}
+		}
+		if r.config.tools == nil {
+			return &RunError{Field: "ToolApproval[" + name + "]", Err: errUnknownActiveTool}
+		}
+		if _, exists := r.config.tools.Lookup(name); !exists {
+			return &RunError{Field: "ToolApproval[" + name + "]", Err: errUnknownActiveTool}
+		}
+	}
 	return nil
 }
 
@@ -525,7 +539,7 @@ func (r Runner) notifyFinished(ctx context.Context, hookContext HookContext, res
 						)
 					}
 				}()
-				capability.OnRunFinished(ctx, hookContext, result, runErr)
+				capability.OnRunFinished(ctx, hookContext, cloneResult(result), runErr)
 			}()
 		}
 	}

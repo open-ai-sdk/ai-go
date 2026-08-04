@@ -54,6 +54,7 @@ func TestBuilderBuildRejectsStaticConfigurationErrors(t *testing.T) {
 	var typedNilModel *builderTestModel
 	model := &builderTestModel{id: "model-id"}
 	shortKey := make([]byte, minApprovalKeyBytes-1)
+	dangerousTools := testToolSet([]ToolDefinition{{Name: "dangerous"}}, nil)
 
 	tests := []struct {
 		name  string
@@ -76,7 +77,7 @@ func TestBuilderBuildRejectsStaticConfigurationErrors(t *testing.T) {
 		},
 		{
 			name: "suspending approval without key",
-			build: New(model).ToolApproval(map[string]ApprovalPolicy{
+			build: New(model).Tools(dangerousTools).ToolApproval(map[string]ApprovalPolicy{
 				"dangerous": func(string, string) bool { return true },
 			}),
 			field: "ApprovalKey",
@@ -84,11 +85,39 @@ func TestBuilderBuildRejectsStaticConfigurationErrors(t *testing.T) {
 		},
 		{
 			name: "nil approval policy",
-			build: New(model).ToolApproval(map[string]ApprovalPolicy{
+			build: New(model).Tools(dangerousTools).ToolApproval(map[string]ApprovalPolicy{
 				"dangerous": nil,
 			}).Approver(builderTestApprover{}),
 			field: "ToolApproval[dangerous]",
 			cause: errNilApprovalPolicy,
+		},
+		{
+			name:  "active tool without registry",
+			build: New(model).ActiveTools("missing"),
+			field: "ActiveTools",
+			cause: errUnknownActiveTool,
+		},
+		{
+			name: "approval for unknown tool",
+			build: New(model).ToolApproval(map[string]ApprovalPolicy{
+				"missing": func(string, string) bool { return true },
+			}).Approver(builderTestApprover{}),
+			field: "ToolApproval[missing]",
+			cause: errUnknownActiveTool,
+		},
+		{
+			name:  "unsupported output type",
+			build: New(model).Output(llm.OutputSchema{Type: "yaml"}),
+			field: "Output",
+			cause: &StructuredOutputError{Kind: StructuredOutputErrorKindValidation},
+		},
+		{
+			name: "invalid output schema",
+			build: New(model).Output(llm.OutputSchema{
+				Type: "object", Schema: map[string]any{"type": 42},
+			}),
+			field: "Output",
+			cause: &StructuredOutputError{Kind: StructuredOutputErrorKindValidation},
 		},
 	}
 
@@ -195,6 +224,7 @@ func TestBuilderBuildDefensivelyCopiesMutableConfiguration(t *testing.T) {
 	}
 
 	builder := New(model).
+		Tools(testToolSet([]ToolDefinition{{Name: "dangerous"}}, nil)).
 		Settings(settings).
 		Output(llm.OutputSchema{Type: "json", Schema: schema}).
 		ProviderOptions(providerOptions).

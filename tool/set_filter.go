@@ -3,8 +3,7 @@ package tool
 import "github.com/open-ai-sdk/ai-go/aikit"
 
 // Restrict returns a validated set exposing only the named definitions in the
-// supplied order. Invokers and the adapted executor are captured from the
-// original set.
+// supplied order. Invokers are captured from the original set.
 func (s *Set) Restrict(definitions []aikit.ToolDefinition) *Set {
 	if s == nil {
 		return nil
@@ -35,7 +34,6 @@ func (s *Set) Restrict(definitions []aikit.ToolDefinition) *Set {
 	restricted, err := newImmutableSet(
 		restrictedDefinitions,
 		restrictedInvokers,
-		snapshot.executor,
 	)
 	if err != nil {
 		// The definitions were selected by name from a validated snapshot, so

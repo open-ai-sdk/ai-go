@@ -291,14 +291,18 @@ func (b Builder) Build() (*Agent, error) {
 	if err := validateActiveTools(b.config); err != nil {
 		return nil, err
 	}
+	if err := validateOutputConfiguration(b.config.output); err != nil {
+		return nil, buildError("Output", err)
+	}
 	for name, policy := range b.config.toolApproval {
 		if policy == nil {
 			return nil, buildError("ToolApproval["+name+"]", errNilApprovalPolicy)
 		}
-		if b.config.tools != nil && b.config.tools.Len() > 0 {
-			if _, exists := b.config.tools.Lookup(name); !exists {
-				return nil, buildError("ToolApproval["+name+"]", errUnknownActiveTool)
-			}
+		if b.config.tools == nil {
+			return nil, buildError("ToolApproval["+name+"]", errUnknownActiveTool)
+		}
+		if _, exists := b.config.tools.Lookup(name); !exists {
+			return nil, buildError("ToolApproval["+name+"]", errUnknownActiveTool)
 		}
 	}
 	if len(b.config.approvalKey) > 0 && len(b.config.approvalKey) < minApprovalKeyBytes {
@@ -330,8 +334,11 @@ func validateActiveTools(config config) error {
 		}
 		seen[name] = struct{}{}
 	}
-	if config.activeTools != nil && config.tools != nil && config.tools.Len() > 0 {
+	if config.activeTools != nil {
 		for _, name := range config.activeTools {
+			if config.tools == nil {
+				return buildError("ActiveTools", fmt.Errorf("%w: %q", errUnknownActiveTool, name))
+			}
 			if _, exists := config.tools.Lookup(name); !exists {
 				return buildError("ActiveTools", fmt.Errorf("%w: %q", errUnknownActiveTool, name))
 			}

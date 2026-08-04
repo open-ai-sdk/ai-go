@@ -6,7 +6,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/tool"
 )
 
@@ -65,16 +64,24 @@ func TestSetSnapshotKeepsOrderDefinitionsAndExactInvokers(t *testing.T) {
 }
 
 func TestConstructorSetOwnsInputDefinitions(t *testing.T) {
-	definitions := []aikit.ToolDefinition{{
-		Name:        "lookup",
-		InputSchema: map[string]any{"type": "object"},
-	}}
-	set, err := tool.NewSetFromExecutor(definitions, &recordingExecutor{})
+	inputSchema := map[string]any{"type": "object"}
+	lookup, err := tool.NewDynamic(
+		"lookup",
+		"Lookup",
+		inputSchema,
+		func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`"ok"`), nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := tool.NewSet(lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	definitions[0].Name = "source-mutated"
+	inputSchema["type"] = "source-mutated"
 	view := set.DefinitionsSnapshot()
 	view[0].Name = "view-mutated"
 	view[0].InputSchema["type"] = "array"
@@ -143,14 +150,5 @@ func TestSetSnapshotConcurrentReadersOwnReturnedDefinitions(t *testing.T) {
 	wait.Wait()
 	if got := snapshot.Definitions()[0].InputSchema["type"]; got != "object" {
 		t.Fatalf("snapshot schema type = %v, want object", got)
-	}
-}
-
-func TestNewSetFromExecutorRejectsEmptyName(t *testing.T) {
-	if _, err := tool.NewSetFromExecutor(
-		[]aikit.ToolDefinition{{Name: ""}},
-		&recordingExecutor{},
-	); err == nil {
-		t.Fatal("expected empty-name registration error")
 	}
 }

@@ -75,11 +75,45 @@ func validateStructuredOutput(raw json.RawMessage, output *OutputSchema) error {
 			Reason: "is invalid JSON: " + err.Error(), Cause: err,
 		}
 	}
-	schema := output.Schema
-	if schema == nil {
-		schema = map[string]any{"type": output.Type}
-		if output.Type == "json_object" {
-			schema["type"] = "object"
+	compiled, err := compileStructuredSchema(output)
+	if err != nil {
+		return err
+	}
+	if err := compiled.Validate(value); err != nil {
+		return structuredValidationError(err)
+	}
+	return nil
+}
+
+func validateOutputConfiguration(output *OutputSchema) error {
+	if output == nil {
+		return nil
+	}
+	switch output.Type {
+	case "text", "json", "json_object", "object", "array":
+	default:
+		return &StructuredOutputError{
+			Kind: StructuredOutputErrorKindValidation,
+			Path: "$schema.type", Reason: fmt.Sprintf("has unsupported output type %q", output.Type),
+		}
+	}
+	if output.Type == "text" {
+		return nil
+	}
+	_, err := compileStructuredSchema(output)
+	return err
+}
+
+func compileStructuredSchema(output *OutputSchema) (*jsonschema.Schema, error) {
+	var schema any = output.Schema
+	if output.Schema == nil {
+		switch output.Type {
+		case "json":
+			schema = true
+		case "json_object":
+			schema = map[string]any{"type": "object"}
+		default:
+			schema = map[string]any{"type": output.Type}
 		}
 	}
 
@@ -90,23 +124,20 @@ func validateStructuredOutput(raw json.RawMessage, output *OutputSchema) error {
 	const schemaURL = "urn:ai-go:structured-output-schema"
 	schemaJSON, err := json.Marshal(schema)
 	if err != nil {
-		return structuredSchemaError(err)
+		return nil, structuredSchemaError(err)
 	}
 	normalizedSchema, err := jsonschema.UnmarshalJSON(bytes.NewReader(schemaJSON))
 	if err != nil {
-		return structuredSchemaError(err)
+		return nil, structuredSchemaError(err)
 	}
 	if err := compiler.AddResource(schemaURL, normalizedSchema); err != nil {
-		return structuredSchemaError(err)
+		return nil, structuredSchemaError(err)
 	}
 	compiled, err := compiler.Compile(schemaURL)
 	if err != nil {
-		return structuredSchemaError(err)
+		return nil, structuredSchemaError(err)
 	}
-	if err := compiled.Validate(value); err != nil {
-		return structuredValidationError(err)
-	}
-	return nil
+	return compiled, nil
 }
 
 func structuredSchemaError(err error) error {
