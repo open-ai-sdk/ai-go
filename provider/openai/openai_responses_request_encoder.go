@@ -48,14 +48,10 @@ type textConfig struct {
 }
 
 type textFormat struct {
-	Type       string         `json:"type"` // "text" or "json_schema"
-	JSONSchema *jsonSchemaRef `json:"json_schema,omitempty"`
-}
-
-type jsonSchemaRef struct {
-	Name   string         `json:"name"`
-	Schema map[string]any `json:"schema"`
-	Strict bool           `json:"strict"`
+	Type   string         `json:"type"` // "text", "json_object", or "json_schema"
+	Name   string         `json:"name,omitempty"`
+	Schema map[string]any `json:"schema,omitempty"`
+	Strict bool           `json:"strict,omitempty"`
 }
 
 // inputItem is a union type for all Responses API input items.
@@ -172,7 +168,10 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 
 	// Structured output schema.
 	if req.Output != nil && req.Output.Type != "text" {
-		r.Text = encodeOutputSchema(req.Output)
+		r.Text, err = encodeOutputSchema(req.Output)
+		if err != nil {
+			return responsesRequest{}, nil, err
+		}
 	}
 
 	return r, warnings, nil
@@ -578,7 +577,13 @@ func encodeTools(defs []aikit.ToolDefinition, opts ProviderOptions) ([]responses
 	return tools, nil
 }
 
-func encodeOutputSchema(o *llm.OutputSchema) *textConfig {
+func encodeOutputSchema(o *llm.OutputSchema) (*textConfig, error) {
+	if o.Type == "json" || o.Type == "json_object" {
+		return &textConfig{Format: &textFormat{Type: "json_object"}}, nil
+	}
+	if (o.Type == "object" || o.Type == "array") && o.Schema == nil {
+		return nil, fmt.Errorf("openai: output type %q requires a schema", o.Type)
+	}
 	schema := o.Schema
 	if o.Type == "object" && schema != nil {
 		if _, ok := schema["type"]; !ok {
@@ -592,12 +597,7 @@ func encodeOutputSchema(o *llm.OutputSchema) *textConfig {
 	}
 	return &textConfig{
 		Format: &textFormat{
-			Type: "json_schema",
-			JSONSchema: &jsonSchemaRef{
-				Name:   "structured_output",
-				Schema: schema,
-				Strict: true,
-			},
+			Type: "json_schema", Name: "structured_output", Schema: schema, Strict: true,
 		},
-	}
+	}, nil
 }

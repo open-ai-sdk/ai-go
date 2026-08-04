@@ -279,27 +279,26 @@ func TestRunnerDefaultMaxTurnsReturnsPartialResultAfterToolContinuation(t *testi
 	}
 }
 
-func TestRunnerStructuredOutputConsumesTurnBudget(t *testing.T) {
+func TestRunnerStructuredOutputUsesFinalConstrainedTurn(t *testing.T) {
 	output := llm.OutputSchema{Type: "object", Schema: map[string]any{
 		"type":       "object",
 		"properties": map[string]any{"ok": map[string]any{"type": "boolean"}},
 		"required":   []any{"ok"},
 	}}
-	oneTurnModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", "draft")}}
+	oneTurnModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", `{"ok":true}`)}}
 	oneTurn := mustRunnerAgent(
 		t,
 		oneTurnModel,
 		func(builder agent.Builder) agent.Builder { return builder.Output(output) },
 	)
-	partial, err := oneTurn.Runner().Prompt("answer as JSON").Run(context.Background())
-	var maxTurns *agent.MaxTurnsError
-	if !errors.As(err, &maxTurns) || partial == nil || partial.Text != "draft" {
-		t.Fatalf("one-turn structured Run() = (%#v, %T %v), want partial MaxTurnsError", partial, err, err)
+	result, err := oneTurn.Runner().Prompt("answer as JSON").Run(context.Background())
+	if err != nil || result == nil || string(result.StructuredOutput) != `{"ok":true}` {
+		t.Fatalf("one-turn structured Run() = (%#v, %v)", result, err)
 	}
 	if len(oneTurnModel.requestSnapshots()) != 1 {
 		t.Fatalf("one-turn model calls = %d, want 1", len(oneTurnModel.requestSnapshots()))
 	}
-	streamModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", "draft")}}
+	streamModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", `{"ok":true}`)}}
 	streamAgent := mustRunnerAgent(
 		t,
 		streamModel,
@@ -319,10 +318,7 @@ func TestRunnerStructuredOutputConsumesTurnBudget(t *testing.T) {
 		t.Fatalf("exhausted structured run emitted %d step starts, want 1", stepStarts)
 	}
 
-	twoTurnModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
-		runnerTextEvents("answer", "draft"),
-		runnerTextEvents("structured", `{"ok":true}`),
-	}}
+	twoTurnModel := &runnerScriptModel{scripts: [][]aikit.StreamEvent{runnerTextEvents("answer", `{"ok":true}`)}}
 	var preparedTurns []int
 	var hookTurns []int
 	twoTurn := mustRunnerAgent(t, twoTurnModel, func(builder agent.Builder) agent.Builder {
@@ -345,19 +341,19 @@ func TestRunnerStructuredOutputConsumesTurnBudget(t *testing.T) {
 				},
 			})
 	})
-	result, err := twoTurn.Runner().Prompt("answer as JSON").Run(context.Background())
+	result, err = twoTurn.Runner().Prompt("answer as JSON").Run(context.Background())
 	if err != nil {
 		t.Fatalf("two-turn structured Run() error = %v", err)
 	}
-	if string(result.StructuredOutput) != `{"ok":true}` || len(twoTurnModel.requestSnapshots()) != 2 {
+	if string(result.StructuredOutput) != `{"ok":true}` || len(twoTurnModel.requestSnapshots()) != 1 {
 		t.Fatalf("structured result/calls = (%s, %d)", result.StructuredOutput, len(twoTurnModel.requestSnapshots()))
 	}
-	if len(result.Steps) != 2 || !reflect.DeepEqual(preparedTurns, []int{0, 1}) ||
-		!reflect.DeepEqual(hookTurns, []int{1, 2}) {
+	if len(result.Steps) != 1 || !reflect.DeepEqual(preparedTurns, []int{0}) ||
+		!reflect.DeepEqual(hookTurns, []int{1}) {
 		t.Fatalf("structured lifecycle = steps:%d prepare:%v hooks:%v", len(result.Steps), preparedTurns, hookTurns)
 	}
 	requests := twoTurnModel.requestSnapshots()
-	if requests[1].Output == nil || len(requests[1].Tools) != 0 {
-		t.Fatalf("structured request = %#v", requests[1])
+	if requests[0].Output == nil || len(requests[0].Tools) != 0 {
+		t.Fatalf("structured request = %#v", requests[0])
 	}
 }

@@ -75,6 +75,12 @@ func NewNativeLanguageModel(modelID string, cfg Config) *NativeLanguageModel {
 // ModelID returns the Gemini model identifier.
 func (m *NativeLanguageModel) ModelID() string { return m.modelID }
 
+// NativeSchemaSupport is separate from generic tool support because Gemini's
+// native API rejects response schemas together with function declarations.
+func (m *NativeLanguageModel) NativeSchemaSupport() llm.NativeSchemaSupport {
+	return geminiNativeSchemaSupport(m.modelID)
+}
+
 // Stream sends a streaming request to the native Gemini API and returns a
 // channel of normalized aikit.StreamEvents.
 func (m *NativeLanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aikit.StreamEvent, error) {

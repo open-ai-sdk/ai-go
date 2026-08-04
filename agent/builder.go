@@ -118,6 +118,12 @@ func (b Builder) Output(output llm.OutputSchema) Builder {
 	return b
 }
 
+// OutputMode selects native schema enforcement or the synthetic output tool.
+func (b Builder) OutputMode(mode OutputMode) Builder {
+	b.config.outputMode = mode
+	return b
+}
+
 // Settings replaces the common model call settings.
 func (b Builder) Settings(settings llm.CallSettings) Builder {
 	b.config.settings = cloneCallSettings(settings)

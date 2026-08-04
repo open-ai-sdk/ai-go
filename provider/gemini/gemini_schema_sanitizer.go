@@ -30,6 +30,28 @@ func sanitizeMap(m map[string]any) map[string]any {
 		}
 		out[k] = sanitizeValue(v)
 	}
+	// Gemini represents nullable schemas with a boolean instead of JSON
+	// Schema's type union. Preserve the non-null type and make null explicit.
+	if types, ok := out["type"].([]any); ok && len(types) == 2 {
+		var nonNull string
+		nullCount := 0
+		for _, value := range types {
+			if value == "null" {
+				nullCount++
+				continue
+			}
+			if name, ok := value.(string); ok {
+				nonNull = name
+				continue
+			}
+			nonNull = ""
+			break
+		}
+		if nullCount == 1 && nonNull != "" {
+			out["type"] = nonNull
+			out["nullable"] = true
+		}
+	}
 	return out
 }
 

@@ -81,3 +81,26 @@ func TestCompatModelRejectsNativeOnlyOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeSchemaSupportDependsOnGeminiModelGeneration(t *testing.T) {
+	tests := []struct {
+		modelID string
+		want    llm.NativeSchemaSupport
+	}{
+		{modelID: "gemini-2.5-flash", want: llm.NativeSchemaSuppressesTools},
+		{modelID: "gemini-3-pro-preview", want: llm.NativeSchemaFull},
+		{modelID: "gemini-30-pro", want: llm.NativeSchemaSuppressesTools},
+	}
+	for _, test := range tests {
+		t.Run(test.modelID, func(t *testing.T) {
+			compat := NewLanguageModel(test.modelID, Config{APIKey: "test"})
+			native := NewNativeLanguageModel(test.modelID, Config{APIKey: "test"})
+			if got := compat.NativeSchemaSupport(); got != test.want {
+				t.Fatalf("compat NativeSchemaSupport() = %v, want %v", got, test.want)
+			}
+			if got := native.NativeSchemaSupport(); got != test.want {
+				t.Fatalf("native NativeSchemaSupport() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

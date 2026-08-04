@@ -89,14 +89,24 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 
 // anthropicRequest is the Messages API request body.
 type anthropicRequest struct {
-	Model      string               `json:"model"`
-	MaxTokens  int                  `json:"max_tokens"`
-	System     string               `json:"system,omitempty"`
-	Messages   []anthropicMsg       `json:"messages"`
-	Stream     bool                 `json:"stream"`
-	Tools      []anthropicTool      `json:"tools,omitempty"`
-	ToolChoice *anthropicToolChoice `json:"tool_choice,omitempty"`
-	Thinking   *thinkingConfig      `json:"thinking,omitempty"`
+	Model      string                 `json:"model"`
+	MaxTokens  int                    `json:"max_tokens"`
+	System     string                 `json:"system,omitempty"`
+	Messages   []anthropicMsg         `json:"messages"`
+	Stream     bool                   `json:"stream"`
+	Tools      []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice *anthropicToolChoice   `json:"tool_choice,omitempty"`
+	Thinking   *thinkingConfig        `json:"thinking,omitempty"`
+	Output     *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+type anthropicOutputConfig struct {
+	Format anthropicOutputFormat `json:"format"`
+}
+
+type anthropicOutputFormat struct {
+	Type   string         `json:"type"`
+	Schema map[string]any `json:"schema"`
 }
 
 type anthropicToolChoice struct {
@@ -148,10 +158,6 @@ type thinkingConfig struct {
 // encodeRequest builds the Messages API body. Returned warnings describe content
 // the API cannot carry; they are surfaced on the stream's finish event.
 func (m *LanguageModel) encodeRequest(req llm.Request, streaming bool) ([]byte, []aikit.Warning, error) {
-	if req.Output != nil {
-		return nil, nil, fmt.Errorf("anthropic: output schema is not yet supported")
-	}
-
 	ar := anthropicRequest{
 		Model:     m.modelID,
 		MaxTokens: req.Settings.MaxTokens,
@@ -171,6 +177,19 @@ func (m *LanguageModel) encodeRequest(req llm.Request, streaming bool) ([]byte, 
 	msgs, warnings := encodeMessages(req.Messages)
 	ar.Messages = msgs
 	ar.Tools = encodeTools(req.Tools)
+	if req.Output != nil && req.Output.Type != "text" {
+		if !m.supportsStructuredOutput() {
+			return nil, nil, &llm.StructuredOutputError{
+				Kind:   llm.StructuredOutputErrorKindPrompt,
+				Reason: "anthropic model does not support native structured output",
+			}
+		}
+		schema := req.Output.Schema
+		if schema == nil {
+			schema = map[string]any{"type": req.Output.Type}
+		}
+		ar.Output = &anthropicOutputConfig{Format: anthropicOutputFormat{Type: "json_schema", Schema: schema}}
+	}
 
 	// Enable caching on last tool if caching is enabled
 	if m.config.EnableCaching && len(ar.Tools) > 0 {
@@ -182,6 +201,46 @@ func (m *LanguageModel) encodeRequest(req llm.Request, streaming bool) ([]byte, 
 		return nil, nil, err
 	}
 	return body, warnings, nil
+}
+
+// supportsStructuredOutput mirrors the capability list maintained by the
+// upstream Anthropic AI SDK. Unknown and older model IDs fail closed so callers
+// get a local typed error rather than an avoidable provider 400.
+func (m *LanguageModel) supportsStructuredOutput() bool {
+	for _, model := range []string{
+		"claude-opus-4-8", "claude-opus-4-7", "claude-fable-5", "claude-sonnet-5",
+		"claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-5",
+		"claude-opus-4-5", "claude-haiku-4-5", "claude-opus-4-1",
+	} {
+		if modelIDMatches(m.modelID, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelIDMatches(modelID, supported string) bool {
+	if modelID == supported {
+		return true
+	}
+	suffix := strings.TrimPrefix(modelID, supported)
+	if len(suffix) != 9 || suffix[0] != '-' {
+		return false
+	}
+	for _, char := range suffix[1:] {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// NativeSchemaSupport exposes the per-model structured-output capability.
+func (m *LanguageModel) NativeSchemaSupport() llm.NativeSchemaSupport {
+	if m.supportsStructuredOutput() {
+		return llm.NativeSchemaFull
+	}
+	return llm.NativeSchemaNone
 }
 
 func mapToolChoice(tc *aikit.ToolChoice) *anthropicToolChoice {

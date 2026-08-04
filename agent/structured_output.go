@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
 // emitStructuredOutput makes a final constrained LLM call when an OutputSchema
@@ -43,9 +43,6 @@ func emitStructuredOutput(
 		RuntimeContext:  request.RuntimeContext,
 	}
 	r.hookContext.Turn = step + 1
-	if !r.emitObserved(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
-		return false
-	}
 	applyPrepareStep(params, step, completedSteps, &model, &req)
 	var err error
 	req, err = r.beforeCompletion(req)
@@ -90,47 +87,59 @@ func emitStructuredOutput(
 		return false
 	}
 
-	sr, interrupted := consumeStructuredStream(r, eventCh, params.Callbacks, span)
+	sr, interrupted := consumeStructuredStreamSilent(r, eventCh, span)
 	if interrupted {
 		return false
 	}
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})
 	}
-	if !r.emitObserved(StepEvent{
-		Type: StepEventStepEnd, StepNumber: step, MessageID: sr.messageID,
-		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
-		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
-	}) {
-		return false
-	}
-	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
+	return emitStructuredOutputResult(r, sr, request.Output)
+}
 
-	raw := sr.text
-	if strings.TrimSpace(raw) == "" {
-		r.emitError(&StructuredOutputError{
-			Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty",
-		})
-		return false
+// parseStructuredOutput is retained for package-level stream tests. Runtime
+// structured-output acceptance uses llm.ValidStructuredJSON.
+func parseStructuredOutput(content string) json.RawMessage {
+	return llm.FirstJSONValue(content)
+}
+
+// emitStructuredOutputValue validates and publishes text collected from the
+// structured-output model call. It performs no provider I/O itself.
+func emitStructuredOutputValue(r *run, raw string, output *OutputSchema) bool {
+	return emitStructuredOutputEvent(r, raw, output, StepEvent{})
+}
+
+func emitStructuredOutputResult(r *run, result streamResult, output *OutputSchema) bool {
+	return emitStructuredOutputEvent(r, result.text, output, StepEvent{
+		MessageID:        result.messageID,
+		Usage:            snapshotUsage(result.usage),
+		FinishReason:     result.finish,
+		RawFinishReason:  result.rawFinish,
+		ProviderMetadata: snapshotJSONMap(result.providerMeta),
+		Warnings:         append([]Warning(nil), result.warnings...),
+	})
+}
+
+func emitStructuredOutputEvent(r *run, raw string, output *OutputSchema, event StepEvent) bool {
+	if output == nil || output.Type == "text" {
+		return true
 	}
-	parsed := parseStructuredOutput(raw)
-	if parsed == nil {
-		r.emitError(&StructuredOutputError{
-			Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON",
-		})
-		return false
-	}
-	if err := validateStructuredOutput(parsed, request.Output); err != nil {
+	parsed, err := llm.ValidStructuredJSON(raw, output)
+	if err != nil {
 		r.emitError(err)
 		return false
 	}
-	return r.emitObserved(StepEvent{Type: StepEventStructuredOutput, StructuredOutput: parsed})
+	event.Type = StepEventStructuredOutput
+	event.StructuredOutput = parsed
+	return r.emitObserved(event)
 }
 
-func consumeStructuredStream(
+// consumeStructuredStreamSilent collects the one exceptional finishing call
+// without turning its JSON into an assistant step or UI text delta. The final
+// value is exposed solely as StepEventStructuredOutput.
+func consumeStructuredStreamSilent(
 	r *run,
 	events <-chan StreamEvent,
-	callbacks *lifecycleCallbacks,
 	span tracing.Span,
 ) (streamResult, bool) {
 	var result streamResult
@@ -142,44 +151,28 @@ func consumeStructuredStream(
 			if !ok {
 				return result, false
 			}
-			if event.Type == StreamEventError {
+			switch event.Type {
+			case StreamEventTextDelta:
+				result.text += event.TextDelta
+			case StreamEventReasoningDelta:
+				result.reasoning += event.TextDelta
+			case StreamEventUsage:
+				result.usage = mergeUsage(result.usage, event.Usage)
+			case StreamEventFinish:
+				result.messageID, result.finish, result.rawFinish = event.MessageID, event.FinishReason, event.RawFinishReason
+				result.providerMeta = event.ProviderMetadata
+				result.warnings = append(result.warnings, event.Warnings...)
+			case StreamEventError:
 				span.RecordError(event.Error)
-				r.emitError(&StructuredOutputError{
-					Kind:   StructuredOutputErrorKindPrompt,
-					Reason: "prompt failed", Cause: event.Error,
-				})
+				r.emitError(
+					&StructuredOutputError{
+						Kind:   StructuredOutputErrorKindPrompt,
+						Reason: "prompt failed",
+						Cause:  event.Error,
+					},
+				)
 				return result, true
 			}
-			if applyStreamEvent(r, event, &result, nil, callbacks) {
-				return result, true
-			}
 		}
 	}
-}
-
-// parseStructuredOutput extracts valid JSON from content, stripping markdown fences if present.
-func parseStructuredOutput(content string) json.RawMessage {
-	content = trimMarkdownFence(content)
-	if json.Valid([]byte(content)) {
-		return json.RawMessage(content)
-	}
-	return nil
-}
-
-// trimMarkdownFence strips ```json ... ``` or ``` ... ``` fencing.
-func trimMarkdownFence(s string) string {
-	s = strings.TrimSpace(s)
-	for _, prefix := range []string{"```json\n", "```json\r\n", "```\n", "```\r\n"} {
-		if strings.HasPrefix(s, prefix) {
-			s = s[len(prefix):]
-			break
-		}
-	}
-	for _, suffix := range []string{"\n```", "\r\n```", "```"} {
-		if strings.HasSuffix(s, suffix) {
-			s = s[:len(s)-len(suffix)]
-			break
-		}
-	}
-	return strings.TrimSpace(s)
 }

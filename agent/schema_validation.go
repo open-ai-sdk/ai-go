@@ -1,174 +1,30 @@
 package agent
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"strings"
 
-	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/open-ai-sdk/ai-go/llm"
 )
 
-// StructuredOutputErrorKind identifies which structured-output boundary
-// failed.
-type StructuredOutputErrorKind string
+// StructuredOutputErrorKind identifies which structured-output boundary failed.
+type StructuredOutputErrorKind = llm.StructuredOutputErrorKind
 
 const (
-	StructuredOutputErrorKindPrompt     StructuredOutputErrorKind = "prompt"
-	StructuredOutputErrorKindJSONDecode StructuredOutputErrorKind = "json_decode"
-	StructuredOutputErrorKindValidation StructuredOutputErrorKind = "validation"
-	StructuredOutputErrorKindEmpty      StructuredOutputErrorKind = "empty"
-
-	StructuredOutputErrorKindPromptFailure = StructuredOutputErrorKindPrompt
-	StructuredOutputErrorKindEmptyResponse = StructuredOutputErrorKindEmpty
+	StructuredOutputErrorKindPrompt        = llm.StructuredOutputErrorKindPrompt
+	StructuredOutputErrorKindJSONDecode    = llm.StructuredOutputErrorKindJSONDecode
+	StructuredOutputErrorKindValidation    = llm.StructuredOutputErrorKindValidation
+	StructuredOutputErrorKindEmpty         = llm.StructuredOutputErrorKindEmpty
+	StructuredOutputErrorKindPromptFailure = llm.StructuredOutputErrorKindPromptFailure
+	StructuredOutputErrorKindEmptyResponse = llm.StructuredOutputErrorKindEmptyResponse
 )
 
-// StructuredOutputError reports a failure while producing, decoding, or
-// validating structured output. Path and Reason remain source-compatible with
-// the original validation-only error.
-type StructuredOutputError struct {
-	Kind   StructuredOutputErrorKind
-	Path   string
-	Reason string
-	Cause  error
-}
-
-func (e *StructuredOutputError) Error() string {
-	if e == nil {
-		return "agent: structured output failed"
-	}
-	reason := e.Reason
-	if reason == "" && e.Cause != nil {
-		reason = e.Cause.Error()
-	}
-	if reason == "" {
-		reason = string(e.Kind)
-	}
-	if e.Path == "" {
-		return "agent: structured output " + reason
-	}
-	return fmt.Sprintf("agent: structured output at %s %s", e.Path, reason)
-}
-
-func (e *StructuredOutputError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
-
-// Is permits kind matching with errors.Is(err,
-// &StructuredOutputError{Kind: kind}). Use errors.As for every kind.
-func (e *StructuredOutputError) Is(target error) bool {
-	want, ok := target.(*StructuredOutputError)
-	return ok && e != nil && want != nil && want.Kind != "" && e.Kind == want.Kind
-}
+// StructuredOutputError is re-exported for source compatibility.
+type StructuredOutputError = llm.StructuredOutputError
 
 func validateStructuredOutput(raw json.RawMessage, output *OutputSchema) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return &StructuredOutputError{
-			Kind: StructuredOutputErrorKindJSONDecode, Path: "$",
-			Reason: "is invalid JSON: " + err.Error(), Cause: err,
-		}
-	}
-	compiled, err := compileStructuredSchema(output)
-	if err != nil {
-		return err
-	}
-	if err := compiled.Validate(value); err != nil {
-		return structuredValidationError(err)
-	}
-	return nil
+	return llm.ValidateStructuredOutput(raw, output)
 }
 
 func validateOutputConfiguration(output *OutputSchema) error {
-	if output == nil {
-		return nil
-	}
-	switch output.Type {
-	case "text", "json", "json_object", "object", "array":
-	default:
-		return &StructuredOutputError{
-			Kind: StructuredOutputErrorKindValidation,
-			Path: "$schema.type", Reason: fmt.Sprintf("has unsupported output type %q", output.Type),
-		}
-	}
-	if output.Type == "text" {
-		return nil
-	}
-	_, err := compileStructuredSchema(output)
-	return err
-}
-
-func compileStructuredSchema(output *OutputSchema) (*jsonschema.Schema, error) {
-	var schema any = output.Schema
-	if output.Schema == nil {
-		switch output.Type {
-		case "json":
-			schema = true
-		case "json_object":
-			schema = map[string]any{"type": "object"}
-		default:
-			schema = map[string]any{"type": output.Type}
-		}
-	}
-
-	compiler := jsonschema.NewCompiler()
-	compiler.DefaultDraft(jsonschema.Draft2020)
-	compiler.AssertFormat()
-	compiler.AssertContent()
-	const schemaURL = "urn:ai-go:structured-output-schema"
-	schemaJSON, err := json.Marshal(schema)
-	if err != nil {
-		return nil, structuredSchemaError(err)
-	}
-	normalizedSchema, err := jsonschema.UnmarshalJSON(bytes.NewReader(schemaJSON))
-	if err != nil {
-		return nil, structuredSchemaError(err)
-	}
-	if err := compiler.AddResource(schemaURL, normalizedSchema); err != nil {
-		return nil, structuredSchemaError(err)
-	}
-	compiled, err := compiler.Compile(schemaURL)
-	if err != nil {
-		return nil, structuredSchemaError(err)
-	}
-	return compiled, nil
-}
-
-func structuredSchemaError(err error) error {
-	return &StructuredOutputError{
-		Kind: StructuredOutputErrorKindValidation, Path: "$schema",
-		Reason: "is invalid: " + err.Error(), Cause: err,
-	}
-}
-
-func structuredValidationError(err error) error {
-	var validationErr *jsonschema.ValidationError
-	if !errors.As(err, &validationErr) {
-		return &StructuredOutputError{
-			Kind: StructuredOutputErrorKindValidation, Path: "$",
-			Reason: "does not satisfy schema: " + err.Error(), Cause: err,
-		}
-	}
-	leaf := validationErr
-	for len(leaf.Causes) > 0 {
-		leaf = leaf.Causes[0]
-	}
-	path := "$"
-	for _, token := range leaf.InstanceLocation {
-		if strings.IndexByte(token, '.') >= 0 {
-			path += "[" + fmt.Sprintf("%q", token) + "]"
-		} else {
-			path += "." + token
-		}
-	}
-	return &StructuredOutputError{
-		Kind: StructuredOutputErrorKindValidation, Path: path,
-		Reason: "does not satisfy schema: " + leaf.Error(), Cause: err,
-	}
+	return llm.ValidateOutputConfiguration(output)
 }

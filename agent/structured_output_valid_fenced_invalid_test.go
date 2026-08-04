@@ -11,12 +11,7 @@ func runStructuredOutputEngine(t *testing.T, modelResponse string) []StepEvent {
 	t.Helper()
 
 	model := &mockModel{calls: [][]StreamEvent{
-		// Step 1: plain finish
-		{
-			{Type: StreamEventTextDelta, TextDelta: "analysis complete"},
-			{Type: StreamEventFinish, FinishReason: FinishReasonStop},
-		},
-		// Structured output call
+		// The native schema constrains the normal final turn; no second call is made.
 		{
 			{Type: StreamEventTextDelta, TextDelta: modelResponse},
 			{Type: StreamEventFinish, FinishReason: FinishReasonStop},
@@ -144,7 +139,6 @@ func TestStructuredOutput_InvalidJSON(t *testing.T) {
 
 func TestStructuredOutput_SchemaViolationTerminatesWithoutDone(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
-		{textEvt("analysis complete"), finishEvt(FinishReasonStop)},
 		{textEvt(`{"age":"not-an-integer"}`), finishEvt(FinishReasonStop)},
 	}}
 	events := collectRunEvents(runConfig{
@@ -185,7 +179,6 @@ func assertStructuredOutputFailure(t *testing.T, events []StepEvent) {
 func TestStructuredOutput_ProviderErrorTerminatesWithoutDone(t *testing.T) {
 	providerErr := errors.New("structured provider failed")
 	model := &mockModel{calls: [][]StreamEvent{
-		{textEvt("analysis complete"), finishEvt(FinishReasonStop)},
 		{{Type: StreamEventError, Error: providerErr}},
 	}}
 	events := collectRunEvents(runConfig{
@@ -212,7 +205,6 @@ func TestStructuredOutput_ProviderErrorTerminatesWithoutDone(t *testing.T) {
 
 func TestStructuredOutput_PreservesEffectiveProviderOptions(t *testing.T) {
 	model := &recordingModel{mockModel: mockModel{calls: [][]StreamEvent{
-		{textEvt("draft"), finishEvt(FinishReasonStop)},
 		{textEvt(`{"ok":true}`), finishEvt(FinishReasonStop)},
 	}}}
 	events := collectRunEvents(runConfig{
@@ -230,10 +222,10 @@ func TestStructuredOutput_PreservesEffectiveProviderOptions(t *testing.T) {
 			t.Fatalf("unexpected error: %v", event.Error)
 		}
 	}
-	if len(model.requests) != 2 {
-		t.Fatalf("model requests = %d, want 2", len(model.requests))
+	if len(model.requests) != 1 {
+		t.Fatalf("model requests = %d, want 1", len(model.requests))
 	}
-	options := model.requests[1].ProviderOptions
+	options := model.requests[0].ProviderOptions
 	if options["base"] != "kept" || options["override"] != "applied" {
 		t.Fatalf("structured provider options = %#v", options)
 	}

@@ -12,7 +12,7 @@ The completion APIs cover one provider model call:
 | `ai.Prompt` | Aggregated text | 1 | Never |
 | `ai.Chat` | Aggregated text with supplied history | 1 | Never |
 | `ai.NewCompletion` / `ai.Complete` | Complete normalized assistant response | 1 | Never |
-| `ai.CompleteObject[T]` | Typed object and normalized response | 1 | Never |
+| `ai.NewTypedCompletion[T]` | Typed object and normalized response | 1 | Never |
 
 Use the highest-level API that preserves the control your application needs.
 Choose a completion when the application owns conversation state, tool
@@ -465,9 +465,10 @@ conditions, handle approvals, and continue across multiple model calls.
 
 ## Typed completion
 
-`ai.CompleteObject[T]` is the direct, typed counterpart to `ai.Complete`. It
-derives JSON Schema from the exported fields of `T`, performs exactly one model
-call, and unmarshals the aggregated text into `T`:
+`ai.NewTypedCompletion[T]` is the direct, typed counterpart to
+`ai.NewCompletion`. It derives a strict JSON Schema from the exported fields of
+`T`, performs exactly one model call, then finds, validates, and decodes the
+first JSON value in the aggregated text:
 
 ```go
 type Capital struct {
@@ -475,11 +476,9 @@ type Capital struct {
   Country string `json:"country"`
 }
 
-request := ai.NewCompletion(model, "What is Vietnam's capital?").
+result, err := ai.NewTypedCompletion[Capital](model, "What is Vietnam's capital?").
   Instructions("Return the requested object.").
-  Build()
-
-result, err := ai.CompleteObject[Capital](ctx, model, request)
+  Complete(ctx)
 if err != nil {
   return err
 }
@@ -487,15 +486,20 @@ fmt.Println(result.Object.City)
 fmt.Println(result.Response.Usage.TotalTokens)
 ```
 
+When no per-request configuration is needed, use the minimal convenience:
+
+```go
+result, err := ai.PromptTyped[Capital](ctx, model, "What is Vietnam's capital?")
+```
+
 The result contains both `Object` and `Response`. If JSON decoding fails,
 `Response` is still available for inspecting text, usage, finish metadata, and
 warnings.
 
-The schema is a request to the provider, not local semantic validation. Model
-and provider support varies, and successful JSON unmarshalling does not enforce
-domain rules. Validate the resulting Go value when the application requires
-stronger guarantees. See [structured output](/core/structured-output) for the
-agent-layer alternative.
+The schema is both a provider constraint and a local structural validation
+boundary. Domain rules that are not expressed by the schema still belong to the
+application. See [structured output](/core/structured-output) for provider
+support, Agent and Extractor surfaces, and typed error handling.
 
 ## Provider-specific options
 
@@ -547,7 +551,7 @@ cause remains available to `errors.Is` and `errors.As`, including typed
 - Use `ai.Chat` when you already have history and only need the next text.
 - Use `ai.NewCompletion` when you need rich content, streaming, usage, tools,
   provider options, or manual continuation.
-- Use `ai.CompleteObject[T]` for one typed, schema-constrained direct call.
+- Use `ai.NewTypedCompletion[T]` for one typed, schema-constrained direct call.
 
 For tool execution and multi-step generation, continue to
 [Agents](/core/agents).

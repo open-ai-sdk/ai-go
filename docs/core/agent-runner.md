@@ -88,9 +88,11 @@ or an approval response without its request fail synchronously with
 ## Turn budget and early stopping
 
 `MaxTurns` is the hard total number of model calls in this run. The initial
-request, tool-result continuations, invalid-call retries, and structured-output
-calls all consume the same budget. It defaults to the Agent value, which is
-`1` unless configured otherwise, and must be positive.
+request, tool-result continuations, invalid-call retries, and any constrained
+finishing call after a terminal tool turn consume the same budget. A normal
+structured-output text turn is parsed in place and does not consume an extra
+turn. `MaxTurns` defaults to the Agent value, which is `1` unless configured,
+and must be positive.
 
 `StopWhen` may finish earlier but cannot expand the budget. There is no zero or
 negative sentinel for an unbounded run.
