@@ -21,6 +21,9 @@ optional `otelagent` package, which adapts OpenTelemetry to the
 - Tool invocation receives isolated request `ToolsContext`, `RuntimeContext`,
   and a tool-call ID. MCP discovery now has context-aware paginated snapshot
   constructors and preserves mixed result content without placeholders.
+- `tool.Typed[Args, Output]` and `tool.Adapt` support struct-based typed tools
+  with state and hand-authored provider definitions, while `tool.New` remains
+  the concise function-based constructor.
 - Hooks now cover completion responses, completed model turns, text/tool-call
   deltas, and stream finish in addition to completion request, tool, invalid
   call, and run-finished phases. `HookFuncs` exposes matching function fields;

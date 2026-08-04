@@ -26,6 +26,53 @@ the JSON Schema when the tool is created; a malformed model call becomes a
 typed input error before the handler runs. Use `tool.NewDynamic` when an
 integration supplies a runtime schema instead.
 
+## Implement a tool as a type
+
+For a stateful tool or a hand-authored schema, implement `tool.Typed` and pass
+the value to `tool.Adapt`. It is the Go equivalent of implementing Rig's
+`Tool` trait: `Describe` provides the provider definition and `Call` receives
+decoded arguments. `context.Context` carries cancellation, deadlines, and
+request-scoped values.
+
+```go
+type OperationArgs struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+type Adder struct{}
+
+func (Adder) Describe() aikit.ToolDefinition {
+	return aikit.ToolDefinition{
+		Name:        "add",
+		Description: "Add x and y together",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"x": map[string]any{"type": "integer"},
+				"y": map[string]any{"type": "integer"},
+			},
+			"required": []string{"x", "y"},
+		},
+	}
+}
+
+func (Adder) Call(_ context.Context, args OperationArgs) (int, error) {
+	return args.X + args.Y, nil
+}
+
+add, err := tool.Adapt(Adder{})
+if err != nil {
+	return err
+}
+```
+
+`tool.Adapt` captures the definition, validates model JSON before `Call`, and
+uses the same output and error handling as `tool.New`. Go infers the generic
+argument and output types from `Adder{}`. Use `tool.New` for the concise
+function form and `Typed` when the receiver needs dependencies, configuration,
+or a custom schema.
+
 The Agent owns the loop: it validates a model call, invokes the tool, commits a
 canonical result, and makes a later model turn only when one is needed. For
 application-owned continuation, use `Set.InvokeResult` directly. See
