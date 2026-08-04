@@ -47,6 +47,13 @@ type sseWriter struct {
 
 func newSSEWriter(w http.ResponseWriter, onError func()) *sseWriter {
 	SetHeaders(w.Header())
+	return newFramingWriter(w, onError)
+}
+
+// newFramingWriter retains the flush/cancel behavior without imposing the AI
+// Node headers. Protocol-aware handlers use this after their Framer applies
+// the protocol's own headers.
+func newFramingWriter(w http.ResponseWriter, onError func()) *sseWriter {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		flusher = nil

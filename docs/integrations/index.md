@@ -17,6 +17,9 @@ formats, and typed provider options.
 - [Model Context Protocol](/integrations/mcp) turns MCP capabilities into tools
   that the agent runtime can call.
 - [AI SDK v7 UI streams](/integrations/ui-streams) translates normalized events
+
+- [UI stream protocol extensions](/integrations/protocol-extensions) explains
+  the event-driven protocol seam and AG-UI subset.
   into the browser-facing SSE protocol.
 
 For the provider/client mental model, start with

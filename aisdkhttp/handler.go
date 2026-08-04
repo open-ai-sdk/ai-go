@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/aisdk"
+	"github.com/open-ai-sdk/ai-go/uistream"
 )
 
 // RunFunc starts an agent run for the messages decoded from a v7 chat request.
@@ -24,8 +25,57 @@ type RunFunc func(
 
 // Handler returns an http.Handler for v7 chat POSTs.
 func Handler(run RunFunc) http.Handler {
+	// Keep the mature v7 path byte-for-byte stable while HandlerFor provides
+	// the extensibility seam. The AI Node adapter is intentionally available to
+	// callers that opt in to the protocol-parameterized path.
 	if run == nil {
 		panic("aisdkhttp: nil RunFunc")
+	}
+	return legacyHandler(run)
+}
+
+func legacyHandler(run RunFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		defer func() { _ = r.Body.Close() }()
+		envelope, err := decodeEnvelope(r.Body)
+		if err != nil {
+			writeHTTPError(w, http.StatusBadRequest, invalidRequestMessage)
+			return
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		events, err := run(ctx, aisdk.ToAIMessages(envelope.Messages))
+		if err != nil || events == nil {
+			writeHTTPError(w, http.StatusInternalServerError, streamErrorMessage)
+			return
+		}
+		messageID := ""
+		if envelope.Trigger == "regenerate-message" {
+			messageID = envelope.MessageID
+		}
+		if messageID == "" {
+			messageID = newMessageID()
+		}
+		chunks := aisdk.NewChunkProducer(messageID).Produce(eventChannel(ctx, events)).Chunks
+		if err := aisdk.WriteSSEStream(newSSEWriter(w, cancel), chunks); err != nil {
+			cancel()
+		}
+	})
+}
+
+// HandlerFor returns a handler driven by a UI stream protocol. Handler keeps
+// the established AI Node v7 behavior by selecting ainode.Protocol.
+func HandlerFor(protocol uistream.Protocol, run RunFunc) http.Handler {
+	if run == nil {
+		panic("aisdkhttp: nil RunFunc")
+	}
+	if protocol.Decoder == nil || protocol.Framer == nil || protocol.NewEncoder == nil {
+		panic("aisdkhttp: incomplete protocol")
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +86,7 @@ func Handler(run RunFunc) http.Handler {
 		}
 		defer func() { _ = r.Body.Close() }()
 
-		envelope, err := decodeEnvelope(r.Body)
+		request, err := protocol.Decoder.Decode(r.Body)
 		if err != nil {
 			writeHTTPError(w, http.StatusBadRequest, invalidRequestMessage)
 			return
@@ -44,32 +94,22 @@ func Handler(run RunFunc) http.Handler {
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
-		events, err := run(ctx, aisdk.ToAIMessages(envelope.Messages))
+		events, err := run(ctx, request.Messages)
 		if err != nil || events == nil {
 			writeHTTPError(w, http.StatusInternalServerError, streamErrorMessage)
 			return
 		}
 
-		messageID := ""
-		if envelope.Trigger == "regenerate-message" {
-			messageID = envelope.MessageID
-		}
-		if messageID == "" {
-			messageID = newMessageID()
-		}
-		chunks := aisdk.NewChunkProducer(messageID).Produce(eventChannel(ctx, events)).Chunks
-		writer := newSSEWriter(w, cancel)
-		if err := aisdk.WriteSSEStream(writer, chunks); err != nil {
+		protocol.Framer.ApplyHeaders(w.Header())
+		writer := newFramingWriter(w, cancel)
+		if err := uistream.Pipe(ctx, writer, events, protocol, uistream.Options{MessageID: request.MessageID, Extra: request.Extra, OnWriteError: func(error) { cancel() }}); err != nil {
 			cancel()
 			return
 		}
 	})
 }
 
-func eventChannel(
-	ctx context.Context,
-	events iter.Seq2[aikit.StepEvent, error],
-) <-chan aikit.StepEvent {
+func eventChannel(ctx context.Context, events iter.Seq2[aikit.StepEvent, error]) <-chan aikit.StepEvent {
 	stream := make(chan aikit.StepEvent)
 	go func() {
 		defer close(stream)
@@ -109,11 +149,10 @@ func decodeEnvelope(body io.Reader) (aisdk.ChatRequestEnvelope, error) {
 	}
 	return *envelope, nil
 }
-
 func newMessageID() string {
-	var bytes [8]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
 		return "msg"
 	}
-	return "msg_" + hex.EncodeToString(bytes[:])
+	return "msg_" + hex.EncodeToString(b[:])
 }

@@ -135,6 +135,13 @@ jobs:
             exit 1
           }
 
+      - name: Enforce UI stream protocol boundaries
+        run: |
+          core_forbidden="$(go list -deps ./uistream | grep -E '^github.com/open-ai-sdk/ai-go/' | grep -vE '/(aikit|uistream)$' || true)"
+          test -z "$core_forbidden" || { echo "uistream may import only aikit:"; echo "$core_forbidden"; exit 1; }
+          adapter_forbidden="$(go list -deps ./uistream/ainode ./uistream/agui | grep -E '^github.com/open-ai-sdk/ai-go/' | grep -vE '/(aikit|uistream|uistream/ainode|uistream/agui)$' || true)"
+          test -z "$adapter_forbidden" || { echo "uistream adapters may import only uistream and aikit:"; echo "$adapter_forbidden"; exit 1; }
+
       - name: Enforce provider dependency boundary
         run: |
           forbidden="$(go list -deps ./provider/... \
