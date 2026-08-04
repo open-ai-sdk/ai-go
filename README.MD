@@ -169,6 +169,25 @@ released raw `Invokable.Invoke` API. Tool input, execution, missing-tool, and
 policy-denial failures are typed and support `errors.Is`/`errors.As`; safe
 model feedback never includes arbitrary operator cause text.
 
+### Lifecycle hooks
+
+Hooks are ordered, run-local Agent extensions. Register reusable hooks with
+`Builder.Hook` and request-specific hooks with `Runner.Hook`. Small capability
+interfaces cover completion requests and responses, completed model turns,
+tool calls/results, invalid tool calls, streaming deltas, stream finish, and
+run completion; `agent.HookFuncs` is the function adapter for local policies.
+
+`ModelTurnHook` can reject a tool-free completed response with `Repeat()` or
+`RetryWithFeedback(...)`. Each retry uses the existing `MaxTurns` budget. When
+such a hook is present, the runner buffers one turn's deltas until acceptance,
+so rejected content does not enter `Result`, the public stream, or the frozen
+AI SDK v7 wire stream. `ToolResultHook` exposes immutable raw execution facts
+alongside a separately rewriteable model presentation. A race-safe scratchpad
+on `HookContext` supports per-run counters and policy state.
+
+See [Hooks](docs/core/hooks.md) for the event/action matrix and examples. Hooks
+are not a substitute for authorization inside tool handlers.
+
 ### Reusable Agents
 
 Package `agent` has one canonical lifecycle: a value-style Builder validates long-lived defaults,
@@ -231,7 +250,7 @@ and releases work owned by the run. Use `Runner.Run` for aggregation; there are 
 stream views. See [the Agent guide](docs/core/agents.md) for reusable configuration and
 [Agent Runner](docs/core/agent-runner.md) for ordered messages and complete result
 semantics, then [Hooks](docs/core/hooks.md) and [Tools](docs/core/tools.md) for
-lifecycle steering, rich output, context, and approvals.
+lifecycle steering, retry-safe streaming, rich output, context, and approvals.
 
 ## Chat server quickstart
 

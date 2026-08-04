@@ -4,8 +4,9 @@ This project follows semantic versioning. While the module remains on `v0.x`, mi
 contain documented breaking changes. `v1.0.0` will be considered only after the restructured public
 layout and all release gates are stable.
 
-The next core release is `v0.0.24`. The optional `otelagent` package is part of
-that module and adapts OpenTelemetry to the new `agent.Tracer` contract.
+`v0.0.24` is already tagged. The next core release continues to include the
+optional `otelagent` package, which adapts OpenTelemetry to the
+`agent.Tracer` contract.
 
 ## Unreleased
 
@@ -20,9 +21,23 @@ that module and adapts OpenTelemetry to the new `agent.Tracer` contract.
 - Tool invocation receives isolated request `ToolsContext`, `RuntimeContext`,
   and a tool-call ID. MCP discovery now has context-aware paginated snapshot
   constructors and preserves mixed result content without placeholders.
-- Hooks gain a run-local race-safe scratchpad, request tool-choice patching,
-  and `ToolResultHook`, which separates raw execution facts from the mutable
-  model presentation. Hooks remain a pre-release API following `v0.0.24`.
+- Hooks now cover completion responses, completed model turns, text/tool-call
+  deltas, and stream finish in addition to completion request, tool, invalid
+  call, and run-finished phases. `HookFuncs` exposes matching function fields;
+  direct hook implementations opt into only the capability interfaces they
+  need.
+- `ModelTurnHook` may repeat a tool-free turn with `Repeat()` or append safe
+  corrective feedback with `RetryWithFeedback(...)`. Each retry consumes the
+  existing `MaxTurns` budget; turns containing tool calls are rejected at this
+  lifecycle boundary. Runs with a model-turn hook buffer one turn until it is
+  accepted, so rejected content cannot leak to Results or AI SDK v7 streams.
+- High-frequency delta hooks advertise `HookInterest` through `InterestedHook`.
+  `HookFuncs` derives this automatically from its delta/finish callbacks.
+- Hooks retain a run-local race-safe scratchpad, request tool-choice patching,
+  and `ToolResultHook`, which separates cloned raw execution facts from the
+  mutable model presentation. Existing `BeforeCompletion`, `BeforeTool`,
+  `AfterTool`, `InvalidToolCall`, `OnStreamEvent`, and `OnRunFinished` hook
+  capabilities remain available during this pre-release API period.
 
 This is a clean break in the Go API. The AI SDK v7 UI-message-stream wire contract remains
 compatible with `ai@7.0.35` and is exercised by the conformance and Playwright suites.

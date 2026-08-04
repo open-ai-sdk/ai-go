@@ -163,12 +163,28 @@ turn-budget exhaustion yields the committed step and tool-result events, then
 returns the same `*agent.MaxTurnsError`; it does not emit a successful done
 event.
 
-## Next: Hooks
+## Hooks and accepted turns
 
 Hooks registered with `Builder.Hook` are copied into every Runner. A hook added
-with `Runner.Hook` is appended only for that invocation. Hooks execute
-synchronously in registration order. See [Hooks](/core/hooks) for event,
-patch, scratchpad, and security-boundary details.
+with `Runner.Hook` is appended only for that invocation, after Agent hooks.
+They observe and steer the same driver used by `Run` and `Stream`.
+
+A model call proceeds through request preparation, provider response,
+model-turn acceptance, tool dispatch, tool-result presentation, and either a
+continuation or finalization. The streaming path additionally exposes text and
+tool-call deltas plus the provider stream finish. A model-turn hook may reject
+a tool-free response and repeat it, optionally appending corrective feedback.
+Every repeat is another model call and consumes `MaxTurns`.
+
+When a model-turn hook is present, the runner holds one turn's deltas until
+that turn is accepted. This applies to both `Run`'s result reduction and
+`Stream`'s public iterator, so a rejected turn cannot leak into a Result or an
+AI SDK v7 stream. It is intentional opt-in latency and bounded per-turn
+buffering, not a new UI protocol rollback event. Tool-call turns cannot be
+retried at that boundary; steer those with a tool-call hook.
+
+See [Hooks](/core/hooks) for the complete event/action matrix, patch merge
+rules, scratchpad, raw-versus-presentation results, and security boundary.
 
 See [Streaming](/core/streaming) for the difference between direct model and
 Agent event streams, [Structured output](/core/structured-output) for final

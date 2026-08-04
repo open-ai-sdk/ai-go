@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"github.com/open-ai-sdk/ai-go/transport"
@@ -107,9 +108,10 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error 
 	// StopWhen allows, not an implicit cap.
 	for step := 0; params.MaxSteps <= 0 || step < params.MaxSteps; step++ {
 		r.hookContext.Turn = step + 1
+		r.beginTurnBuffer(r.hasModelTurnHooks())
 		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
 		// cancelled context makes the StepStart send return false and unwinds.
-		if !r.emitObserved(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
+		if !r.emitStreamChunk(StepEvent{Type: StepEventStepStart, StepNumber: step}, params.Callbacks) {
 			return r.stopError()
 		}
 
@@ -206,11 +208,58 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error 
 		}
 		modelSpan.End()
 		if interrupted {
+			r.discardTurnBuffer()
 			stepSpan.End()
 			return r.stopError()
 		}
 		lastSR = sr
 		fullText := sr.text
+		response := CompletionResponseEvent{
+			Text: sr.text, Reasoning: sr.reasoning, MessageID: sr.messageID, FinishReason: sr.finish,
+		}
+		if sr.usage != nil {
+			response.Usage = *sr.usage
+		}
+		if err := r.observeCompletionResponse(response); err != nil {
+			r.discardTurnBuffer()
+			stepSpan.End()
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
+		turnAction, err := r.modelTurn(ModelTurnEvent{
+			CompletionResponseEvent: response,
+			HasToolCalls:            acc.hasToolCalls(),
+		})
+		if err != nil {
+			r.discardTurnBuffer()
+			stepSpan.End()
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
+		switch turnAction.Kind {
+		case ModelTurnRetry:
+			r.discardTurnBuffer()
+			stepSpan.End()
+			if turnAction.Retry.Feedback != "" {
+				rejected := aikit.Message{
+					ID: sr.messageID, Role: aikit.RoleAssistant,
+					Content: []aikit.ContentPart{aikit.TextPart(sr.text)},
+				}
+				history = append(history,
+					rejected,
+					aikit.UserMessage(turnAction.Retry.Feedback),
+				)
+			}
+			continue
+		}
+		if !r.flushTurnBuffer() {
+			stepSpan.End()
+			return r.stopError()
+		}
 
 		if !acc.hasToolCalls() {
 			return finishTextStep(r, params, step, sr, fullText, model, req, history, completedSteps, stepSpan)

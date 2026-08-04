@@ -13,8 +13,10 @@ specific service.
   defaults.
 - [Agent Runner](/core/agent-runner) — add ordered input and request-local
   overrides, then execute or stream one invocation.
-- [Hooks](/core/hooks) — add run-local lifecycle observation and steering.
-- [Tools](/core/tools) — define schema-backed tools and rich execution output.
+- [Hooks](/core/hooks) — add run-local lifecycle observation, policy,
+  model-turn retry, and streaming delta handling.
+- [Tools](/core/tools) — define schema-backed tools with rich output, safe
+  failures, and request context.
 
 ## Understand the architecture
 

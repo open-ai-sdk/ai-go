@@ -65,11 +65,108 @@ type ToolResultEvent struct {
 	Presentation aikit.ToolResult
 }
 
+// CompletionResponseEvent is the canonical response produced by one provider
+// call before tool dispatch or finalization.
+type CompletionResponseEvent struct {
+	Text, Reasoning string
+	MessageID       string
+	Usage           aikit.Usage
+	FinishReason    aikit.FinishReason
+}
+
+// ModelTurnEvent is the completed model turn parked for hook acceptance.
+// Retry is valid only when HasToolCalls is false.
+type ModelTurnEvent struct {
+	CompletionResponseEvent
+	HasToolCalls bool
+}
+
+// TextDeltaEvent provides both the newest fragment and the turn aggregate.
+type TextDeltaEvent struct{ Delta, Text string }
+
+// ToolCallDeltaEvent describes a streamed tool-call argument fragment.
+type ToolCallDeltaEvent struct {
+	ID, Name string
+	Index    int
+	Delta    json.RawMessage
+}
+
+// StreamFinishEvent is emitted after the provider finishes a stream and
+// before model-turn acceptance.
+type StreamFinishEvent struct{ CompletionResponseEvent }
+
+// ObservationAction controls observer-only lifecycle events.
+type ObservationActionKind uint8
+
+const (
+	ObservationContinue ObservationActionKind = iota
+	ObservationStop
+)
+
+type ObservationAction struct {
+	Kind   ObservationActionKind
+	Reason string
+}
+
+// RetryRequest describes how a tool-free rejected model turn should continue.
+type RetryRequest struct{ Feedback string }
+
+func Repeat() RetryRequest                           { return RetryRequest{} }
+func RetryWithFeedback(feedback string) RetryRequest { return RetryRequest{Feedback: feedback} }
+
+type ModelTurnActionKind uint8
+
+const (
+	ModelTurnContinue ModelTurnActionKind = iota
+	ModelTurnRetry
+	ModelTurnStop
+)
+
+// ModelTurnAction accepts, retries, or stops a canonical model turn.
+type ModelTurnAction struct {
+	Kind   ModelTurnActionKind
+	Retry  RetryRequest
+	Reason string
+}
+
+// HookInterest is an optional high-frequency observation hint.
+type HookInterest uint8
+
+const (
+	HookInterestTextDelta HookInterest = 1 << iota
+	HookInterestToolCallDelta
+	HookInterestStreamFinish
+)
+
 // ToolResultHook is the rich post-tool capability. AfterTool remains
 // supported for existing pre-release hooks.
 type ToolResultHook interface {
 	Hook
 	OnToolResult(context.Context, HookContext, ToolResultEvent) (ToolResultAction, error)
+}
+type CompletionResponseHook interface {
+	Hook
+	OnCompletionResponse(context.Context, HookContext, CompletionResponseEvent) (ObservationAction, error)
+}
+type ModelTurnHook interface {
+	Hook
+	OnModelTurn(context.Context, HookContext, ModelTurnEvent) (ModelTurnAction, error)
+}
+type TextDeltaHook interface {
+	Hook
+	OnTextDelta(context.Context, HookContext, TextDeltaEvent) (ObservationAction, error)
+}
+type ToolCallDeltaHook interface {
+	Hook
+	OnToolCallDelta(context.Context, HookContext, ToolCallDeltaEvent) (ObservationAction, error)
+}
+type StreamFinishHook interface {
+	Hook
+	OnStreamFinish(context.Context, HookContext, StreamFinishEvent) (ObservationAction, error)
+}
+type InterestedHook interface {
+	Hook
+	HookInterests() HookInterest
 }
 
 type CompletionActionKind uint8
@@ -165,14 +262,80 @@ type RunFinishedHook interface {
 
 // HookFuncs is a convenience adapter for function-based hooks.
 type HookFuncs struct {
-	Name                 string
-	BeforeCompletionFunc func(context.Context, HookContext, llm.Request) (CompletionAction, error)
-	BeforeToolFunc       func(context.Context, HookContext, aikit.ToolCallInfo) (ToolCallAction, error)
-	AfterToolFunc        func(context.Context, HookContext, aikit.ToolResult) (ToolResultAction, error)
-	ToolResultFunc       func(context.Context, HookContext, ToolResultEvent) (ToolResultAction, error)
-	InvalidToolCallFunc  func(context.Context, HookContext, aikit.RepairToolCallInput) (InvalidToolCallAction, error)
-	StreamEventFunc      func(context.Context, HookContext, aikit.StepEvent) error
-	RunFinishedFunc      func(context.Context, HookContext, *Result, error)
+	Name                   string
+	BeforeCompletionFunc   func(context.Context, HookContext, llm.Request) (CompletionAction, error)
+	BeforeToolFunc         func(context.Context, HookContext, aikit.ToolCallInfo) (ToolCallAction, error)
+	AfterToolFunc          func(context.Context, HookContext, aikit.ToolResult) (ToolResultAction, error)
+	ToolResultFunc         func(context.Context, HookContext, ToolResultEvent) (ToolResultAction, error)
+	CompletionResponseFunc func(context.Context, HookContext, CompletionResponseEvent) (ObservationAction, error)
+	ModelTurnFunc          func(context.Context, HookContext, ModelTurnEvent) (ModelTurnAction, error)
+	TextDeltaFunc          func(context.Context, HookContext, TextDeltaEvent) (ObservationAction, error)
+	ToolCallDeltaFunc      func(context.Context, HookContext, ToolCallDeltaEvent) (ObservationAction, error)
+	StreamFinishFunc       func(context.Context, HookContext, StreamFinishEvent) (ObservationAction, error)
+	InvalidToolCallFunc    func(context.Context, HookContext, aikit.RepairToolCallInput) (InvalidToolCallAction, error)
+	StreamEventFunc        func(context.Context, HookContext, aikit.StepEvent) error
+	RunFinishedFunc        func(context.Context, HookContext, *Result, error)
+}
+
+func (h HookFuncs) HookInterests() HookInterest {
+	var value HookInterest
+	if h.TextDeltaFunc != nil {
+		value |= HookInterestTextDelta
+	}
+	if h.ToolCallDeltaFunc != nil {
+		value |= HookInterestToolCallDelta
+	}
+	if h.StreamFinishFunc != nil {
+		value |= HookInterestStreamFinish
+	}
+	return value
+}
+
+func (h HookFuncs) OnCompletionResponse(
+	ctx context.Context,
+	hc HookContext,
+	event CompletionResponseEvent,
+) (ObservationAction, error) {
+	if h.CompletionResponseFunc == nil {
+		return ObservationAction{Kind: ObservationContinue}, nil
+	}
+	return h.CompletionResponseFunc(ctx, hc, event)
+}
+
+func (h HookFuncs) OnModelTurn(ctx context.Context, hc HookContext, event ModelTurnEvent) (ModelTurnAction, error) {
+	if h.ModelTurnFunc == nil {
+		return ModelTurnAction{Kind: ModelTurnContinue}, nil
+	}
+	return h.ModelTurnFunc(ctx, hc, event)
+}
+
+func (h HookFuncs) OnTextDelta(ctx context.Context, hc HookContext, event TextDeltaEvent) (ObservationAction, error) {
+	if h.TextDeltaFunc == nil {
+		return ObservationAction{Kind: ObservationContinue}, nil
+	}
+	return h.TextDeltaFunc(ctx, hc, event)
+}
+
+func (h HookFuncs) OnToolCallDelta(
+	ctx context.Context,
+	hc HookContext,
+	event ToolCallDeltaEvent,
+) (ObservationAction, error) {
+	if h.ToolCallDeltaFunc == nil {
+		return ObservationAction{Kind: ObservationContinue}, nil
+	}
+	return h.ToolCallDeltaFunc(ctx, hc, event)
+}
+
+func (h HookFuncs) OnStreamFinish(
+	ctx context.Context,
+	hc HookContext,
+	event StreamFinishEvent,
+) (ObservationAction, error) {
+	if h.StreamFinishFunc == nil {
+		return ObservationAction{Kind: ObservationContinue}, nil
+	}
+	return h.StreamFinishFunc(ctx, hc, event)
 }
 
 func (h HookFuncs) OnToolResult(ctx context.Context, hc HookContext, event ToolResultEvent) (ToolResultAction, error) {
@@ -312,6 +475,24 @@ func callInvalidTool(
 	return hook.InvalidToolCall(ctx, hc, input)
 }
 
+func callObservation(fn func() (ObservationAction, error)) (action ObservationAction, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = panicError(value)
+		}
+	}()
+	return fn()
+}
+
+func callModelTurn(fn func() (ModelTurnAction, error)) (action ModelTurnAction, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = panicError(value)
+		}
+	}()
+	return fn()
+}
+
 func completionActionError(hook Hook, kind CompletionActionKind) error {
 	return hookFailure(hook, "before_completion", fmt.Errorf("invalid action %d", kind))
 }
@@ -369,6 +550,137 @@ func (r *run) beforeCompletion(request llm.Request) (llm.Request, error) {
 		}
 	}
 	return request, nil
+}
+
+func (r *run) observeCompletionResponse(event CompletionResponseEvent) error {
+	r.hookMu.Lock()
+	defer r.hookMu.Unlock()
+	for _, hook := range r.hooks {
+		capability, ok := hook.(CompletionResponseHook)
+		if !ok {
+			continue
+		}
+		action, err := callObservation(func() (ObservationAction, error) {
+			return capability.OnCompletionResponse(r.ctx, r.hookContext, event)
+		})
+		if err != nil {
+			return hookFailure(hook, "completion_response", err)
+		}
+		if action.Kind == ObservationStop {
+			return hookStopped(hook, "completion_response", action.Reason)
+		}
+		if action.Kind != ObservationContinue {
+			return hookFailure(hook, "completion_response", fmt.Errorf("invalid observation action %d", action.Kind))
+		}
+	}
+	return nil
+}
+
+func (r *run) modelTurn(event ModelTurnEvent) (ModelTurnAction, error) {
+	for _, hook := range r.hooks {
+		capability, ok := hook.(ModelTurnHook)
+		if !ok {
+			continue
+		}
+		action, err := callModelTurn(func() (ModelTurnAction, error) {
+			return capability.OnModelTurn(r.ctx, r.hookContext, event)
+		})
+		if err != nil {
+			return ModelTurnAction{}, hookFailure(hook, "model_turn", err)
+		}
+		switch action.Kind {
+		case ModelTurnContinue:
+		case ModelTurnRetry:
+			if event.HasToolCalls {
+				err := errors.New("retry is invalid for a turn containing tool calls")
+				return ModelTurnAction{}, hookFailure(hook, "model_turn", err)
+			}
+			return action, nil
+		case ModelTurnStop:
+			return ModelTurnAction{}, hookStopped(hook, "model_turn", action.Reason)
+		default:
+			err := fmt.Errorf("invalid model turn action %d", action.Kind)
+			return ModelTurnAction{}, hookFailure(hook, "model_turn", err)
+		}
+	}
+	return ModelTurnAction{Kind: ModelTurnContinue}, nil
+}
+
+func (r *run) observeTextDelta(event TextDeltaEvent) error {
+	return r.observeDelta(HookInterestTextDelta, "text_delta", func(h Hook) (ObservationAction, error) {
+		capability, ok := h.(TextDeltaHook)
+		if !ok {
+			return ObservationAction{Kind: ObservationContinue}, nil
+		}
+		return callObservation(func() (ObservationAction, error) {
+			return capability.OnTextDelta(r.ctx, r.hookContext, event)
+		})
+	})
+}
+
+func (r *run) observeToolCallDelta(event ToolCallDeltaEvent) error {
+	return r.observeDelta(HookInterestToolCallDelta, "tool_call_delta", func(h Hook) (ObservationAction, error) {
+		capability, ok := h.(ToolCallDeltaHook)
+		if !ok {
+			return ObservationAction{Kind: ObservationContinue}, nil
+		}
+		return callObservation(func() (ObservationAction, error) {
+			return capability.OnToolCallDelta(r.ctx, r.hookContext, event)
+		})
+	})
+}
+
+func (r *run) observeStreamFinish(event StreamFinishEvent) error {
+	return r.observeDelta(HookInterestStreamFinish, "stream_finish", func(h Hook) (ObservationAction, error) {
+		capability, ok := h.(StreamFinishHook)
+		if !ok {
+			return ObservationAction{Kind: ObservationContinue}, nil
+		}
+		return callObservation(func() (ObservationAction, error) {
+			return capability.OnStreamFinish(r.ctx, r.hookContext, event)
+		})
+	})
+}
+
+func (r *run) observeDelta(interest HookInterest, phase string, invoke func(Hook) (ObservationAction, error)) error {
+	r.hookMu.Lock()
+	defer r.hookMu.Unlock()
+	for _, hook := range r.hooks {
+		if interested, ok := hook.(InterestedHook); ok && interested.HookInterests()&interest == 0 {
+			continue
+		}
+		action, err := invoke(hook)
+		if err != nil {
+			return hookFailure(hook, phase, err)
+		}
+		if action.Kind == ObservationStop {
+			return hookStopped(hook, phase, action.Reason)
+		}
+		if action.Kind != ObservationContinue {
+			return hookFailure(hook, phase, fmt.Errorf("invalid observation action %d", action.Kind))
+		}
+	}
+	return nil
+}
+
+func (r *run) hasModelTurnHooks() bool {
+	for _, hook := range r.hooks {
+		switch value := hook.(type) {
+		case HookFuncs:
+			if value.ModelTurnFunc != nil {
+				return true
+			}
+		case *HookFuncs:
+			if value != nil && value.ModelTurnFunc != nil {
+				return true
+			}
+		default:
+			if _, ok := hook.(ModelTurnHook); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *run) beforeTool(tc toolCallState) (toolCallState, bool, string, error) {

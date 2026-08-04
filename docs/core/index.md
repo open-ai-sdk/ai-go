@@ -11,8 +11,10 @@ individual helper function.
 - [Agents](/core/agents) — reusable immutable model, tool, and policy defaults.
 - [Agent Runner](/core/agent-runner) — ordered input, per-run overrides,
   multi-turn execution and results.
-- [Hooks](/core/hooks) — run-local lifecycle steering and observation.
-- [Tools](/core/tools) — typed tools, rich execution results, and approvals.
+- [Hooks](/core/hooks) — run-local lifecycle policy, model-turn retries,
+  streaming observations, and result presentation.
+- [Tools](/core/tools) — typed tools, ordered rich results, safe errors,
+  invocation context, and approvals.
 - [Streaming](/core/streaming) — normalized model and Agent Runner events.
 - [Structured output](/core/structured-output) — schema-backed Go values.
 - [Embeddings](/core/embeddings) — single and batched vector generation.

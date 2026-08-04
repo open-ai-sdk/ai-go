@@ -45,8 +45,41 @@ type run struct {
 	hookErr      error
 	// These are the prepared request values for the current model turn. They
 	// are snapshotted into every invocation context before a tool starts.
-	toolsContext   aikit.ToolsContext
-	runtimeContext aikit.RuntimeContext
+	toolsContext         aikit.ToolsContext
+	runtimeContext       aikit.RuntimeContext
+	bufferingTurn        bool
+	bufferedStreamEvents []StepEvent
+}
+
+func (r *run) beginTurnBuffer(enabled bool) { r.bufferingTurn = enabled; r.bufferedStreamEvents = nil }
+
+func (r *run) discardTurnBuffer() { r.bufferedStreamEvents = nil; r.bufferingTurn = false }
+
+func (r *run) flushTurnBuffer() bool {
+	buffered := r.bufferedStreamEvents
+	r.bufferedStreamEvents = nil
+	r.bufferingTurn = false
+	for _, event := range buffered {
+		if !r.emitObserved(event) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *run) emitStreamChunk(event StepEvent, callbacks *lifecycleCallbacks) bool {
+	if r.bufferingTurn {
+		r.bufferedStreamEvents = append(r.bufferedStreamEvents, snapshotStepEvent(event))
+		return true
+	}
+	if !r.emit(event) {
+		return false
+	}
+	if callbacks != nil && callbacks.OnChunk != nil {
+		value := snapshotStepEvent(event)
+		r.safeObserver(func() { callbacks.OnChunk(value) })
+	}
+	return true
 }
 
 func (r *run) reserveModelCall() error {

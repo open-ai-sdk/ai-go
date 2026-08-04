@@ -6,7 +6,11 @@
 // The package owns no conversation store. Requests, tool results, and approval
 // decisions are carried by values supplied to a Runner, so a caller can
 // suspend a request and resume later from message history without retaining
-// server-side agent state. Hooks are ordered, run-local lifecycle extensions;
-// their HookContext scratchpad is safe for parallel tool callbacks but is not
-// a substitute for tool authorization.
+// server-side agent state. Hooks are ordered, run-local lifecycle extensions:
+// small capability interfaces cover request/response, model-turn, tool,
+// invalid-call, streaming, and finish events. A model-turn hook may retry a
+// tool-free response; each retry consumes the normal Runner turn budget and
+// buffers that turn until acceptance. HookContext has a scratchpad safe for
+// parallel tool callbacks, but neither hooks nor scratchpad replace tool
+// authorization.
 package agent
