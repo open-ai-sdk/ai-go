@@ -39,6 +39,7 @@ func main() {
 }
 ```
 
-Continue with [agents](/core/agents), learn the
-[provider/client model](/core/providers-and-clients), or select another
-[provider integration](/providers/).
+Next, learn the [provider/client model](/core/providers-and-clients) and
+[direct completions](/core/completions). Then build a reusable
+[Agent](/core/agents) and execute through an [Agent Runner](/core/agent-runner), or select
+another [provider integration](/providers/).

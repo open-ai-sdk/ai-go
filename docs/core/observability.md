@@ -42,3 +42,5 @@ OpenTelemetry support is opt-in through the `otelagent` package, keeping its
 dependencies outside the core runtime and provider packages. Pass the adapter
 to `Builder.Tracer` or `Runner.Tracer`; package `ai` has no Agent tracing
 options or forwarding API.
+
+See [Agent Runner](/core/agent-runner) for the Runner lifecycle and hook ordering.

@@ -23,7 +23,7 @@ fmt.Println(result.Object.Summary)
 The direct result includes the typed Object and normalized completion response,
 including usage, finish reason, warnings, and provider metadata.
 
-For structured output as part of a multi-turn Agent run, attach an explicit
+For structured output during multi-turn Agent Runner execution, attach an explicit
 `llm.OutputSchema` to the Agent Builder or one Runner:
 
 ```go
@@ -43,8 +43,11 @@ if err := json.Unmarshal(result.StructuredOutput, &answer); err != nil {
 }
 ```
 
-Structured-output generation and retries consume the same positive
-`MaxTurns` budget as every other model call. If an additional structured turn
-is required after the budget is spent, `*agent.MaxTurnsError` carries the
-partial Result and full Transcript. Decode, empty-output, and schema validation
-failures are classifiable as `*agent.StructuredOutputError`.
+The final structured-output model call consumes the same positive `MaxTurns`
+budget as every other model call. If that call is required after the budget is
+spent, `*agent.MaxTurnsError` carries the partial Result and full Transcript.
+The runtime does not retry decode or schema failures; decode, empty-output, and
+schema validation errors are classifiable as `*agent.StructuredOutputError`.
+
+See [Agent Runner](/core/agent-runner) for how this final model call participates
+in the run's shared turn budget and Result.

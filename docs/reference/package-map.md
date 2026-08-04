@@ -19,17 +19,24 @@ providers.
 
 Agent code follows one ownership path:
 
-```text
-agent.Builder -> immutable *agent.Agent -> per-run agent.Runner
-                                         -> aikit.StepEvent iterator
-                                         -> agent.Result
+```mermaid
+flowchart LR
+    Builder["agent.Builder"] -->|"Build()"| Agent["immutable *agent.Agent"]
+    Agent -->|"Runner()"| Runner["per-invocation agent.Runner"]
+    Runner -->|"Run(ctx)"| Result["*agent.Result"]
+    Runner -->|"Stream(ctx)"| Events["iter.Seq2[aikit.StepEvent, error]"]
 ```
 
 Package `ai` does not alias or forward Agent symbols. The removed legacy Agent
-package has no compatibility replacement: use `agent.Runner` for multi-turn
-execution and `llm.NewCompletion` for one direct model call.
+package has no compatibility replacement: build an `agent.Agent`, call
+`Agent.Runner()` for multi-turn execution, and use `llm.NewCompletion` for one
+direct model call.
 Applications that need to mock an Agent should define the narrow local
 interface their code consumes.
+
+The conceptual documentation follows the same dependency order: direct
+[Completions](/core/completions) and [Tools](/core/tools), reusable
+[Agents](/core/agents), then per-invocation [Agent Runner](/core/agent-runner).
 
 The [README](https://github.com/open-ai-sdk/ai-go#readme) and Go package
 documentation remain the canonical API references. This site focuses on the

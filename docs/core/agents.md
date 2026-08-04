@@ -1,21 +1,27 @@
 # Agents
 
-Package `agent` owns the reusable multi-step API. Its lifecycle has three
-parts:
+An Agent is a reusable, immutable configuration built on top of an
+[`llm.Model`](/core/completions). It combines the model with system
+instructions, tools, model settings, hooks, approval policies, and other
+long-lived defaults.
 
-```text
-agent.Builder -> immutable *agent.Agent -> per-run agent.Runner
+The lifecycle is intentionally split in two:
+
+```mermaid
+flowchart LR
+    Model["llm.Model"] -->|"agent.New(model)"| Builder["agent.Builder"]
+    Builder -->|"Build()"| Agent["*agent.Agent"]
+    Agent -->|"Runner()"| Runner["agent.Runner"]
 ```
 
-The builder holds long-lived defaults, `Build` validates and snapshots them,
-and each Runner owns one invocation's input and overrides. There is no Agent
-API in package `ai` and no compatibility layer for the previous functional
-options or Agent implementation.
+This follows Rig's distinction between a configured Agent and the per-prompt
+runner that executes it. In ai-go, `Agent.Runner()` is the public run builder;
+the provider/tool state machine remains an implementation detail.
 
 ## Build an Agent
 
-Create tools first, place them in an ordered immutable registry, then build the
-Agent:
+Create tools first, place them in an immutable registry, and attach that
+registry to the Agent Builder:
 
 ```go
 weather, err := tool.New(
@@ -44,152 +50,68 @@ assistant, err := agent.New(model).
 	ID("travel-assistant").
 	Instructions("Answer carefully and state uncertainty.").
 	Tools(tools).
-	MaxTurns(4).
+	Temperature(0.2).
 	Build()
 if err != nil {
 	return err
 }
 ```
 
-Builder methods use value semantics. A fluent call returns a new builder, and
-`Build` defensively copies mutable configuration. The resulting Agent has no
-mutable exported state and can create concurrent Runners; registered tool
-implementations must still be safe for however the application invokes them.
+Builder methods use value semantics: every fluent call returns a new Builder.
+`Build` validates the complete configuration and defensively copies mutable
+values. The resulting `*agent.Agent` has no exported mutable state and may be
+used to create concurrent runs.
 
-`Build` rejects invalid static configuration before provider I/O, including a
-nil model, duplicate tools, invalid turn or concurrency limits, impossible
-active-tool/tool-choice combinations, and incomplete approval configuration.
-`MaxTurns` defaults to `1` and must be positive.
+Registered tool implementations still need to be concurrency-safe when an
+application executes runs concurrently or enables parallel tools within one
+run.
 
-## Run with overrides
+## Agent defaults
 
-`Agent.Runner()` snapshots the Agent defaults. Runner methods use the same
-value-builder style and never mutate the Agent:
+Keep stable behavior on the Agent:
+
+- model and Agent identifier;
+- system instructions;
+- immutable tool registry and default active-tool policy;
+- model settings and provider-specific options;
+- structured-output schema;
+- approval policies, hooks, logging, and tracing;
+- default turn and tool-concurrency limits.
+
+Put request-specific input and overrides on the Runner instead. For example,
+user messages, a tighter turn limit for one request, or a request-local
+temperature belong to that Runner invocation.
+
+`Build` rejects invalid defaults before provider I/O, including a nil model,
+invalid limits, impossible tool choices, unknown active or approval-gated
+tools, invalid output schemas, nil hooks, and incomplete approval
+configuration.
+
+## Agent accessors
+
+An Agent exposes only stable metadata:
+
+```go
+fmt.Println(assistant.ID())
+fmt.Println(assistant.Instructions())
+fmt.Println(assistant.MaxTurns())
+```
+
+The tool registry and other mutable-looking values are deliberately not
+exposed through the Agent. Configure them with the Builder or override them on
+a fresh Runner.
+
+## Next: run the Agent
+
+After building the Agent, create a new Runner for every invocation:
 
 ```go
 result, err := assistant.Runner().
 	Prompt("Find the weather in Hanoi").
-	Temperature(0.2).
-	ActiveTools("weather").
-	ToolConcurrency(2).
-	Run(ctx)
-if err != nil {
-	return err
-}
-
-fmt.Println(result.Text)
-fmt.Println(result.Steps)
-```
-
-`ToolConcurrency(1)` is serial. Higher values allow tool bodies to finish in
-parallel, while results and transcript messages are committed in model-call
-order.
-
-`Result` is the single aggregate for a run. It includes the full independently
-owned `Transcript`, individual `Steps`, final text and reasoning, usage, tool
-results, pending approvals, warnings, sources, generated files, finish reason,
-provider metadata, and structured output. `GeneratedMessages()` derives the
-continuation produced by the run without storing a second message history.
-
-## Ordered messages and multimodal input
-
-Every Runner starts with no input. Supply at least one valid message:
-
-- `Messages(messages...)` replaces the complete ordered input sequence.
-- `Message(message)` appends one full message.
-- `Prompt(text)` appends one text user message.
-
-Use `Messages` for full chat history, multimodal content, prior tool calls and
-results, or approval-response history:
-
-```go
-result, err := assistant.Runner().
-	Messages(
-		aikit.SystemMessage("Use the supplied trip context."),
-		aikit.Message{
-			Role: aikit.RoleUser,
-			Content: []aikit.ContentPart{
-				aikit.TextPart("Describe this destination"),
-				aikit.ImageURLPart("https://example.com/destination.jpg"),
-			},
-		},
-	).
-	Message(aikit.UserMessage("Then suggest what to pack.")).
+	MaxTurns(4).
 	Run(ctx)
 ```
 
-Messages and nested mutable values are cloned before execution. Invalid roles,
-empty input, an empty `Prompt`, a tool result without its preceding tool call,
-or an approval response without its preceding request fail synchronously with
-`*agent.RunError`.
-
-## Turn budget and early stopping
-
-`MaxTurns` is one hard total budget for model calls. The initial request,
-tool-result continuation, invalid-call retry, and structured-output retry all
-consume it. `StopWhen` may end a run earlier, but cannot expand that budget.
-There is no zero or negative sentinel for an unbounded run.
-
-If another model call is required after the budget is spent, `Run` returns a
-typed error and the partial result:
-
-```go
-result, err := assistant.Runner().
-	Prompt("Research this and use tools when needed.").
-	MaxTurns(2).
-	Run(ctx)
-
-var exhausted *agent.MaxTurnsError
-if errors.As(err, &exhausted) {
-	partial := result
-	if exhausted.Result != nil {
-		partial = exhausted.Result
-	}
-	// The last committed step keeps its real finish reason.
-	return savePartial(partial)
-}
-if err != nil {
-	return err
-}
-```
-
-In streaming mode, committed events are yielded before the iterator returns
-the same `*agent.MaxTurnsError`. A budget failure does not produce a successful
-done event.
-
-## Streaming
-
-`Runner.Stream` returns a single-use, single-owner
-`iter.Seq2[aikit.StepEvent, error]`:
-
-```go
-events, err := assistant.Runner().
-	Prompt("Explain Go channels").
-	Stream(ctx)
-if err != nil {
-	return err // validation failed before streaming began
-}
-
-for event, err := range events {
-	if err != nil {
-		return err
-	}
-	if event.Type == aikit.StepEventTextDelta {
-		fmt.Print(event.TextDelta)
-	}
-}
-```
-
-Range the sequence exactly once. A second range returns
-`agent.ErrStreamUsed`. Breaking the loop cancels the child context and releases
-the provider and tool work owned by that run. Use `Run` when an aggregate is
-needed; do not attempt to create multiple views over the event sequence.
-
-Hooks registered with `Builder.Hook` or `Runner.Hook` execute synchronously in
-registration order. A Runner hook is appended only for that invocation. Hook
-actions can patch or stop a lifecycle stage; they do not create a second
-execution or aggregation path.
-
-See [Streaming](/core/streaming) for the difference between a direct model
-stream and an Agent event stream, and [Tools](/core/tools) for tool construction
-and approval behavior.
+See [Agent Runner](/core/agent-runner) for ordered input, per-run overrides,
+multi-turn budgets, results, hooks, and streaming. See [Tools](/core/tools) for
+tool construction and approval behavior.

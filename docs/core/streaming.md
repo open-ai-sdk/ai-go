@@ -39,7 +39,6 @@ Build a reusable Agent and stream one invocation from its Runner:
 assistant, err := agent.New(model).
 	Instructions("Answer concisely.").
 	Tools(tools).
-	MaxTurns(4).
 	Build()
 if err != nil {
 	return err
@@ -47,6 +46,7 @@ if err != nil {
 
 events, err := assistant.Runner().
 	Prompt("Explain Go channels").
+	MaxTurns(4).
 	Stream(ctx)
 if err != nil {
 	return err // synchronous Runner validation
@@ -84,3 +84,5 @@ exhausted; that terminal path does not yield `aikit.StepEventDone`.
 `Run` and `Stream` use the same driver and state reducer. For the same model
 events they agree on transcript order, usage, tool results, finish reason,
 warnings, sources, files, provider metadata, and terminal errors.
+
+See [Agent Runner](/core/agent-runner) for the complete per-invocation lifecycle.

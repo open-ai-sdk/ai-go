@@ -177,7 +177,6 @@ assistant, err := agent.New(model).
 	ID("travel-assistant").
 	Instructions("Answer carefully and state uncertainty.").
 	Tools(tools).
-	MaxTurns(4).
 	Build()
 if err != nil {
 	return err
@@ -187,6 +186,7 @@ result, err := assistant.Runner().
 	Prompt("Find the weather in Hanoi").
 	Temperature(0.2).
 	ActiveTools("get_weather").
+	MaxTurns(4).
 	Run(ctx)
 if err != nil {
 	var exhausted *agent.MaxTurnsError
@@ -225,8 +225,9 @@ for event, err := range events {
 
 The `iter.Seq2[aikit.StepEvent, error]` is single-use and single-owner. Breaking iteration cancels
 and releases work owned by the run. Use `Runner.Run` for aggregation; there are no fan-out or late
-stream views. See [the Agent guide](docs/core/agents.md) for ordered message validation, hooks,
-approvals, and complete result semantics.
+stream views. See [the Agent guide](docs/core/agents.md) for reusable configuration and
+[Agent Runner](docs/core/agent-runner.md) for ordered messages, hooks, approvals, and complete result
+semantics.
 
 ## Chat server quickstart
 

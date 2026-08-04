@@ -42,3 +42,6 @@ The included `examples/chat-server` is the runnable reference implementation
 with `/chat` and `/healthz`, and is exercised by the browser conformance suite.
 Gin users can use the separately versioned `aisdkgin` module, which wraps the
 same HTTP handler without adding Gin to the core dependency graph.
+
+See [Agent Runner](/core/agent-runner) for Runner ownership and validation before
+connecting the iterator to an HTTP adapter.

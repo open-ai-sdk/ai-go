@@ -28,7 +28,7 @@ if err != nil {
 Cancellation, invalid requests, and malformed responses are not retryable.
 Provider HTTP retryability remains available through the wrapped API error.
 
-## Agent runs
+## Agent Runner
 
 Agent construction and invocation validation fail synchronously. `Build`
 returns `*agent.BuildError`; `Runner.Run` and `Runner.Stream` return
@@ -38,13 +38,15 @@ retain their underlying causes through `Unwrap`.
 ```go
 assistant, err := agent.New(model).
   Tools(tools).
-  MaxTurns(4).
   Build()
 if err != nil {
   return err
 }
 
-result, err := assistant.Runner().Prompt(prompt).Run(ctx)
+result, err := assistant.Runner().
+  Prompt(prompt).
+  MaxTurns(4).
+  Run(ctx)
 if err == nil {
   return use(result)
 }
@@ -70,3 +72,6 @@ output, and schema validation. Typed-output helpers may additionally report a
 deserialization failure after a valid model response. Keep the normalized
 response or partial Agent Result for diagnostics, and never log raw provider
 payloads without applying the application's data-handling policy.
+
+See [Agent Runner](/core/agent-runner) for the full Result, transcript, and
+streaming terminal-error contract.

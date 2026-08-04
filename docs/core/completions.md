@@ -373,7 +373,7 @@ for _, part := range response.Message.Content {
 | `Raw` | Provider-native usage metadata |
 
 Providers do not always report every counter, so absent values remain zero.
-One direct completion reports one model call's usage. Agent runs aggregate usage
+One direct completion reports one model call's usage. Agent Runner executions aggregate usage
 across turns; lower-level orchestration can use `Usage.Add` or
 `Usage.Accumulate` to do the same.
 

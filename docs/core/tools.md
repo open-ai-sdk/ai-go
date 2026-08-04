@@ -20,20 +20,20 @@ tools, err := tool.NewSet(weather)
 if err != nil { return err }
 ```
 
-Attach the immutable registry to an Agent Builder. `MaxTurns` is the positive
-total model-call budget and must allow any follow-up model call after a tool
+Attach the immutable registry to the reusable Agent, then set the turn budget
+for the invocation. `MaxTurns` must allow any follow-up model call after a tool
 result:
 
 ```go
 assistant, err := agent.New(model).
   Tools(tools).
-  MaxTurns(4).
   Build()
 if err != nil { return err }
 
 result, err := assistant.Runner().
   Prompt("What is the weather in Hanoi?").
   ActiveTools("get_weather").
+  MaxTurns(4).
   Run(ctx)
 ```
 
@@ -60,3 +60,6 @@ JSON-looking strings remain text. Use `aikit.JSONToolResultContent` or
 `aikit.ParseToolResultJSON` when JSON semantics are intended. Rich content is cloned
 when messages and result snapshots are built, so caller mutation cannot alter
 stored history.
+
+See [Agents](/core/agents) for reusable configuration and
+[Agent Runner](/core/agent-runner) for execution order and turn-budget semantics.

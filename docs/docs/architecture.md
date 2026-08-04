@@ -43,6 +43,10 @@ one public multi-turn lifecycle: a value Builder creates an immutable Agent,
 and each value Runner owns one invocation's ordered messages and overrides.
 `Run` and `Stream` share one driver and Result reducer.
 
+This ordering is reflected in the concept guides: first configure an
+[Agent](/core/agents), then create a Runner and execute through the
+[Agent Runner](/core/agent-runner) lifecycle.
+
 ### Shared vocabulary
 
 `aikit` contains dependency-light messages, content parts, stream events,
