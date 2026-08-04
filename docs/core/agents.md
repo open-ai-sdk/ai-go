@@ -14,9 +14,9 @@ flowchart LR
     Agent -->|"Runner()"| Runner["agent.Runner"]
 ```
 
-This follows Rig's distinction between a configured Agent and the per-prompt
-runner that executes it. In ai-go, `Agent.Runner()` is the public run builder;
-the provider/tool state machine remains an implementation detail.
+A configured Agent is reusable, while a per-prompt Runner owns one execution.
+In ai-go, `Agent.Runner()` is the public run builder; the provider/tool state
+machine remains an implementation detail.
 
 ## Build an Agent
 

@@ -29,10 +29,9 @@ integration supplies a runtime schema instead.
 ## Implement a tool as a type
 
 For a stateful tool or a hand-authored schema, implement `tool.Typed` and pass
-the value to `tool.Adapt`. It is the Go equivalent of implementing Rig's
-`Tool` trait: `Describe` provides the provider definition and `Call` receives
-decoded arguments. `context.Context` carries cancellation, deadlines, and
-request-scoped values.
+the value to `tool.Adapt`. `Describe` provides the provider definition and
+`Call` receives decoded arguments. `context.Context` carries cancellation,
+deadlines, and request-scoped values.
 
 ```go
 type OperationArgs struct {
