@@ -91,6 +91,12 @@ func NewModel(cfg Config) *Model {
 // ModelID returns the configured model identifier.
 func (m *Model) ModelID() string { return m.cfg.ModelID }
 
+// NativeSchemaSupport reports the configured backend's native structured-output
+// capability without exposing the backend implementation.
+func (m *Model) NativeSchemaSupport() llm.NativeSchemaSupport {
+	return providerCapabilities(m.cfg.Provider).NativeSchema
+}
+
 // Stream sends a streaming request and returns normalized events.
 func (m *Model) Stream(
 	ctx context.Context,

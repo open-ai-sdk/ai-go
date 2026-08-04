@@ -321,7 +321,7 @@ func finishTextStep(
 		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
 		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	})
-	if !emitStructuredOutput(r, params, model, req, history, completedSteps) {
+	if !emitStructuredOutputValue(r, fullText, req.Output) {
 		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })

@@ -10,6 +10,14 @@ optional `otelagent` package, which adapts OpenTelemetry to the
 
 ## Unreleased
 
+### Structured output
+
+| Changed behavior | Replacement |
+| --- | --- |
+| A normal agent structured-output run made a second finishing request and could replace `Result.Text` with JSON. | The final constrained turn is parsed directly; consume `Result.StructuredOutput`, `RunObject[T]`, or `Extractor[T]`. |
+| `CompleteObject[T]` decoded raw text without fence handling or schema validation. | It now uses the shared parse → validate → decode pipeline and strict output schema. |
+| Structured JSON could leak as UI text deltas. | Structured output is server-side only through `StepEventStructuredOutput` until a later AI SDK data-chunk mapping. |
+
 ### Hooks and rich tools
 
 - Tools now support additive `ResultInvokable`/`ExecutionResult` rich results.

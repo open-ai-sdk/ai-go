@@ -48,14 +48,10 @@ type textConfig struct {
 }
 
 type textFormat struct {
-	Type       string         `json:"type"` // "text" or "json_schema"
-	JSONSchema *jsonSchemaRef `json:"json_schema,omitempty"`
-}
-
-type jsonSchemaRef struct {
-	Name   string         `json:"name"`
-	Schema map[string]any `json:"schema"`
-	Strict bool           `json:"strict"`
+	Type   string         `json:"type"` // "text", "json_object", or "json_schema"
+	Name   string         `json:"name,omitempty"`
+	Schema map[string]any `json:"schema,omitempty"`
+	Strict bool           `json:"strict,omitempty"`
 }
 
 // inputItem is a union type for all Responses API input items.
@@ -579,6 +575,9 @@ func encodeTools(defs []aikit.ToolDefinition, opts ProviderOptions) ([]responses
 }
 
 func encodeOutputSchema(o *llm.OutputSchema) *textConfig {
+	if o.Type == "json" || o.Type == "json_object" {
+		return &textConfig{Format: &textFormat{Type: "json_object"}}
+	}
 	schema := o.Schema
 	if o.Type == "object" && schema != nil {
 		if _, ok := schema["type"]; !ok {
@@ -592,12 +591,7 @@ func encodeOutputSchema(o *llm.OutputSchema) *textConfig {
 	}
 	return &textConfig{
 		Format: &textFormat{
-			Type: "json_schema",
-			JSONSchema: &jsonSchemaRef{
-				Name:   "structured_output",
-				Schema: schema,
-				Strict: true,
-			},
+			Type: "json_schema", Name: "structured_output", Schema: schema, Strict: true,
 		},
 	}
 }

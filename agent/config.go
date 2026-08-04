@@ -32,6 +32,7 @@ type config struct {
 	maxTurns    int
 	stopWhen    aikit.StopCondition
 	output      *llm.OutputSchema
+	outputMode  OutputMode
 
 	settings        llm.CallSettings
 	providerOptions map[string]any

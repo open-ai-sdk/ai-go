@@ -35,6 +35,7 @@ func (compatBackend) ProviderName() string { return "gemini" }
 func (compatBackend) Capabilities() openaicompat.CapabilityFlags {
 	return openaicompat.CapabilityFlags{
 		SupportsStructuredOutput: true,
+		NativeSchema:             llm.NativeSchemaFull,
 		SupportsStreamUsage:      true,
 	}
 }
@@ -59,16 +60,31 @@ func (compatBackend) RewriteRequest(
 		)
 	}
 	if options.ThinkingConfig == nil {
-		return body, nil
+		return sanitizeCompatOutputSchema(body), nil
 	}
 	thinking := buildCompatThinkingConfig(options.ThinkingConfig)
 	if len(thinking) == 0 {
-		return body, nil
+		return sanitizeCompatOutputSchema(body), nil
 	}
 	body["extra_body"] = map[string]any{
 		"google": map[string]any{"thinking_config": thinking},
 	}
-	return body, nil
+	return sanitizeCompatOutputSchema(body), nil
+}
+
+func sanitizeCompatOutputSchema(body map[string]any) map[string]any {
+	format, ok := body["response_format"].(map[string]any)
+	if !ok {
+		return body
+	}
+	jsonSchema, ok := format["json_schema"].(map[string]any)
+	if !ok {
+		return body
+	}
+	if schema, ok := jsonSchema["schema"].(map[string]any); ok {
+		jsonSchema["schema"] = sanitizeMap(schema)
+	}
+	return body
 }
 
 func buildCompatThinkingConfig(config *ThinkingConfig) map[string]any {

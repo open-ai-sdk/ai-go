@@ -118,6 +118,12 @@ func (r Runner) Output(value llm.OutputSchema) Runner {
 	return r
 }
 
+// OutputMode overrides the agent's structured-output mode for this run.
+func (r Runner) OutputMode(value OutputMode) Runner {
+	r.config.outputMode = value
+	return r
+}
+
 func (r Runner) Settings(value llm.CallSettings) Runner {
 	r.config.settings = cloneCallSettings(value)
 	return r
@@ -456,9 +462,24 @@ func (r Runner) runParams(ctx context.Context, runID string, streaming bool) (ru
 		ProviderOptions: jsonclone.Map(r.config.providerOptions),
 		ToolsContext:    cloneMap(r.config.toolsContext), RuntimeContext: cloneMap(r.config.runtimeContext),
 	}
+	// Existing custom models predate capability reporting and historically
+	// received the native schema, so retain that behavior until they opt in.
+	native := llm.NativeSchemaFull
+	if capable, ok := r.config.model.(llm.NativeSchemaCapable); ok {
+		native = capable.NativeSchemaSupport()
+	}
+	mode, err := resolveOutputMode(r.config.outputMode, r.config.output != nil && r.config.output.Type != "text", len(definitions) > 0, outputToolCallable(r.config.toolChoice, "structured_output"), native)
+	if err != nil {
+		return runConfig{}, &RunError{Field: "OutputMode", Err: err}
+	}
+	// Gemini native cannot carry responseSchema beside function declarations.
+	if mode == OutputModeNative && native == llm.NativeSchemaSuppressesTools && len(definitions) > 0 {
+		request.Output = nil
+	}
 	return runConfig{
 		Model: r.config.model, Request: request, Tools: r.config.tools,
-		StopWhen: stopWhen, MaxSteps: r.config.maxTurns,
+		OutputMode: mode,
+		StopWhen:   stopWhen, MaxSteps: r.config.maxTurns,
 		ErrorOnMaxTurns: true,
 		PrepareStep:     r.config.prepareStep, RepairToolCall: r.config.repairToolCall,
 		ToolApproval: approval, ApprovalKey: append([]byte(nil), r.config.approvalKey...),

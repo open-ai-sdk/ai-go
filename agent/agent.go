@@ -125,11 +125,12 @@ type endEvent struct {
 
 // runConfig is the private driver snapshot produced by Runner.
 type runConfig struct {
-	Model    Model
-	Request  Request
-	Tools    *ToolSet
-	StopWhen StopCondition
-	MaxSteps int
+	Model      Model
+	Request    Request
+	Tools      *ToolSet
+	StopWhen   StopCondition
+	MaxSteps   int
+	OutputMode OutputMode
 	// ErrorOnMaxTurns makes exhaustion a typed terminal error instead of a
 	// successful Done with pending tool calls. It is the canonical Runner
 	// behavior; the field exists only while legacy callers are cut over.

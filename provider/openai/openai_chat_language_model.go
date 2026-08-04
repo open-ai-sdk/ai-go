@@ -20,6 +20,7 @@ func (chatBackend) ProviderName() string { return chatProviderName }
 func (chatBackend) Capabilities() openaicompat.CapabilityFlags {
 	return openaicompat.CapabilityFlags{
 		SupportsStructuredOutput: true,
+		NativeSchema:             llm.NativeSchemaFull,
 		SupportsStreamUsage:      true,
 	}
 }

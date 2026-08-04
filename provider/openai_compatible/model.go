@@ -13,6 +13,7 @@ type Config struct {
 	Timeout, ChunkTimeout         time.Duration
 	Headers                       map[string]string
 	SupportsStructuredOutput      bool
+	NativeSchemaSupport           llm.NativeSchemaSupport
 	SupportsStreamUsage           bool
 	TransformRequest              func(map[string]any) map[string]any
 	HTTPClient                    transport.Doer
@@ -35,8 +36,13 @@ func (b backend) ProviderName() string {
 }
 
 func (b backend) Capabilities() openaicompat.CapabilityFlags {
+	native := b.config.NativeSchemaSupport
+	if native == llm.NativeSchemaNone && b.config.SupportsStructuredOutput {
+		native = llm.NativeSchemaFull
+	}
 	return openaicompat.CapabilityFlags{
 		SupportsStructuredOutput: b.config.SupportsStructuredOutput,
+		NativeSchema:             native,
 		SupportsStreamUsage:      b.config.SupportsStreamUsage,
 	}
 }
