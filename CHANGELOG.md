@@ -10,6 +10,27 @@ optional `otelagent` package, which adapts OpenTelemetry to the
 
 ## Unreleased
 
+### Streaming
+
+| Changed behavior | Replacement |
+| --- | --- |
+| `CompletionRequestBuilder.Stream` returned a bare `<-chan aikit.StreamEvent`, so the aggregated `*CompletionResponse` was unreachable. **Removed.** | `StreamSend(ctx)` returns a `*llm.StreamingResponse`: the same events as `iter.Seq2`, plus `Response()` after drain. `llm.Model.Stream` still returns a channel and is unchanged — it is the provider contract. |
+| A direct streaming completion could not report usage, sources, files, or finish metadata without a second aggregating pass. | `StreamingResponse.Response()` returns everything `Send` returns, with no extra model call. |
+| A streamed agent run could not surface its `*agent.Result`. | `Runner.StreamRun(ctx)` returns an `*agent.StepStream` carrying both. `Runner.Stream` is unchanged and now forwards to it. |
+| Breaking a streamed run on `StepEventDone` recorded `context.Canceled` internally and passed it to `RunFinishedHook`. | Stopping on the terminal event is a normal exit: nil error, `StreamCompleted`. Stopping before it still reports cancellation with the partial aggregate. |
+| Direct completions appended tool-call arguments unconditionally, so a provider that re-sent complete arguments produced invalid JSON. | Argument folding is shared with the agent in `aikit.ToolCallFold` and stops once the arguments parse. |
+| The agent discarded a tool ID or name that arrived after the first delta, which loses the name on OpenAI-compatible providers that send it late. | The same shared fold adopts a non-empty ID or name from any delta. |
+
+- New: `llm.StreamPrompt`, `llm.StreamChat`, `llm.Streaming`, and the
+  `ai` forwarders; `Agent.StreamPrompt`, `Agent.StreamChat`,
+  `Agent.StreamCompletion`.
+- New: `aikit.Stream`, `aikit.StreamingPrompt`, `aikit.StreamingChat`, and
+  `aikit.StreamingCompletion` — implemented at both the model and agent layers,
+  so a helper can accept either.
+- `StreamCompleted` reports that nothing failed, not that every event was seen.
+  Several providers report usage *after* the finish event, so breaking there
+  drops those counts; range to the end when the aggregate matters.
+
 ### Structured output
 
 | Changed behavior | Replacement |

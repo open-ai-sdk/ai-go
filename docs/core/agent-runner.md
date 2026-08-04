@@ -158,7 +158,47 @@ for event, err := range events {
 
 Range the sequence once. A second range returns `agent.ErrStreamUsed`.
 Breaking the loop cancels the child context and releases provider and tool work
-owned by this run. Use `Run` when an aggregate is needed.
+owned by this run.
+
+### Stream and aggregate together
+
+`Runner.StreamRun` returns an `*agent.StepStream`: the same event sequence, plus
+the `*agent.Result` it aggregates. It costs no extra model call — the same
+reducer already ran behind `Stream`.
+
+```go
+stream, err := assistant.Runner().
+	Prompt("Explain Go channels").
+	StreamRun(ctx)
+if err != nil {
+	return err
+}
+
+for event, err := range stream.Events() {
+	if err != nil {
+		return err
+	}
+	if event.Type == aikit.StepEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
+}
+
+result, err := stream.Result()
+if err != nil {
+	return err
+}
+fmt.Println(len(result.Steps), "steps")
+```
+
+`Result()` reports `agent.ErrStreamNotDrained` until the sequence ends, and
+returns the partial result alongside the terminal error when a run fails or the
+consumer stops early. Breaking on `aikit.StepEventDone` is a normal early exit —
+the aggregate is whole and the error is nil.
+
+`Agent.StreamPrompt` and `Agent.StreamChat` are shorthand for the common shapes,
+and `Agent.StreamCompletion` returns a `Runner` you can shape first.
+
+Use `Run` when you want only the aggregate.
 
 Committed events are yielded before a terminal runtime error. In particular,
 turn-budget exhaustion yields the committed step and tool-result events, then

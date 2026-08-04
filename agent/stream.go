@@ -171,7 +171,9 @@ func handleToolCallDelta(
 }
 
 // mergeUsage combines partial usage reports from the same step without
-// discarding fields populated by an earlier provider event.
+// discarding fields populated by an earlier provider event. The merge strategy
+// lives in aikit.Usage.Merge; this wrapper owns only the agent's nil policy,
+// where an absent report leaves the prior snapshot untouched.
 func mergeUsage(prior, incoming *Usage) *Usage {
 	if incoming == nil {
 		return snapshotUsage(prior)
@@ -179,42 +181,7 @@ func mergeUsage(prior, incoming *Usage) *Usage {
 	if prior == nil {
 		return snapshotUsage(incoming)
 	}
-	takeInt := func(current, next int) int {
-		if next != 0 {
-			return next
-		}
-		return current
-	}
-	merged := *prior
-	merged.InputTokens = takeInt(prior.InputTokens, incoming.InputTokens)
-	merged.OutputTokens = takeInt(prior.OutputTokens, incoming.OutputTokens)
-	merged.TotalTokens = takeInt(prior.TotalTokens, incoming.TotalTokens)
-	merged.ToolUsePromptTokens = takeInt(prior.ToolUsePromptTokens, incoming.ToolUsePromptTokens)
-	merged.InputTokenDetails.NoCacheTokens = takeInt(
-		prior.InputTokenDetails.NoCacheTokens,
-		incoming.InputTokenDetails.NoCacheTokens,
-	)
-	merged.InputTokenDetails.CacheReadTokens = takeInt(
-		prior.InputTokenDetails.CacheReadTokens,
-		incoming.InputTokenDetails.CacheReadTokens,
-	)
-	merged.InputTokenDetails.CacheWriteTokens = takeInt(
-		prior.InputTokenDetails.CacheWriteTokens,
-		incoming.InputTokenDetails.CacheWriteTokens,
-	)
-	merged.OutputTokenDetails.TextTokens = takeInt(
-		prior.OutputTokenDetails.TextTokens,
-		incoming.OutputTokenDetails.TextTokens,
-	)
-	merged.OutputTokenDetails.ReasoningTokens = takeInt(
-		prior.OutputTokenDetails.ReasoningTokens,
-		incoming.OutputTokenDetails.ReasoningTokens,
-	)
-	if incoming.Raw != nil {
-		merged.Raw = snapshotJSONMap(incoming.Raw)
-	} else {
-		merged.Raw = snapshotJSONMap(prior.Raw)
-	}
+	merged := prior.Merge(*incoming)
 	return &merged
 }
 

@@ -161,7 +161,7 @@ func (r *resultReducer) consumeText(event aikit.StepEvent) {
 		return
 	}
 	r.current.Text += event.TextDelta
-	appendText(&r.current.Content, event.TextDelta, event.ThoughtSignature)
+	r.current.Content = aikit.AppendText(r.current.Content, event.TextDelta, event.ThoughtSignature)
 }
 
 func (r *resultReducer) consumeReasoning(event aikit.StepEvent) {
@@ -169,35 +169,7 @@ func (r *resultReducer) consumeReasoning(event aikit.StepEvent) {
 		return
 	}
 	r.current.Reasoning += event.ReasoningDelta
-	appendReasoning(&r.current.Content, event.ReasoningDelta, event.ThoughtSignature)
-}
-
-func appendText(parts *[]aikit.ContentPart, text, signature string) {
-	if text == "" {
-		return
-	}
-	if n := len(*parts); n > 0 && (*parts)[n-1].Type == aikit.ContentPartTypeText &&
-		(*parts)[n-1].ThoughtSignature == signature {
-		(*parts)[n-1].Text += text
-		return
-	}
-	*parts = append(*parts, aikit.ContentPart{
-		Type: aikit.ContentPartTypeText, Text: text, ThoughtSignature: signature,
-	})
-}
-
-func appendReasoning(parts *[]aikit.ContentPart, text, signature string) {
-	if text == "" {
-		return
-	}
-	if n := len(*parts); n > 0 && (*parts)[n-1].Type == aikit.ContentPartTypeReasoning &&
-		(*parts)[n-1].ThoughtSignature == signature {
-		(*parts)[n-1].ReasoningText += text
-		return
-	}
-	*parts = append(*parts, aikit.ContentPart{
-		Type: aikit.ContentPartTypeReasoning, ReasoningText: text, ThoughtSignature: signature,
-	})
+	r.current.Content = aikit.AppendReasoning(r.current.Content, event.ReasoningDelta, event.ThoughtSignature)
 }
 
 func (r *resultReducer) startToolCall(event aikit.StepEvent) {

@@ -37,3 +37,26 @@ func Prompt(ctx context.Context, model LanguageModel, prompt string) (string, er
 func Chat(ctx context.Context, model LanguageModel, prompt string, history ...Message) (string, error) {
 	return llm.Chat(ctx, model, prompt, history...)
 }
+
+// Streaming adapts a model to the streaming entrypoints, for code that must
+// accept anything streamable rather than make one call.
+func Streaming(model LanguageModel) ModelStream {
+	return llm.Streaming(model)
+}
+
+// StreamPrompt streams one direct user prompt and carries the aggregate it
+// produced. It is the streaming twin of Prompt.
+func StreamPrompt(ctx context.Context, model LanguageModel, prompt string) (*StreamingResponse, error) {
+	return llm.StreamPrompt(ctx, model, prompt)
+}
+
+// StreamChat streams one direct user prompt after history. It is the streaming
+// twin of Chat.
+func StreamChat(
+	ctx context.Context,
+	model LanguageModel,
+	prompt string,
+	history ...Message,
+) (*StreamingResponse, error) {
+	return llm.StreamChat(ctx, model, prompt, history...)
+}
