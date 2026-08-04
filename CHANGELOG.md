@@ -4,13 +4,81 @@ This project follows semantic versioning. While the module remains on `v0.x`, mi
 contain documented breaking changes. `v1.0.0` will be considered only after the restructured public
 layout and all release gates are stable.
 
-The next core release is `v0.0.24`. The optional `otelagent` package is part of
-that module and adapts OpenTelemetry to the new `agent.Tracer` contract.
+`v0.0.24` is already tagged. The next core release continues to include the
+optional `otelagent` package, which adapts OpenTelemetry to the
+`agent.Tracer` contract.
 
 ## Unreleased
 
+### Hooks and rich tools
+
+- Tools now support additive `ResultInvokable`/`ExecutionResult` rich results.
+  `Invokable.Invoke` remains source-compatible. Text, explicit JSON, and image
+  content retain their type and order; metadata is host-only.
+- Tool failures now use safe model-facing `tool.Details` output. Error causes
+  remain available to operators through `errors.Is`/`errors.As` and are no
+  longer copied into provider history by default.
+- Tool invocation receives isolated request `ToolsContext`, `RuntimeContext`,
+  and a tool-call ID. MCP discovery now has context-aware paginated snapshot
+  constructors and preserves mixed result content without placeholders.
+- `tool.Typed[Args, Output]` and `tool.Adapt` support struct-based typed tools
+  with state and hand-authored provider definitions, while `tool.New` remains
+  the concise function-based constructor.
+- Hooks now cover completion responses, completed model turns, text/tool-call
+  deltas, and stream finish in addition to completion request, tool, invalid
+  call, and run-finished phases. `HookFuncs` exposes matching function fields;
+  direct hook implementations opt into only the capability interfaces they
+  need.
+- `ModelTurnHook` may repeat a tool-free turn with `Repeat()` or append safe
+  corrective feedback with `RetryWithFeedback(...)`. Each retry consumes the
+  existing `MaxTurns` budget; turns containing tool calls are rejected at this
+  lifecycle boundary. Runs with a model-turn hook buffer one turn until it is
+  accepted, so rejected content cannot leak to Results or AI SDK v7 streams.
+- High-frequency delta hooks advertise `HookInterest` through `InterestedHook`.
+  `HookFuncs` derives this automatically from its delta/finish callbacks.
+- Hooks retain a run-local race-safe scratchpad, request tool-choice patching,
+  and `ToolResultHook`, which separates cloned raw execution facts from the
+  mutable model presentation. Existing `BeforeCompletion`, `BeforeTool`,
+  `AfterTool`, `InvalidToolCall`, `OnStreamEvent`, and `OnRunFinished` hook
+  capabilities remain available during this pre-release API period.
+
 This is a clean break in the Go API. The AI SDK v7 UI-message-stream wire contract remains
 compatible with `ai@7.0.35` and is exercised by the conformance and Playwright suites.
+
+### Agent and Runner rewrite
+
+The Agent API now has one canonical owner and lifecycle:
+
+```text
+agent.New(model) Builder -> immutable *agent.Agent -> per-run agent.Runner
+```
+
+This is a source-breaking replacement, not a deprecation cycle. No aliases,
+adapters, or compatibility shims are provided for the removed Agent APIs.
+
+| Removed API or behavior | Replacement |
+|---|---|
+| `ai.NewToolLoopAgent`, `agent/generate.ToolLoopAgent`, and the broad Agent interface | Build a concrete reusable Agent with `agent.New(model).Build()`. Define a narrow application-local interface when substitution is needed. |
+| `AgentOption`, `Option`, `WithAgent*`, and Agent request `With*` functions | Configure long-lived defaults with `agent.Builder` methods and invocation-specific overrides with `agent.Runner` methods. |
+| `GenerateText`, `StreamText`, `GenerateTextRequest`, and duplicate request builders/results | Use `Runner.Run` for an aggregated `*agent.Result` or `Runner.Stream` for `iter.Seq2[aikit.StepEvent,error]`. Use `llm.NewCompletion` for one direct model call. |
+| Public `agent.RunParams`, `agent.Run`, and `agent.Stream` | Build an Agent, then call `Agent.Runner().Messages(...).Run/Stream`. |
+| `MaxSteps`, `IsStepCount` as a budget, zero/unbounded sentinels, and differing one/20-step defaults | `MaxTurns` is the single positive total model-call budget, defaults to `1`, and counts initial calls, continuations, and retries. `StopWhen` can only stop earlier. |
+| Successful termination with pending continuation after a budget limit | `*agent.MaxTurnsError` returns the partial Result and full Transcript. Streaming yields committed events followed by that terminal error and no successful done event. |
+| Fan-out `StreamResult`, `TextStream`, `Events`, `Consume`, and `DrainUnused` | Range the Runner's single-use, single-owner iterator once. Breaking iteration cancels and releases its provider/tool work. |
+| `Result.Response.Messages` plus a separately stored Transcript | `agent.Result.Transcript` is the one independently owned full history; `GeneratedMessages()` derives the continuation view. |
+| Mutable `tool.Set` fields and raw executor seams | Construct a validated immutable ordered registry with `tool.NewSet`; definitions and invokers are snapshotted together. |
+
+`Runner.Messages` replaces the complete ordered input sequence;
+`Runner.Message` and `Runner.Prompt` append. Full message history supports
+multimodal content, preceding tool calls/results, and approval responses, and
+is validated before provider I/O. `Build` and Runner preflight also reject nil
+models, invalid budgets, duplicate or impossible tool configuration, and
+invalid approval settings synchronously.
+
+`aisdkhttp.RunFunc` now consumes the Runner's
+`iter.Seq2[aikit.StepEvent,error]` directly. The AI SDK v7 chunk union, SSE
+framing, headers, approval signatures, finish-reason mappings, and `[DONE]`
+termination are unchanged; `aisdk` remains independent of `agent`.
 
 ### Package migration
 
@@ -25,15 +93,14 @@ compatible with `ai@7.0.35` and is exercised by the conformance and Playwright s
 | `ai.DefineTool[T]` | `tool.New[In, Out]` | Return typed Go values from the handler; `tool.New` derives input schema and marshals output. Construction now returns an error. |
 | `ai.ToolSet` and tool lookup helpers | `tool.Set` | Build a duplicate-safe set with `tool.NewSet`; duplicate names return an error instead of silently winning. |
 | `ai` tool context helpers and tool errors | `tool` | Use `tool.ToolContextFrom`, `tool.RuntimeContextFrom`, and errors classifiable with `errors.Is`/`errors.As`. |
-| `internal/engine` | `agent` | Use the public `agent.Run`/`agent.Stream` runtime for direct multi-step execution. The package speaks `llm.Request` and emits `aikit.StepEvent`. |
-| high-level generation internals formerly in `ai` | `agent/generate` | The thin `ai` facade delegates generation, aggregation, options, and stream-result behavior to this lower package and re-exports aliases for the common surface. |
+| `internal/engine`, `agent/generate`, and high-level Agent internals formerly in `ai` | `agent` | Build an immutable Agent and use a per-run Runner. Package `ai` no longer aliases Agent contracts, and `agent/generate` was removed. |
 | `uistream` | `aisdk` | Import AI SDK v7 chunks, inbound UI-message conversion, approval signatures, invariants, and SSE framing from `aisdk`. |
 | HTTP/UI helpers formerly mixed into `uistream` or `httputil` | `aisdkhttp` | Serve AI SDK v7 POST/SSE endpoints through the `net/http` handler. |
 | client-side HTTP, retry, SSE reader, and provider error helpers from `httputil` | `transport` | Providers share the lower transport package; it has no UI protocol dependency. |
 | `provider/internal/openaichat` | `provider/openaicompat` | Implement an OpenAI-compatible provider with the public `openaicompat.Compat` hooks. |
 | `provider/openai_compatible` | `provider/openaicompat` for new integrations | The underscore package remains a legacy convenience constructor; new compatibility providers should use the shared public implementation. |
 | core Gin helper/dependency | separate `aisdkgin` module | Compose `aisdkgin.Handler(aisdkhttp.Handler(run))`; Gin is absent from the core module graph. |
-| core OpenTelemetry integration | optional `otelagent` package | Pass an `agent.Tracer` (or `ai.WithTracer`) and import `otelagent` only when the application chooses OpenTelemetry. |
+| core OpenTelemetry integration | optional `otelagent` package | Pass an `agent.Tracer` through `Builder.Tracer` or `Runner.Tracer`, and import `otelagent` only when the application chooses OpenTelemetry. |
 | orphaned `schema` package | `tool.New` schema derivation | The unused package was removed; tool input schemas are owned and validated by `tool`. |
 
 All hand-written Go filenames now use `snake_case`. Files that stayed in the same package were
@@ -43,13 +110,13 @@ The package table above records the earlier cross-package moves.
 
 ### Facade and package boundaries
 
-- `ai` is a thin top-level facade for `GenerateText`, `StreamText`, `GenerateObject`, and `Embed`.
-  It reuses lower-package contracts rather than declaring a second model/message vocabulary.
+- `ai` contains only non-Agent convenience operations. `agent` is the sole
+  owner of multi-turn Agent configuration and execution.
 - `aikit` has a standard-library-only dependency closure.
 - `aisdk` is independent of agents, providers, and transport.
 - providers depend downward on `llm`, `aikit`, and transport, never on `aisdk` or `ai`.
 - OpenTelemetry was removed from the runtime and provider package dependency closures. The core
-  exposes the optional `agent.Tracer`/`ai.WithTracer` seam with a no-op default; the regular
+  exposes the optional `agent.Tracer` seam through Agent Builder/Runner methods with a no-op default; the regular
   `otelagent` package supplies the OpenTelemetry adapter.
 
 ### Behavioral changes
@@ -61,8 +128,8 @@ The package table above records the earlier cross-package moves.
 - Messages now carry provider assistant IDs and explicit image, audio,
   document, and video content kinds. Role-aware validation and deep clone
   helpers are public; legacy generic file parts remain supported.
-- Agent results expose `Transcript` as the full independently owned
-  conversation while retaining continuation-only `Response.Messages`.
+- Agent results expose `Transcript` as the one full independently owned
+  conversation. `GeneratedMessages()` derives its continuation-only view.
 - Usage aggregation now retains cache, reasoning, and tool-use prompt counters
   and exposes `HasValues`, `Add`, and `Accumulate`.
 - Completion, prompt, and structured-output failures have stable typed
@@ -71,10 +138,6 @@ The package table above records the earlier cross-package moves.
 - Tool results can contain explicit ordered text, JSON, and image parts.
   JSON-looking text is never reinterpreted implicitly.
 
-- `agent/generate.Agent` now includes the `Completion` capability:
-  custom Agent implementations must add `Prompt(context.Context, string)` and
-  `Chat(context.Context, string, ...Message)`. `ToolLoopAgent` supplies both
-  methods plus `Completion(prompt)` for an agent-bound request builder.
 - Removed `Writer.WriteSource` and `Writer.WriteSources`. Their `source` and `sources` chunk types
   are not members of the AI SDK v7 union. Emit `source-url` with `WriteSourceURL`, emit
   `source-document` with `WriteSourceDocument`, or let `ChunkProducer` convert `aikit.Source`

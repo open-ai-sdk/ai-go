@@ -6,15 +6,15 @@ kind matching; avoid parsing error strings.
 
 ## Direct completions
 
-`*ai.CompletionError` classifies failures as transport, JSON decode, invalid
+`*llm.CompletionError` classifies failures as transport, JSON decode, invalid
 request, invalid response, or provider error. Its `Unwrap` method retains the
 original cause, including `context.Canceled`, transport errors, and
-`*ai.APIError`:
+provider API errors:
 
 ```go
-response, err := ai.NewCompletion(model, prompt).Send(ctx)
+response, err := llm.NewCompletion(model, prompt).Send(ctx)
 if err != nil {
-  var completionErr *ai.CompletionError
+  var completionErr *llm.CompletionError
   if errors.As(err, &completionErr) && completionErr.Retryable() {
     // Retry according to the application's backoff and idempotency policy.
   }
@@ -28,31 +28,50 @@ if err != nil {
 Cancellation, invalid requests, and malformed responses are not retryable.
 Provider HTTP retryability remains available through the wrapped API error.
 
-## Agent prompts
+## Agent Runner
 
-`ai.GenerateText` wraps failed runs in `*ai.PromptError`. Its kind separates
-completion, cancellation, unknown/disallowed tool, tool execution, maximum
-turns, and memory/history failures. `Partial` and `History` are deep snapshots,
-so they remain safe to inspect or persist after the request returns.
+Agent construction and invocation validation fail synchronously. `Build`
+returns `*agent.BuildError`; `Runner.Run` and `Runner.Stream` return
+`*agent.RunError` before provider I/O when invocation input is invalid. Both
+retain their underlying causes through `Unwrap`.
 
 ```go
-result, err := ai.GenerateText(ctx, request)
+assistant, err := agent.New(model).
+  Tools(tools).
+  Build()
 if err != nil {
-  var promptErr *ai.PromptError
-  if errors.As(err, &promptErr) && promptErr.Partial != nil {
-    saveDraft(promptErr.Partial.Text, promptErr.History)
-  }
   return err
 }
+
+result, err := assistant.Runner().
+  Prompt(prompt).
+  MaxTurns(4).
+  Run(ctx)
+if err == nil {
+  return use(result)
+}
+
+var exhausted *agent.MaxTurnsError
+if errors.As(err, &exhausted) {
+  // The partial Result and full Transcript are independently owned.
+  return savePartial(exhausted.Result)
+}
+return err
 ```
 
-Tool and completion causes remain discoverable through the prompt wrapper's
-unwrap chain.
+Runtime errors preserve partial committed state where meaningful. In
+particular, `*agent.MaxTurnsError` means another model call was required after
+the positive total-turn budget was exhausted. Tool causes remain classifiable
+as `*tool.InputError`, `*tool.ExecutionError`, `*tool.DeniedError`, or
+`*tool.NoSuchToolError` through `errors.As`.
 
 ## Structured output
 
-`*ai.StructuredOutputError` distinguishes prompt failure, JSON decoding, empty
+`*agent.StructuredOutputError` distinguishes prompt failure, JSON decoding, empty
 output, and schema validation. Typed-output helpers may additionally report a
 deserialization failure after a valid model response. Keep the normalized
-response or partial agent result for diagnostics, and never log raw provider
+response or partial Agent Result for diagnostics, and never log raw provider
 payloads without applying the application's data-handling policy.
+
+See [Agent Runner](/core/agent-runner) for the full Result, transcript, and
+streaming terminal-error contract.

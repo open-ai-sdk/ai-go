@@ -6,12 +6,17 @@ individual helper function.
 
 - [Providers and clients](/core/providers-and-clients) — provider-wide state,
   model handles, capabilities, and mixed-modality output.
-- [Agents](/core/agents) — reusable defaults and multi-step tool orchestration.
 - [Completions](/core/completions) — provider-neutral language-model requests
   and responses.
-- [Streaming](/core/streaming) — normalized model and step events.
+- [Agents](/core/agents) — reusable immutable model, tool, and policy defaults.
+- [Agent Runner](/core/agent-runner) — ordered input, per-run overrides,
+  multi-turn execution and results.
+- [Hooks](/core/hooks) — run-local lifecycle policy, model-turn retries,
+  streaming observations, and result presentation.
+- [Tools](/core/tools) — typed tools, ordered rich results, safe errors,
+  invocation context, and approvals.
+- [Streaming](/core/streaming) — normalized model and Agent Runner events.
 - [Structured output](/core/structured-output) — schema-backed Go values.
-- [Tools](/core/tools) — typed tools, execution, and approvals.
 - [Embeddings](/core/embeddings) — single and batched vector generation.
 - [Media generation](/core/media-generation) — image models, inputs, and
   generated media.

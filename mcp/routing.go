@@ -96,7 +96,7 @@ func FilterToolSet(ts *tool.Set, routing *Routing) *tool.Set {
 	})
 
 	// Fallback: if no preferred tools found and fallback is allowed, keep all unblocked.
-	if len(result.Definitions) == 0 {
+	if result.Len() == 0 {
 		if routing.FallbackAllowed == nil || *routing.FallbackAllowed {
 			return unblocked
 		}

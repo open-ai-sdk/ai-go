@@ -23,7 +23,7 @@ func cumulativeUsageEvents() []aikit.StepEvent {
 }
 
 func TestToUIMessageStream_CumulativeUsageUsesLatestStepSnapshot(t *testing.T) {
-	stream := newMockStreamEventer(cumulativeUsageEvents()...)
+	stream := newEventStream(cumulativeUsageEvents()...)
 	var captured MessageMetadataInfo
 	chunks := drainChunks(ToUIMessageStream(stream, "message-1", ToUIStreamOptions{
 		MessageMetadata: func(info MessageMetadataInfo) map[string]any {
@@ -50,14 +50,8 @@ func TestToUIMessageStream_CumulativeUsageUsesLatestStepSnapshot(t *testing.T) {
 }
 
 func TestAdapter_CumulativeUsageUsesLatestStepSnapshot(t *testing.T) {
-	channel := make(chan aikit.StepEvent, 8)
-	for _, event := range cumulativeUsageEvents() {
-		channel <- event
-	}
-	close(channel)
-
 	var output bytes.Buffer
-	NewAdapter("message-1").Stream(channel, &output)
+	NewAdapter("message-1").Stream(newEventStream(cumulativeUsageEvents()...), &output)
 	body := output.String()
 
 	if !strings.Contains(body, `"inputTokens":10`) {

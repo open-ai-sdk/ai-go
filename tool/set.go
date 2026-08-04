@@ -6,100 +6,157 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// Set is a collection of tool definitions and invokers.
-//
-// Construct sets with NewSet or NewSetFromExecutor. The exported legacy fields
-// remain available while the ai facade is being restructured; constructor-made
-// sets eagerly build a duplicate-safe O(1) registry.
+// Set is an immutable ordered registry of tool definitions and their exact
+// invokers. Construct sets with NewSet.
 type Set struct {
-	Definitions []aikit.ToolDefinition
-	Executor    Executor
-
-	indexOnce sync.Once
-	index     map[string]int
-	invokers  map[string]Invokable
-	indexErr  error
+	definitions []aikit.ToolDefinition
+	index       map[string]int
+	invokers    map[string]Invokable
 }
 
-// NewSet registers invokable tools and rejects duplicate names.
+// Snapshot is an immutable, run-scoped view of a Set. It keeps definitions in
+// registration order and binds them to the exact invokers captured at snapshot
+// time.
+type Snapshot struct {
+	definitions []aikit.ToolDefinition
+	index       map[string]int
+	invokers    map[string]Invokable
+}
+
+// NewSet registers invokable tools in argument order.
 func NewSet(tools ...Invokable) (*Set, error) {
-	set := &Set{
-		Definitions: make([]aikit.ToolDefinition, 0, len(tools)),
-		index:       make(map[string]int, len(tools)),
-		invokers:    make(map[string]Invokable, len(tools)),
-	}
+	definitions := make([]aikit.ToolDefinition, 0, len(tools))
+	invokers := make(map[string]Invokable, len(tools))
 	for _, candidate := range tools {
 		if candidate == nil || isNilInvokable(candidate) {
 			return nil, errors.New("tool: cannot register a nil tool")
 		}
 		definition := candidate.Describe()
-		if _, exists := set.index[definition.Name]; exists {
+		if definition.Name == "" {
+			return nil, errors.New("tool: cannot register a tool with an empty name")
+		}
+		if _, exists := invokers[definition.Name]; exists {
 			return nil, fmt.Errorf("tool: duplicate registration %q", definition.Name)
 		}
-		set.index[definition.Name] = len(set.Definitions)
-		set.invokers[definition.Name] = candidate
-		set.Definitions = append(set.Definitions, cloneDefinition(definition))
+		definitions = append(definitions, definition)
+		invokers[definition.Name] = candidate
 	}
-	set.indexOnce.Do(func() {})
-	return set, nil
+	return newImmutableSet(definitions, invokers)
 }
 
-// NewSetFromExecutor adapts a named string executor into a duplicate-safe Set.
-func NewSetFromExecutor(
+func newImmutableSet(
 	definitions []aikit.ToolDefinition,
-	executor Executor,
+	invokers map[string]Invokable,
 ) (*Set, error) {
-	set := &Set{
-		Definitions: make([]aikit.ToolDefinition, len(definitions)),
-		Executor:    executor,
-		index:       make(map[string]int, len(definitions)),
+	cloned := cloneDefinitions(definitions)
+	index, err := indexDefinitions(cloned)
+	if err != nil {
+		return nil, err
 	}
-	for i, definition := range definitions {
-		if _, exists := set.index[definition.Name]; exists {
-			return nil, fmt.Errorf("tool: duplicate registration %q", definition.Name)
-		}
-		set.index[definition.Name] = i
-		set.Definitions[i] = cloneDefinition(definition)
+	boundInvokers := make(map[string]Invokable, len(invokers))
+	for name, invoker := range invokers {
+		boundInvokers[name] = invoker
 	}
-	set.indexOnce.Do(func() {})
-	return set, nil
+	return &Set{
+		definitions: cloned,
+		index:       index,
+		invokers:    boundInvokers,
+	}, nil
 }
 
-// Validate reports duplicate names in sets created through legacy struct
-// literals.
+// Validate reports whether the registry is valid. Constructor-made sets are
+// validated eagerly, so an existing Set is always valid.
 func (s *Set) Validate() error {
+	return nil
+}
+
+// Snapshot captures definitions and their exact execution paths together.
+// Mutating the source definitions or the returned definition copies cannot
+// change the snapshot.
+func (s *Set) Snapshot() (Snapshot, error) {
+	if s == nil {
+		return Snapshot{}, nil
+	}
+	definitions := s.activeDefinitions()
+	index, err := indexDefinitions(definitions)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	invokers := make(map[string]Invokable, len(s.invokers))
+	for name, invoker := range s.invokers {
+		invokers[name] = invoker
+	}
+	return Snapshot{
+		definitions: definitions,
+		index:       index,
+		invokers:    invokers,
+	}, nil
+}
+
+// Clone returns an independently owned immutable Set preserving registration
+// order and the exact captured execution paths. It returns nil for a nil or
+// invalid legacy Set; constructor-made sets are always valid.
+func (s *Set) Clone() *Set {
 	if s == nil {
 		return nil
 	}
-	s.indexOnce.Do(s.buildIndex)
-	return s.indexErr
+	snapshot, err := s.Snapshot()
+	if err != nil {
+		return nil
+	}
+	cloned, err := newImmutableSet(
+		snapshot.definitions,
+		snapshot.invokers,
+	)
+	if err != nil {
+		return nil
+	}
+	return cloned
 }
 
-// Lookup returns the definition named name in O(1) after construction.
+// DefinitionsSnapshot returns an independently owned definition slice in
+// deterministic registration order.
+func (s *Set) DefinitionsSnapshot() []aikit.ToolDefinition {
+	if s == nil {
+		return nil
+	}
+	return s.activeDefinitions()
+}
+
+// Len returns the number of registered definitions.
+func (s *Set) Len() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.definitions)
+}
+
+// Lookup returns an independently owned copy of the named definition.
 func (s *Set) Lookup(name string) (aikit.ToolDefinition, bool) {
 	if s == nil {
 		return aikit.ToolDefinition{}, false
-	}
-	s.indexOnce.Do(s.buildIndex)
-	if s.indexErr != nil {
-		return aikit.ToolDefinition{}, false
-	}
-	if len(s.index) != len(s.Definitions) {
-		return s.scanForName(name)
 	}
 	i, ok := s.index[name]
 	if !ok {
 		return aikit.ToolDefinition{}, false
 	}
-	return cloneDefinition(s.Definitions[i]), true
+	return cloneDefinition(s.definitions[i]), true
 }
 
-// Invoke dispatches name through the typed registry or adapted Executor.
+// Invoker returns the exact typed invoker registered for name.
+func (s *Set) Invoker(name string) (Invokable, bool) {
+	if s == nil {
+		return nil, false
+	}
+	invoker, ok := s.invokers[name]
+	return invoker, ok
+}
+
+// Invoke dispatches name through the registry's captured execution path.
 func (s *Set) Invoke(
 	ctx context.Context,
 	name string,
@@ -108,40 +165,55 @@ func (s *Set) Invoke(
 	if s == nil {
 		return nil, &ExecutionError{
 			ToolName: name,
-			Cause:    errors.New("no executor"),
+			Cause:    errors.New("nil tool set"),
 		}
-	}
-	if err := s.Validate(); err != nil {
-		return nil, &ExecutionError{ToolName: name, Cause: err}
 	}
 	if invoker, ok := s.invokers[name]; ok {
 		return invoker.Invoke(ctx, input)
 	}
-	registered := false
-	if len(s.Definitions) > 0 {
-		if _, ok := s.Lookup(name); !ok {
-			return nil, &NoSuchToolError{
-				ToolName:       name,
-				AvailableTools: s.names(),
-			}
-		}
-		registered = true
+	return nil, &NoSuchToolError{ToolName: name, AvailableTools: Snapshot{definitions: s.definitions}.names()}
+}
+
+// InvokeResult dispatches through the rich capability when supplied, adapting
+// legacy invokers at the released raw-JSON boundary otherwise.
+func (s *Set) InvokeResult(ctx context.Context, name string, input json.RawMessage) (ExecutionResult, error) {
+	if s == nil {
+		return ExecutionResult{}, &ExecutionError{ToolName: name, Cause: errors.New("nil tool set")}
 	}
-	if s.Executor != nil {
-		output, err := s.Executor.Execute(ctx, name, string(input))
-		if err != nil {
-			// Executor is the compatibility seam for existing agent
-			// integrations. Preserve its error value and presentation exactly;
-			// New and NewDynamic provide typed classification for new tools.
-			return nil, err
-		}
-		return json.RawMessage(output), nil
+	return Snapshot{definitions: s.definitions, index: s.index, invokers: s.invokers}.InvokeResult(ctx, name, input)
+}
+
+// Definitions returns independent copies of the snapshot's definitions.
+func (s Snapshot) Definitions() []aikit.ToolDefinition {
+	return cloneDefinitions(s.definitions)
+}
+
+// Len returns the number of definitions in the snapshot.
+func (s Snapshot) Len() int { return len(s.definitions) }
+
+// Lookup returns an independently owned copy of the named definition.
+func (s Snapshot) Lookup(name string) (aikit.ToolDefinition, bool) {
+	i, ok := s.index[name]
+	if !ok {
+		return aikit.ToolDefinition{}, false
 	}
-	if registered {
-		return nil, &ExecutionError{
-			ToolName: name,
-			Cause:    errors.New("no executor"),
-		}
+	return cloneDefinition(s.definitions[i]), true
+}
+
+// Invoker returns the exact typed invoker captured for name.
+func (s Snapshot) Invoker(name string) (Invokable, bool) {
+	invoker, ok := s.invokers[name]
+	return invoker, ok
+}
+
+// Invoke dispatches through the exact execution path captured by the snapshot.
+func (s Snapshot) Invoke(
+	ctx context.Context,
+	name string,
+	input json.RawMessage,
+) (json.RawMessage, error) {
+	if invoker, ok := s.invokers[name]; ok {
+		return invoker.Invoke(ctx, input)
 	}
 	return nil, &NoSuchToolError{
 		ToolName:       name,
@@ -149,47 +221,58 @@ func (s *Set) Invoke(
 	}
 }
 
-// Execute implements Executor without changing the raw-string output contract.
-func (s *Set) Execute(
-	ctx context.Context,
-	name, argsJSON string,
-) (string, error) {
-	output, err := s.Invoke(ctx, name, json.RawMessage(argsJSON))
-	return string(output), err
-}
-
-func (s *Set) buildIndex() {
-	s.index = make(map[string]int, len(s.Definitions))
-	for i, definition := range s.Definitions {
-		if _, exists := s.index[definition.Name]; exists {
-			s.indexErr = fmt.Errorf(
-				"tool: duplicate registration %q",
-				definition.Name,
-			)
-			return
-		}
-		s.index[definition.Name] = i
+// InvokeResult invokes the exact captured rich or legacy path.
+func (s Snapshot) InvokeResult(ctx context.Context, name string, input json.RawMessage) (ExecutionResult, error) {
+	invoker, ok := s.invokers[name]
+	if !ok {
+		return ExecutionResult{}, &NoSuchToolError{ToolName: name, AvailableTools: s.names()}
 	}
-}
-
-func (s *Set) scanForName(name string) (aikit.ToolDefinition, bool) {
-	for _, definition := range s.Definitions {
-		if definition.Name == name {
-			return cloneDefinition(definition), true
-		}
+	if rich, ok := invoker.(ResultInvokable); ok {
+		return rich.InvokeResult(ctx, input)
 	}
-	return aikit.ToolDefinition{}, false
+	raw, err := invoker.Invoke(ctx, input)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return ResultFromLegacy(raw), nil
 }
 
-func (s *Set) names() []string {
-	names := make([]string, 0, len(s.Definitions))
-	for _, definition := range s.Definitions {
+func (s *Set) activeDefinitions() []aikit.ToolDefinition {
+	return cloneDefinitions(s.definitions)
+}
+
+func indexDefinitions(definitions []aikit.ToolDefinition) (map[string]int, error) {
+	index := make(map[string]int, len(definitions))
+	for i, definition := range definitions {
+		if definition.Name == "" {
+			return nil, errors.New("tool: cannot register a tool with an empty name")
+		}
+		if _, exists := index[definition.Name]; exists {
+			return nil, fmt.Errorf("tool: duplicate registration %q", definition.Name)
+		}
+		index[definition.Name] = i
+	}
+	return index, nil
+}
+
+func cloneDefinitions(definitions []aikit.ToolDefinition) []aikit.ToolDefinition {
+	if definitions == nil {
+		return nil
+	}
+	cloned := make([]aikit.ToolDefinition, len(definitions))
+	for i, definition := range definitions {
+		cloned[i] = cloneDefinition(definition)
+	}
+	return cloned
+}
+
+func (s Snapshot) names() []string {
+	names := make([]string, 0, len(s.definitions))
+	for _, definition := range s.definitions {
 		names = append(names, definition.Name)
 	}
 	return names
 }
-
-var _ Executor = (*Set)(nil)
 
 func isNilInvokable(candidate Invokable) bool {
 	value := reflect.ValueOf(candidate)

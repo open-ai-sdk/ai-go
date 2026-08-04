@@ -194,7 +194,7 @@ func TestIntegration_EnvelopeRoundTrip_WithAllPartTypes(t *testing.T) {
 // TestIntegration_SendStartFalse_SendFinishFalse_ForMergePattern verifies that
 // suppressing both lifecycle chunks leaves only step content, suitable for merging.
 func TestIntegration_SendStartFalse_SendFinishFalse_ForMergePattern(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "merged content"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},

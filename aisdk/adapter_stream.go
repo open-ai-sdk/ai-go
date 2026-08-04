@@ -2,16 +2,17 @@ package aisdk
 
 import (
 	"io"
+	"iter"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-func (adapter *Adapter) Stream(events <-chan aikit.StepEvent, output io.Writer) string {
+func (adapter *Adapter) Stream(events iter.Seq2[aikit.StepEvent, error], output io.Writer) string {
 	state := &interceptState{}
 	if adapter.toolResultHook != nil {
 		state.toolCache = make(map[string]toolData)
 	}
-	stream := NewChunkProducer(adapter.msgID).Produce(adapter.interceptEvents(events, state))
+	stream := NewChunkProducer(adapter.msgID).Produce(adapter.interceptEvents(eventChannel(events), state))
 	writer := NewWriter(output)
 	var finishReason string
 	var writeErr error

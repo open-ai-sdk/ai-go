@@ -26,19 +26,14 @@ const (
 )
 
 // ProviderOptions holds OpenAI-specific options passed via
-// GenerateTextRequest.ProviderOptions["openai"].
+// llm.Request.ProviderOptions["openai"], usually through Runner.With.
 //
 // Usage:
 //
-//	req := ai.GenerateTextRequest{
-//	    Model: model,
-//	    ProviderOptions: map[string]any{
-//	        "openai": openai.ProviderOptions{
-//	            PreviousResponseID: "resp_abc",
-//	            ReasoningEffort:    "medium",
-//	        },
-//	    },
-//	}
+//	runner := assistant.Runner().With(openai.ProviderOptions{
+//	    PreviousResponseID: "resp_abc",
+//	    ReasoningEffort:    "medium",
+//	})
 type ProviderOptions struct {
 	// PreviousResponseID continues a prior Responses API response by id.
 	// When set, the new request appends to that conversation thread.

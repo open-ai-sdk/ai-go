@@ -34,10 +34,10 @@ func New[In, Out any](
 			Description: description,
 			InputSchema: schema,
 		},
-		invoke: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		invokeResult: func(ctx context.Context, raw json.RawMessage) (ExecutionResult, error) {
 			var input In
 			if err := json.Unmarshal(raw, &input); err != nil {
-				return nil, &InputError{
+				return ExecutionResult{}, &InputError{
 					ToolName: name,
 					Input:    append(json.RawMessage(nil), raw...),
 					Cause:    err,
@@ -46,16 +46,9 @@ func New[In, Out any](
 
 			output, err := fn(ctx, input)
 			if err != nil {
-				return nil, classifyHandlerError(name, err)
+				return ExecutionResult{}, classifyHandlerError(name, err)
 			}
-			encoded, err := json.Marshal(output)
-			if err != nil {
-				return nil, &ExecutionError{
-					ToolName: name,
-					Cause:    fmt.Errorf("marshal output: %w", err),
-				}
-			}
-			return encoded, nil
+			return resultFromTypedOutput(name, output)
 		},
 	}, nil
 }
@@ -84,6 +77,58 @@ func NewDynamic(
 			return append(json.RawMessage(nil), output...), nil
 		},
 	}, nil
+}
+
+// NewDynamicResult creates a dynamic tool that returns canonical rich output.
+func NewDynamicResult(
+	name, description string,
+	inputSchema map[string]any,
+	fn func(context.Context, json.RawMessage) (ExecutionResult, error),
+) (*Tool, error) {
+	if fn == nil {
+		return nil, fmt.Errorf("tool.NewDynamicResult %q: nil handler", name)
+	}
+	handler := func(ctx context.Context, input json.RawMessage) (ExecutionResult, error) {
+		result, err := fn(ctx, append(json.RawMessage(nil), input...))
+		if err != nil {
+			return ExecutionResult{}, classifyHandlerError(name, err)
+		}
+		return result.Clone(), nil
+	}
+	return &Tool{
+		definition: aikit.ToolDefinition{
+			Name: name, Description: description, InputSchema: cloneJSONMap(inputSchema),
+		},
+		invokeResult: handler,
+		invoke: func(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
+			result, err := handler(ctx, input)
+			if err != nil {
+				return nil, err
+			}
+			return json.RawMessage(result.Output.ModelText()), nil
+		},
+	}, nil
+}
+
+func resultFromTypedOutput[Out any](name string, value Out) (ExecutionResult, error) {
+	if output, ok := any(value).(Output); ok {
+		return ExecutionResult{Output: output.Clone()}, nil
+	}
+	if result, ok := any(value).(ExecutionResult); ok {
+		return result.Clone(), nil
+	}
+	if text, ok := any(value).(string); ok {
+		return ExecutionResult{Output: Text(text)}, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ExecutionResult{}, &ExecutionError{ToolName: name, Cause: fmt.Errorf("marshal output: %w", err)}
+	}
+	output, err := JSON(raw)
+	if err != nil {
+		return ExecutionResult{}, &ExecutionError{ToolName: name, Cause: err}
+	}
+	return ExecutionResult{Output: output}, nil
 }
 
 func classifyHandlerError(toolName string, err error) error {

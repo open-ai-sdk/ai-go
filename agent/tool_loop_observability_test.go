@@ -108,9 +108,9 @@ func runObservabilityScenario(t *testing.T, tracer tracing.Tracer, logger *slog.
 	}}
 	exec := &mockExecutor{results: map[string]string{"lookup": `{"result":"TOOL_OUTPUT_MARKER"}`}}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: model,
-		Tools: &ToolSet{Executor: exec},
+		Tools: testToolSet(nil, exec),
 		Request: Request{
 			Messages: []Message{{Role: "user", Content: []ContentPart{{Type: "text", Text: "PROMPT_MARKER"}}}},
 		},
@@ -224,7 +224,7 @@ func TestRunLoop_SpansIncludeContentWhenTraceContentEnabled(t *testing.T) {
 
 func TestRunLoop_NilTracer_DoesNotPanic(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{{textEvt("hi"), finishEvt(FinishReasonStop)}}}
-	ch := Run(context.Background(), RunParams{Model: model, MaxSteps: 1})
+	ch := driveStream(context.Background(), runConfig{Model: model, MaxSteps: 1})
 	for ev := range ch {
 		if ev.Type == StepEventError {
 			t.Fatalf("unexpected error: %v", ev.Error)

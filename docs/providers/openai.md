@@ -26,16 +26,13 @@ The client owns credentials and shared HTTP resources. `CompletionModel` and
 provider configuration for each model. A model ID can be used with more than one
 factory when OpenAI supports that model on both operations.
 
-Pass typed OpenAI options alongside a generation request when needed:
+Pass typed OpenAI options through the direct completion builder or an Agent
+Builder/Runner when needed:
 
 ```go
-result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-  Model:    model,
-  Messages: []ai.Message{ai.UserMessage("Explain this code")},
-  ProviderOptions: map[string]any{
-    "openai": openai.ProviderOptions{ReasoningEffort: "low"},
-  },
-})
+result, err := llm.NewCompletion(model, "Explain this code").
+  With(openai.ProviderOptions{ReasoningEffort: "low"}).
+  Send(ctx)
 ```
 
 Keep provider configuration at client creation and request-specific options on
@@ -48,12 +45,12 @@ A direct `Send` therefore returns normalized assistant content and retains the
 successful OpenAI Responses payload for provider-specific diagnostics:
 
 ```go
-response, err := ai.NewCompletion(model, "Explain Go interfaces").Send(ctx)
+response, err := llm.NewCompletion(model, "Explain Go interfaces").Send(ctx)
 if err != nil {
   return err
 }
 
-native, ok := ai.RawResponseAs[*openai.ResponsesResponse](response)
+native, ok := llm.RawResponseAs[*openai.ResponsesResponse](response)
 if ok {
   fmt.Println(native.ID, native.Status)
 }
@@ -83,7 +80,7 @@ options := openai.ProviderOptions{
   PromptCacheInstructions: true,
 }
 
-response, err := ai.NewCompletion(model, "What should this customer do next?").
+response, err := llm.NewCompletion(model, "What should this customer do next?").
   Instructions(stablePolicyOver1024Tokens).
   With(options).
   Send(ctx)
@@ -135,15 +132,15 @@ if err != nil {
   return err
 }
 
-message := ai.Message{
-  Role: ai.RoleUser,
-  Content: []ai.ContentPart{
-    ai.TextPart("Summarize the report and explain its charts."),
-    ai.DocumentDataPart(pdf, "application/pdf", "report.pdf"),
+message := aikit.Message{
+  Role: aikit.RoleUser,
+  Content: []aikit.ContentPart{
+    aikit.TextPart("Summarize the report and explain its charts."),
+    aikit.DocumentDataPart(pdf, "application/pdf", "report.pdf"),
   },
 }
 
-response, err := ai.NewCompletion(model, "").
+response, err := llm.NewCompletion(model, "").
   Messages(message).
   With(openai.ProviderOptions{PDFDetail: openai.PDFDetailHigh}).
   Send(ctx)
@@ -157,7 +154,7 @@ print while consuming more input tokens. Prefer `openai.PDFDetailAuto`,
 
 For files reused across requests, upload once with `Client.UploadFile` using
 `FilePurposeUserData`, then pass the returned ID with
-`ai.DocumentFileIDPart`. `ai.DocumentURLPart` sends an external URL directly.
+`aikit.DocumentFileIDPart`. `aikit.DocumentURLPart` sends an external URL directly.
 Each file or image content part must have exactly one source: inline data, an
 external URL, or an uploaded file ID. The provider rejects manually constructed
 parts with missing or conflicting sources before sending the request. A

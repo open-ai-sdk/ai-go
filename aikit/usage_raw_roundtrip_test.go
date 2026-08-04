@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
 )
@@ -38,17 +37,15 @@ func (rawUsageModel) Stream(
 	return events, nil
 }
 
-func TestUsageRawReachesGenerateTextResult(t *testing.T) {
-	result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-		Model: rawUsageModel{},
-	})
+func TestUsageRawReachesCompletionResponse(t *testing.T) {
+	result, err := llm.Complete(context.Background(), rawUsageModel{}, llm.Request{})
 	if err != nil {
-		t.Fatalf("GenerateText() error = %v", err)
+		t.Fatalf("Complete() error = %v", err)
 	}
 	if got := result.Usage.Raw["provider"]; got != "preserved" {
 		t.Fatalf("Usage.Raw[provider] = %#v, want preserved", got)
 	}
-	if got := result.FinalStep.Usage.Raw["cached"]; got != float64(2) {
-		t.Fatalf("FinalStep.Usage.Raw[cached] = %#v, want 2", got)
+	if got := result.Usage.Raw["cached"]; got != float64(2) {
+		t.Fatalf("Usage.Raw[cached] = %#v, want 2", got)
 	}
 }

@@ -2,29 +2,20 @@ package aisdk
 
 import (
 	"bytes"
+	"iter"
 	"strings"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-type testStreamResult struct{ ch <-chan aikit.StepEvent }
-
-func (s *testStreamResult) Stream() <-chan aikit.StepEvent { return s.ch }
-func (*testStreamResult) DrainUnused()                     {}
-
-func makeStreamResult(evs ...aikit.StepEvent) *testStreamResult {
-	ch := make(chan aikit.StepEvent, len(evs))
-	for _, e := range evs {
-		ch <- e
-	}
-	close(ch)
-	return &testStreamResult{ch: ch}
+func makeEventStream(events ...aikit.StepEvent) iter.Seq2[aikit.StepEvent, error] {
+	return newEventStream(events...)
 }
 
 // TestStreamToWriter_BasicTextStream verifies SSE output contains expected chunks.
 func TestStreamToWriter_BasicTextStream(t *testing.T) {
-	sr := makeStreamResult(
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
@@ -33,7 +24,7 @@ func TestStreamToWriter_BasicTextStream(t *testing.T) {
 	)
 
 	var buf bytes.Buffer
-	text := StreamToWriter(sr, &buf, "msg-1")
+	text := StreamToWriter(events, &buf, "msg-1")
 	output := buf.String()
 
 	if text != "Hello world" {
@@ -50,7 +41,7 @@ func TestStreamToWriter_BasicTextStream(t *testing.T) {
 
 // TestStreamToWriter_ToolResultHookFires verifies the tool result hook is invoked.
 func TestStreamToWriter_ToolResultHookFires(t *testing.T) {
-	sr := makeStreamResult(
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{
 			Type:              aikit.StepEventToolCallStart,
@@ -82,7 +73,7 @@ func TestStreamToWriter_ToolResultHookFires(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	StreamToWriter(sr, &buf, "msg-hook", WithUIToolResultHook(hook))
+	StreamToWriter(events, &buf, "msg-hook", WithUIToolResultHook(hook))
 
 	if !hookFired {
 		t.Error("expected tool result hook to fire")
@@ -100,7 +91,7 @@ func TestStreamToWriter_ToolResultHookFires(t *testing.T) {
 
 // TestStreamToWriter_OnEndCallback verifies the onEnd callback is invoked with full text.
 func TestStreamToWriter_OnEndCallback(t *testing.T) {
-	sr := makeStreamResult(
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -109,7 +100,7 @@ func TestStreamToWriter_OnEndCallback(t *testing.T) {
 
 	var ended string
 	var buf bytes.Buffer
-	StreamToWriter(sr, &buf, "msg-finish", WithUIOnEnd(func(text string) {
+	StreamToWriter(events, &buf, "msg-finish", WithUIOnEnd(func(text string) {
 		ended = text
 	}))
 
@@ -120,7 +111,7 @@ func TestStreamToWriter_OnEndCallback(t *testing.T) {
 
 // TestStreamToWriter_SSELineFormat verifies every line is prefixed with "data: ".
 func TestStreamToWriter_SSELineFormat(t *testing.T) {
-	sr := makeStreamResult(
+	events := makeEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "x"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -128,7 +119,7 @@ func TestStreamToWriter_SSELineFormat(t *testing.T) {
 	)
 
 	var buf bytes.Buffer
-	StreamToWriter(sr, &buf, "msg-fmt")
+	StreamToWriter(events, &buf, "msg-fmt")
 
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
 		line = strings.TrimSpace(line)

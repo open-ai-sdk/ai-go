@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"github.com/open-ai-sdk/ai-go/tool"
 	"golang.org/x/sync/errgroup"
 )
 
+//nolint:gocyclo // Tool actions intentionally share one ordered commit path.
 func executeToolCalls(
 	r *run,
 	tools *ToolSet,
@@ -22,26 +24,53 @@ func executeToolCalls(
 	toolNames = make([]string, 0, len(prepared))
 	for _, preparedCall := range prepared {
 		tc := preparedCall.tc
+		if preparedCall.controlErr != nil {
+			if controlErr == nil {
+				controlErr = preparedCall.controlErr
+			}
+			break
+		}
 		if preparedCall.invalidErr != nil {
-			r.emitObserved(StepEvent{
+			if !r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
 				ToolCallID:        tc.id,
 				ToolCallName:      tc.name,
 				ToolCallArgsDelta: tc.args,
-			})
-			errOutput := invalidToolCallOutput(tc, preparedCall.invalidErr)
-			*history = append(*history, buildToolResultMessage(tc.id, tc.name, errOutput))
+			}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			result := invalidToolResult(tc, preparedCall.invalidErr)
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			*history = append(*history, toolResultHistoryMessage(result, result.ModelOutput))
 			toolNames = append(toolNames, tc.name)
+			stepToolResults = append(stepToolResults, *result)
 			continue
 		}
 
-		r.emitObserved(StepEvent{
+		skip := preparedCall.skip
+		skipReason := preparedCall.skipReason
+		if !skip {
+			var hookErr error
+			tc, skip, skipReason, hookErr = r.beforeTool(tc)
+			if hookErr != nil {
+				if controlErr == nil {
+					controlErr = hookErr
+				}
+				break
+			}
+		}
+
+		if !r.emitObserved(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
 			ToolCallName:      tc.name,
 			ToolCallArgsDelta: tc.args,
 			ThoughtSignature:  tc.thoughtSignature,
-		})
+		}) {
+			return toolNames, stepToolCalls, stepToolResults, r.stopError()
+		}
 		toolNames = append(toolNames, tc.name)
 		stepToolCalls = append(stepToolCalls, ToolCallInfo{
 			ID:               tc.id,
@@ -51,29 +80,39 @@ func executeToolCalls(
 			ThoughtSignature: tc.thoughtSignature,
 		})
 
-		result, approvalResolved, approvalErr := approvedToolCall(
-			r,
-			r.ctx,
-			tools,
-			tc,
-			preparedCall.def,
-			approval,
-			approver,
-		)
+		var result *ToolResult
+		approvalResolved := false
+		var approvalErr error
+		if skip {
+			result = skippedToolResult(tc, skipReason)
+		} else {
+			result, approvalResolved, approvalErr = approvedToolCall(
+				r, r.ctx, tools, tc, preparedCall.def, approval, approver,
+			)
+		}
 		if approvalErr != nil {
 			if controlErr == nil {
 				controlErr = approvalErr
 			}
 			continue
 		}
+		result, hookErr := r.afterTool(result)
+		if hookErr != nil {
+			if controlErr == nil {
+				controlErr = hookErr
+			}
+			break
+		}
 		// Apply ToModelOutput transform for history; event keeps original output.
 		// def was resolved once during validation (prepareToolCalls), so no
-		// second scan of tools.Definitions is needed here.
+		// second scan of the tool registry is needed here.
 		modelOutput, transformErr := transformToolOutput(r, preparedCall.def, result)
 		if transformErr != nil {
 			result.ModelOutput = result.Output
 			result.ModelOutputSet = true
-			r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result})
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
 			if controlErr == nil {
 				controlErr = transformErr
 			}
@@ -93,12 +132,21 @@ func executeToolCalls(
 		}
 		stepToolCalls[len(stepToolCalls)-1].Args = json.RawMessage(result.Args)
 
-		r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result})
+		if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
+			return toolNames, stepToolCalls, stepToolResults, r.stopError()
+		}
 		updateLatestToolCallArgs(history, result.ID, result.Args)
 		*history = append(*history, toolResultHistoryMessage(result, modelOutput))
 		stepToolResults = append(stepToolResults, *result)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
+}
+
+func skippedToolResult(tc toolCallState, reason string) *ToolResult {
+	if reason == "" {
+		reason = "tool call skipped by hook"
+	}
+	return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: reason, Disposition: aikit.ToolResultSkipped}
 }
 
 // executeToolCallsParallel processes tool calls concurrently, bounded by
@@ -108,6 +156,8 @@ func executeToolCalls(
 // Per-call errors travel through results[i].result.Output instead of through
 // g.Wait's return value. errgroup is used here only for concurrency limiting
 // and ctx propagation, not for fail-fast error aggregation.
+//
+//nolint:gocyclo // Parallel execution keeps validation, cancellation, and ordered commit together.
 func executeToolCallsParallel(
 	r *run,
 	tools *ToolSet,
@@ -141,25 +191,39 @@ func executeToolCallsParallel(
 	for i, preparedCall := range prepared {
 		tc := preparedCall.tc
 		def := preparedCall.def
+		if preparedCall.controlErr != nil {
+			results[i] = indexedResult{tc: tc, valid: true, controlErr: preparedCall.controlErr}
+			continue
+		}
 		if preparedCall.invalidErr != nil {
 			results[i] = indexedResult{
 				tc: tc, valid: false,
-				result: &ToolResult{
-					ID: tc.id, Name: tc.name, Args: tc.args,
-					Output: invalidToolCallOutput(tc, preparedCall.invalidErr),
-				},
+				result: invalidToolResult(tc, preparedCall.invalidErr),
 			}
 			continue
 		}
+		skip := preparedCall.skip
+		skipReason := preparedCall.skipReason
+		if !skip {
+			var hookErr error
+			tc, skip, skipReason, hookErr = r.beforeTool(tc)
+			if hookErr != nil {
+				results[i] = indexedResult{tc: tc, valid: true, controlErr: hookErr}
+				continue
+			}
+		}
 
 		// Emit ToolCallReady before execution starts (matches sequential contract).
-		r.emitObserved(StepEvent{
+		if !r.emitObserved(StepEvent{
 			Type:              StepEventToolCallReady,
 			ToolCallID:        tc.id,
 			ToolCallName:      tc.name,
 			ToolCallArgsDelta: tc.args,
 			ThoughtSignature:  tc.thoughtSignature,
-		})
+		}) {
+			results[i] = indexedResult{tc: tc, valid: true, controlErr: r.stopError()}
+			continue
+		}
 
 		results[i] = indexedResult{tc: tc, valid: true}
 		idx := i
@@ -201,9 +265,21 @@ func executeToolCallsParallel(
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			result, approvalResolved, approvalErr := approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			var result *ToolResult
+			approvalResolved := false
+			var approvalErr error
+			if skip {
+				result = skippedToolResult(tc, skipReason)
+			} else {
+				result, approvalResolved, approvalErr = approvedToolCall(r, gctx, tools, tc, def, approval, approver)
+			}
 			if approvalErr != nil {
 				results[idx].controlErr = approvalErr
+				return nil
+			}
+			result, hookErr := r.afterTool(result)
+			if hookErr != nil {
+				results[idx].controlErr = hookErr
 				return nil
 			}
 			results[idx].result = result
@@ -239,19 +315,27 @@ func executeToolCallsParallel(
 	toolNames = make([]string, 0, len(prepared))
 	for _, res := range results {
 		if !res.valid {
-			r.emitObserved(StepEvent{
+			if !r.emitObserved(StepEvent{
 				Type:              StepEventToolCallInvalid,
 				ToolCallID:        res.tc.id,
 				ToolCallName:      res.tc.name,
 				ToolCallArgsDelta: res.tc.args,
-			})
-			*history = append(*history, buildToolResultMessage(res.tc.id, res.tc.name, res.result.Output))
+			}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			*history = append(*history, toolResultHistoryMessage(res.result, res.result.ModelOutput))
 			toolNames = append(toolNames, res.tc.name)
+			stepToolResults = append(stepToolResults, *res.result)
 			continue
 		}
 
 		if res.result != nil {
-			r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result})
+			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: res.result}) {
+				res.controlErr = r.stopError()
+			}
 			updateLatestToolCallArgs(history, res.result.ID, res.result.Args)
 			*history = append(*history, toolResultHistoryMessage(res.result, res.modelOutput))
 		}
@@ -381,7 +465,7 @@ func executeApprovedToolCall(
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.arguments", Value: tc.args})
 	}
-	result := executeToolCall(toolCtx, tools, tc, def)
+	result := executeToolCallForRun(r, toolCtx, tools, tc, def)
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.tool.output", Value: result.Output})
 	}
@@ -424,7 +508,21 @@ func toolResultHistoryMessage(result *ToolResult, modelOutput string) Message {
 		result.ID, result.Name, modelOutput, result.ApprovalSignature, result.ApprovalApproved,
 	)
 	message.Content[0].ToolApprovalID = result.ApprovalID
+	if result.Content != nil {
+		message.Content[0].ToolResultContent = make([]aikit.ToolResultContent, len(result.Content))
+		for i := range result.Content {
+			message.Content[0].ToolResultContent[i] = result.Content[i].Clone()
+		}
+	}
 	return message
+}
+
+func invalidToolResult(tc toolCallState, err error) *ToolResult {
+	output := invalidToolCallOutput(tc, err)
+	return &ToolResult{
+		ID: tc.id, Name: tc.name, Args: tc.args, Output: output,
+		ModelOutput: output, ModelOutputSet: true, Error: err, Disposition: aikit.ToolResultError,
+	}
 }
 
 func updateLatestToolCallArgs(history *[]Message, toolCallID, args string) {
@@ -455,5 +553,6 @@ func deniedToolResult(
 			Reason:   reason,
 			Cause:    cause,
 		},
+		Disposition: aikit.ToolResultDenied,
 	}
 }

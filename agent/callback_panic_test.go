@@ -25,9 +25,9 @@ func (panicApprovalResponder) RequestApproval(
 	panic("approval responder panic")
 }
 
-func collectRunEvents(params RunParams) []StepEvent {
+func collectRunEvents(params runConfig) []StepEvent {
 	events := make([]StepEvent, 0, 8)
-	for event := range Run(context.Background(), params) {
+	for event := range driveStream(context.Background(), params) {
 		events = append(events, event)
 	}
 	return events
@@ -51,40 +51,40 @@ func TestObserverCallbackPanicsAreSwallowed(t *testing.T) {
 	providerErr := errors.New("provider failure")
 	tests := []struct {
 		name   string
-		params RunParams
+		params runConfig
 	}{
 		{
 			name: "on_chunk",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{textEvt("ok"), finishEvt(FinishReasonStop)}}},
-				Callbacks: &LifecycleCallbacks{OnChunk: func(StepEvent) {
+				Callbacks: &lifecycleCallbacks{OnChunk: func(StepEvent) {
 					panic("on chunk")
 				}},
 			},
 		},
 		{
 			name: "on_step_end",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{textEvt("ok"), finishEvt(FinishReasonStop)}}},
-				Callbacks: &LifecycleCallbacks{OnStepEnd: func(StepEndEvent) {
+				Callbacks: &lifecycleCallbacks{OnStepEnd: func(stepEndEvent) {
 					panic("on step end")
 				}},
 			},
 		},
 		{
 			name: "on_end",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{textEvt("ok"), finishEvt(FinishReasonStop)}}},
-				Callbacks: &LifecycleCallbacks{OnEnd: func(EndEvent) {
+				Callbacks: &lifecycleCallbacks{OnEnd: func(endEvent) {
 					panic("on end")
 				}},
 			},
 		},
 		{
 			name: "on_error",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{{Type: StreamEventError, Error: providerErr}}}},
-				Callbacks: &LifecycleCallbacks{OnError: func(error) {
+				Callbacks: &lifecycleCallbacks{OnError: func(error) {
 					panic("on error")
 				}},
 			},
@@ -120,11 +120,11 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 	}
 	tests := []struct {
 		name   string
-		params RunParams
+		params runConfig
 	}{
 		{
 			name: "prepare_step",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{textEvt("unused")}}},
 				PrepareStep: func(PrepareStepContext) *PrepareStepResult {
 					panic("prepare step")
@@ -133,9 +133,9 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 		},
 		{
 			name: "stop_when",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{toolCall}},
-				Tools: &ToolSet{Definitions: []ToolDefinition{{Name: "search"}}, Executor: &mockExecutor{}},
+				Tools: testToolSet([]ToolDefinition{{Name: "search"}}, &mockExecutor{}),
 				StopWhen: func(int, *StepResult) bool {
 					panic("stop condition")
 				},
@@ -143,12 +143,12 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 		},
 		{
 			name: "repair_tool_call",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{
 					toolCallEvt(0, "tc1", "unknown", `{}`),
 					finishEvt(FinishReasonToolCalls),
 				}}},
-				Tools: &ToolSet{Definitions: []ToolDefinition{{Name: "search"}}, Executor: &mockExecutor{}},
+				Tools: testToolSet([]ToolDefinition{{Name: "search"}}, &mockExecutor{}),
 				RepairToolCall: func(context.Context, ToolCallRepairContext) (*ToolCallInfo, error) {
 					panic("repair")
 				},
@@ -156,9 +156,9 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 		},
 		{
 			name: "approval_policy",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{toolCall}},
-				Tools: &ToolSet{Definitions: []ToolDefinition{{Name: "search"}}, Executor: &mockExecutor{}},
+				Tools: testToolSet([]ToolDefinition{{Name: "search"}}, &mockExecutor{}),
 				ToolApproval: map[string]func(string, string) bool{
 					"search": func(string, string) bool { panic("approval policy") },
 				},
@@ -166,9 +166,9 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 		},
 		{
 			name: "approval_responder",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{toolCall}},
-				Tools: &ToolSet{Definitions: []ToolDefinition{{Name: "search"}}, Executor: &mockExecutor{}},
+				Tools: testToolSet([]ToolDefinition{{Name: "search"}}, &mockExecutor{}),
 				ToolApproval: map[string]func(string, string) bool{
 					"search": func(string, string) bool { return true },
 				},
@@ -188,20 +188,20 @@ func TestControlCallbackPanicsFailRun(t *testing.T) {
 func TestToModelOutputPanicPreservesToolResultBeforeFailingRun(t *testing.T) {
 	for _, parallel := range []bool{false, true} {
 		t.Run(map[bool]string{false: "sequential", true: "parallel"}[parallel], func(t *testing.T) {
-			events := collectRunEvents(RunParams{
+			events := collectRunEvents(runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{
 					toolCallEvt(0, "tc1", "search", `{}`),
 					finishEvt(FinishReasonToolCalls),
 				}}},
-				Tools: &ToolSet{
-					Definitions: []ToolDefinition{{
+				Tools: testToolSet(
+					[]ToolDefinition{{
 						Name: "search",
 						ToModelOutput: func(string) string {
 							panic("history transform")
 						},
 					}},
-					Executor: &mockExecutor{results: map[string]string{"search": `{"ok":true}`}},
-				},
+					&mockExecutor{results: map[string]string{"search": `{"ok":true}`}}),
+
 				ParallelToolExecution: parallel,
 			})
 
@@ -227,21 +227,15 @@ func TestOnErrorObservesEveryTerminalFailureBoundary(t *testing.T) {
 	sentinel := errors.New("terminal failure")
 	tests := []struct {
 		name   string
-		params RunParams
+		params runConfig
 	}{
 		{
-			name: "tool_set_validation",
-			params: RunParams{
-				Tools: &ToolSet{Definitions: []ToolDefinition{{Name: "dup"}, {Name: "dup"}}},
-			},
-		},
-		{
 			name:   "stream_start",
-			params: RunParams{Model: startErrorModel{err: sentinel}},
+			params: runConfig{Model: startErrorModel{err: sentinel}},
 		},
 		{
 			name: "control_panic",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{{textEvt("unused")}}},
 				PrepareStep: func(PrepareStepContext) *PrepareStepResult {
 					panic("control")
@@ -250,7 +244,7 @@ func TestOnErrorObservesEveryTerminalFailureBoundary(t *testing.T) {
 		},
 		{
 			name: "structured_output",
-			params: RunParams{
+			params: runConfig{
 				Model: &mockModel{calls: [][]StreamEvent{
 					{textEvt("draft"), finishEvt(FinishReasonStop)},
 					{{Type: StreamEventError, Error: sentinel}},
@@ -263,7 +257,7 @@ func TestOnErrorObservesEveryTerminalFailureBoundary(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var observed []error
-			test.params.Callbacks = &LifecycleCallbacks{OnError: func(err error) {
+			test.params.Callbacks = &lifecycleCallbacks{OnError: func(err error) {
 				observed = append(observed, err)
 			}}
 			events := collectRunEvents(test.params)

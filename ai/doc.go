@@ -1,6 +1,4 @@
-// Package ai is the ergonomic façade for common model operations.
-//
-// GenerateText, StreamText, GenerateObject, and Embed compose the lower-level
-// contracts from aikit, llm, agent, and tool. Applications that need direct
-// control over the event loop can use package agent instead.
+// Package ai provides conveniences for direct model completion, typed object
+// completion, embeddings, and image generation. Stateful model/tool execution
+// is owned by package agent.
 package ai

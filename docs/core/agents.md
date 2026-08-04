@@ -1,106 +1,117 @@
 # Agents
 
-An agent binds a language model to reusable instructions, tools, policies, and
-callbacks. It runs the same provider-neutral model contract as a completion,
-but may execute tools and make additional model calls until a stop condition is
-met.
+An Agent is a reusable, immutable configuration built on top of an
+[`llm.Model`](/core/completions). It combines the model with system
+instructions, tools, model settings, hooks, approval policies, and other
+long-lived defaults.
 
-Use `ai.GenerateText` for a request-scoped run. Use `ai.NewToolLoopAgent` when
-several runs should share the same defaults.
+The lifecycle is intentionally split in two:
 
-## Agent contract
-
-The `ai.Agent` interface combines a small prompt/chat capability with access to
-the configured tools and full generation methods:
-
-```go
-type Agent interface {
-  Completion
-  ID() string
-  Tools() *ToolSet
-  Generate(context.Context, ...Option) (*GenerateTextResult, error)
-  Stream(context.Context, ...Option) (*StreamResult, error)
-}
+```mermaid
+flowchart LR
+    Model["llm.Model"] -->|"agent.New(model)"| Builder["agent.Builder"]
+    Builder -->|"Build()"| Agent["*agent.Agent"]
+    Agent -->|"Runner()"| Runner["agent.Runner"]
 ```
 
-`ToolLoopAgent` is the standard implementation. Per-call messages, steps, and
-tool calls are not stored on the agent, so one configured agent can be reused
-across requests when its tools are safe for concurrent use.
+A configured Agent is reusable, while a per-prompt Runner owns one execution.
+In ai-go, `Agent.Runner()` is the public run builder; the provider/tool state
+machine remains an implementation detail.
 
-## Request-scoped generation
+## Build an Agent
 
-`ai.GenerateText` runs the agent runtime from an explicit request:
-
-```go
-result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
-  Model:        model,
-  Instructions: "Be concise and cite uncertainty.",
-  Messages:     []ai.Message{ai.UserMessage("Summarize this report")},
-  Tools:        tools,
-  StopWhen:     ai.IsStepCount(3),
-})
-if err != nil {
-  return err
-}
-
-fmt.Println(result.Text)
-fmt.Println(result.Steps)
-```
-
-The default stop condition is `ai.IsStepCount(1)`. A tool requested in that
-step may execute, but a follow-up model call requires a stop condition that
-allows another step. `MaxSteps` is an independent safety cap; zero leaves the
-stop condition or a natural model finish in control.
-
-The result aggregates text, reasoning, usage, tool results, warnings, sources,
-generated files, and provider metadata across the run. `Steps` retains each
-individual model call. `Response.Messages` remains the continuation-only view;
-`Transcript` contains an independently owned full conversation made from the
-initial messages followed by every generated assistant and tool message.
-`MessageID`, each step's `MessageID`, and assistant `Message.ID` preserve the
-provider-issued message identity across a tool loop.
-
-Agent usage is aggregated across completed model calls. Use `Usage.HasValues`
-to distinguish reported counters from an empty value, `Add` for a field-wise
-sum, or `Accumulate` to update an aggregate. Cache, reasoning, and tool-use
-prompt counters are retained when providers report them.
-
-## Reusable agents
-
-Create a `ToolLoopAgent` when configuration should be shared:
+Create tools first, place them in an immutable registry, and attach that
+registry to the Agent Builder:
 
 ```go
-agent := ai.NewToolLoopAgent(model,
-  ai.WithAgentID("travel-assistant"),
-  ai.WithAgentInstructions("Answer carefully and state uncertainty."),
-  ai.WithAgentTools(tools),
-  ai.WithAgentStopWhen(ai.IsStepCount(3)),
+weather, err := tool.New(
+	"weather",
+	"Get the current weather for a city",
+	func(ctx context.Context, input struct {
+		City string `json:"city" description:"City name"`
+	}) (struct {
+		Summary string `json:"summary"`
+	}, error) {
+		return struct {
+			Summary string `json:"summary"`
+		}{Summary: lookupWeather(input.City)}, nil
+	},
 )
+if err != nil {
+	return err
+}
 
-answer, err := agent.Prompt(ctx, "Find the weather in Hanoi")
+tools, err := tool.NewSet(weather)
+if err != nil {
+	return err
+}
+
+assistant, err := agent.New(model).
+	ID("travel-assistant").
+	Instructions("Answer carefully and state uncertainty.").
+	Tools(tools).
+	Temperature(0.2).
+	Build()
+if err != nil {
+	return err
+}
 ```
 
-`Prompt` returns only final text. `Chat` adds caller-owned history. Use the
-agent-bound completion builder when one call needs overrides while retaining
-the agent defaults:
+Builder methods use value semantics: every fluent call returns a new Builder.
+`Build` validates the complete configuration and defensively copies mutable
+values. The resulting `*agent.Agent` has no exported mutable state and may be
+used to create concurrent runs.
+
+Registered tool implementations still need to be concurrency-safe when an
+application executes runs concurrently or enables parallel tools within one
+run.
+
+## Agent defaults
+
+Keep stable behavior on the Agent:
+
+- model and Agent identifier;
+- system instructions;
+- immutable tool registry and default active-tool policy;
+- model settings and provider-specific options;
+- structured-output schema;
+- approval policies, hooks, logging, and tracing;
+- default turn and tool-concurrency limits.
+
+Put request-specific input and overrides on the Runner instead. For example,
+user messages, a tighter turn limit for one request, or a request-local
+temperature belong to that Runner invocation.
+
+`Build` rejects invalid defaults before provider I/O, including a nil model,
+invalid limits, impossible tool choices, unknown active or approval-gated
+tools, invalid output schemas, nil hooks, and incomplete approval
+configuration.
+
+## Agent accessors
+
+An Agent exposes only stable metadata:
 
 ```go
-result, err := agent.Completion("Find the weather in Hanoi").
-  Temperature(0.2).
-  ActiveTools("weather").
-  Send(ctx)
+fmt.Println(assistant.ID())
+fmt.Println(assistant.Instructions())
+fmt.Println(assistant.MaxTurns())
 ```
 
-Unlike `ai.NewCompletion`, the agent-bound builder can execute tools and call
-the model multiple times. See [Completions](/core/completions) for the direct,
-single-call boundary and [Tools](/core/tools) for tool construction and
-approval behavior.
+The tool registry and other mutable-looking values are deliberately not
+exposed through the Agent. Configure them with the Builder or override them on
+a fresh Runner.
 
-## Streaming an agent run
+## Next: run the Agent
 
-`ai.StreamText` and `ToolLoopAgent.Stream` expose step-level events, including
-tool execution and transitions between model calls. This is a higher-level
-stream than the raw normalized model stream returned by a direct completion.
+After building the Agent, create a new Runner for every invocation:
 
-See [Streaming](/core/streaming) for the two event layers and their ownership
-rules.
+```go
+result, err := assistant.Runner().
+	Prompt("Find the weather in Hanoi").
+	MaxTurns(4).
+	Run(ctx)
+```
+
+See [Agent Runner](/core/agent-runner) for ordered input, per-run overrides,
+multi-turn budgets, results, and streaming. Next, see [Hooks](/core/hooks),
+then [Tools](/core/tools) for construction and approval behavior.

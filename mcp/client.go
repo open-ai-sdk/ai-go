@@ -115,7 +115,21 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 
 // ListTools retrieves the list of tools available on the server.
 func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
-	raw, err := c.request(ctx, "tools/list", nil)
+	return c.ListToolsPage(ctx, "")
+}
+
+// ListToolsPage retrieves one tools/list page. An empty cursor requests the
+// first page and keeps the released ListTools behavior source-compatible.
+func (c *Client) ListToolsPage(ctx context.Context, cursor string) (*ListToolsResult, error) {
+	var params json.RawMessage
+	if cursor != "" {
+		encoded, err := json.Marshal(map[string]string{"cursor": cursor})
+		if err != nil {
+			return nil, fmt.Errorf("mcp.Client.ListToolsPage: marshal cursor: %w", err)
+		}
+		params = encoded
+	}
+	raw, err := c.request(ctx, "tools/list", params)
 	if err != nil {
 		return nil, fmt.Errorf("mcp.Client.ListTools: %w", err)
 	}
@@ -125,6 +139,32 @@ func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
 		return nil, fmt.Errorf("mcp.Client.ListTools: parse result: %w", err)
 	}
 	return &res, nil
+}
+
+// ListAllTools follows nextCursor until the server finishes. Cursor loops are
+// rejected instead of silently hanging a discovery request.
+func (c *Client) ListAllTools(ctx context.Context) ([]MCPToolDef, error) {
+	var all []MCPToolDef
+	seen := map[string]struct{}{}
+	cursor := ""
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		page, err := c.ListToolsPage(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page.Tools...)
+		if page.NextCursor == "" {
+			return all, nil
+		}
+		if _, exists := seen[page.NextCursor]; exists {
+			return nil, fmt.Errorf("mcp.Client.ListAllTools: cursor loop at %q", page.NextCursor)
+		}
+		seen[page.NextCursor] = struct{}{}
+		cursor = page.NextCursor
+	}
 }
 
 // CallTool invokes a named tool on the server with the given arguments.

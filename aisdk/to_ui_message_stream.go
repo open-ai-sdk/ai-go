@@ -1,6 +1,7 @@
 package aisdk
 
 import (
+	"iter"
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -52,13 +53,10 @@ type (
 	OutputTokenDetails struct{ TextTokens, ReasoningTokens int }
 )
 
-// ToUIMessageStream converts events from a StreamEventer into a channel of typed Chunks.
-// It bridges StreamResult.Stream() → UI protocol chunks with configurable options.
+// ToUIMessageStream converts an event iterator into a channel of typed Chunks.
 // The returned channel is closed when the stream completes.
-func ToUIMessageStream(sr StreamEventer, msgID string, opts ToUIStreamOptions) <-chan Chunk {
-	sr.DrainUnused()
-
-	eventCh := sr.Stream()
+func ToUIMessageStream(events iter.Seq2[aikit.StepEvent, error], msgID string, opts ToUIStreamOptions) <-chan Chunk {
+	eventCh := eventChannel(events)
 
 	// Determine whether we need to intercept events.
 	needIntercept := !opts.SendReasoning || !opts.SendSources || opts.MessageMetadata != nil

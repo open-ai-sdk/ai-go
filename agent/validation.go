@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/internal/jsonclone"
 	"github.com/open-ai-sdk/ai-go/tool"
 )
 
@@ -13,6 +15,9 @@ type preparedToolCall struct {
 	tc         toolCallState
 	def        ToolDefinition // resolved once here; execute steps reuse it, no re-scan
 	invalidErr error
+	skip       bool
+	skipReason string
+	controlErr error
 }
 
 func preparedToolCallStates(prepared []preparedToolCall) []toolCallState {
@@ -27,7 +32,7 @@ func preparedToolCallStates(prepared []preparedToolCall) []toolCallState {
 }
 
 func prepareToolCalls(
-	ctx context.Context,
+	r *run,
 	tools *ToolSet,
 	repair ToolCallRepairFunc,
 	req Request,
@@ -36,11 +41,43 @@ func prepareToolCalls(
 	stepTools := toolSetForStep(tools, req.Tools)
 	prepared := make([]preparedToolCall, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		fixed, def, err := validateAndRepairToolCall(ctx, stepTools, repair, req, tc)
+		fixed, def, err := validateAndRepairToolCall(r.ctx, stepTools, repair, req, tc)
+		preparedCall := preparedToolCall{tc: fixed, def: def, invalidErr: err}
+		if err != nil {
+			input := ToolCallRepairContext{
+				Instructions: req.Instructions,
+				Messages:     snapshotMessages(req.Messages),
+				ToolCall: ToolCallInfo{
+					ID: fixed.id, Name: fixed.name,
+					Args: append(json.RawMessage(nil), fixed.args...), ArgsSet: true,
+					ThoughtSignature: fixed.thoughtSignature,
+				},
+				Tools: snapshotToolDefinitionsForCallback(stepTools), Error: err,
+			}
+			action, hookErr := r.recoverInvalidToolCall(input)
+			if hookErr != nil {
+				preparedCall.controlErr = hookErr
+			} else {
+				switch action.Kind {
+				case InvalidToolCallFail:
+					preparedCall.controlErr = err
+				case InvalidToolCallRetry:
+					// Keep invalidErr so execution emits a model-visible invalid
+					// result. The driver then spends the next model turn retrying.
+				case InvalidToolCallRepair:
+					preparedCall.tc = applyToolCallRepair(fixed, action.Repaired)
+					preparedCall.def, preparedCall.invalidErr = validateToolCall(stepTools, preparedCall.tc)
+				case InvalidToolCallSkip:
+					preparedCall.invalidErr = nil
+					preparedCall.skip = true
+					preparedCall.skipReason = action.Reason
+				}
+			}
+		}
 		prepared = append(prepared, preparedToolCall{
-			tc:         fixed,
-			def:        def,
-			invalidErr: err,
+			tc: preparedCall.tc, def: preparedCall.def,
+			invalidErr: preparedCall.invalidErr, skip: preparedCall.skip,
+			skipReason: preparedCall.skipReason, controlErr: preparedCall.controlErr,
 		})
 	}
 	return prepared
@@ -78,6 +115,16 @@ func validateAndRepairToolCall(
 		return tc, def, err
 	}
 
+	tc = applyToolCallRepair(tc, repaired)
+
+	def, err = validateToolCall(tools, tc)
+	return tc, def, err
+}
+
+func applyToolCallRepair(tc toolCallState, repaired *ToolCallInfo) toolCallState {
+	if repaired == nil {
+		return tc
+	}
 	if repaired.ID != "" {
 		tc.id = repaired.ID
 	}
@@ -93,13 +140,12 @@ func validateAndRepairToolCall(
 		tc.thoughtSignature = repaired.ThoughtSignature
 	}
 
-	def, err = validateToolCall(tools, tc)
-	return tc, def, err
+	return tc
 }
 
 // validateToolCall checks tc against tools and, on success, returns the
 // matched ToolDefinition so callers resolve a tool call's definition exactly
-// once instead of validating and then re-scanning Definitions during
+// once instead of validating and then re-scanning the registry during
 // execution for ToModelOutput/Timeout. The zero ToolDefinition is returned
 // when tools carries no Definitions at all (any tool name is accepted, same
 // as before Lookup existed).
@@ -110,7 +156,7 @@ func validateToolCall(tools *ToolSet, tc toolCallState) (ToolDefinition, error) 
 			AvailableTools: nil,
 		}
 	}
-	if len(tools.Definitions) == 0 {
+	if tools.Len() == 0 {
 		if err := invalidToolArgumentsError(tc.name, tc.args); err != nil {
 			return ToolDefinition{}, err
 		}
@@ -155,15 +201,16 @@ func invalidToolCallOutput(tc toolCallState, err error) string {
 		return fmt.Sprintf(`{"error":%q}`, fmt.Sprintf("invalid JSON arguments for tool %q", invalidArgsErr.ToolName))
 	}
 
-	return fmt.Sprintf(`{"error":%q}`, err.Error())
+	return tool.Details(classifyToolError(tc.name, err)).ModelOutput.ModelText()
 }
 
 func toolDefinitionNames(tools *ToolSet) []string {
-	if tools == nil || len(tools.Definitions) == 0 {
+	if tools == nil || tools.Len() == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(tools.Definitions))
-	for _, def := range tools.Definitions {
+	definitions := tools.DefinitionsSnapshot()
+	names := make([]string, 0, len(definitions))
+	for _, def := range definitions {
 		names = append(names, def.Name)
 	}
 	return names
@@ -173,7 +220,7 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 	if tools == nil {
 		return nil
 	}
-	if len(tools.Definitions) == 0 {
+	if tools.Len() == 0 {
 		return tools.Restrict(nil)
 	}
 	if len(activeDefs) == 0 {
@@ -182,12 +229,29 @@ func toolSetForStep(tools *ToolSet, activeDefs []ToolDefinition) *ToolSet {
 	return tools.Restrict(activeDefs)
 }
 
-// executeToolCall invokes tools.Executor for a single validated call. def is
+// executeToolCall invokes the immutable tool registry for a validated call. def is
 // the ToolDefinition resolved during validation; its Timeout, if set, bounds
 // this call — the default (zero) leaves ctx as the caller's, since agent
 // tools may legitimately run for minutes and an SDK-imposed default would be
 // a silent behavior change.
-func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState, def ToolDefinition) *ToolResult {
+func executeToolCallForRun(
+	r *run,
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+) *ToolResult {
+	return executeToolCallWithContexts(ctx, tools, tc, def, r.toolsContext, r.runtimeContext)
+}
+
+func executeToolCallWithContexts(
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+	toolsContext aikit.ToolsContext,
+	runtimeContext aikit.RuntimeContext,
+) *ToolResult {
 	result := &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args}
 	if tools == nil {
 		result.Error = &tool.ExecutionError{
@@ -195,23 +259,52 @@ func executeToolCall(ctx context.Context, tools *ToolSet, tc toolCallState, def 
 			Cause:    errors.New("no executor"),
 		}
 		result.Output = fmt.Sprintf(`{"error":"no executor for tool %q"}`, tc.name)
+		result.Disposition = aikit.ToolResultError
 		return result
 	}
-	// Inject tool call ID into context so downstream code (e.g. approval managers) can correlate.
+	// Inject independently owned per-tool/run context and call identity while
+	// preserving parent cancellation/deadline semantics.
 	execCtx := tool.WithToolCallID(ctx, tc.id)
+	if runtimeContext != nil {
+		clonedRuntime := aikit.RuntimeContext(jsonclone.Map(map[string]any(runtimeContext)))
+		execCtx = tool.WithRuntimeContext(execCtx, clonedRuntime)
+	}
+	if value, ok := toolsContext[tc.name]; ok {
+		clonedToolContext := jsonclone.Value(value)
+		execCtx = tool.WithToolContext(execCtx, clonedToolContext)
+	}
 	if def.Timeout > 0 {
 		var cancel context.CancelFunc
 		execCtx, cancel = context.WithTimeout(execCtx, def.Timeout)
 		defer cancel()
 	}
-	output, err := tools.Invoke(execCtx, tc.name, json.RawMessage(tc.args))
+	execution, err := tools.InvokeResult(execCtx, tc.name, json.RawMessage(tc.args))
 	if err != nil {
 		result.Error = classifyToolError(tc.name, err)
-		result.Output = fmt.Sprintf(`{"error":%q}`, err.Error())
+		details := tool.Details(result.Error)
+		result.Content = details.ModelOutput.Parts()
+		result.Output = details.ModelOutput.ModelText()
+		result.Metadata = nil
+		result.Disposition = dispositionForError(details)
 	} else {
-		result.Output = string(output)
+		result.Content = execution.Output.Parts()
+		result.Output = execution.Output.ModelText()
+		result.Metadata = execution.Clone().Metadata
+		result.Disposition = aikit.ToolResultSuccess
 	}
 	return result
+}
+
+func dispositionForError(details tool.ErrorDetails) aikit.ToolResultDisposition {
+	if details.Refusal {
+		return aikit.ToolResultRefused
+	}
+	switch details.Kind {
+	case tool.ErrorKindDenied:
+		return aikit.ToolResultDenied
+	default:
+		return aikit.ToolResultError
+	}
 }
 
 func classifyToolError(toolName string, err error) error {

@@ -23,7 +23,7 @@ func runStructuredOutputEngine(t *testing.T, modelResponse string) []StepEvent {
 		},
 	}}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: model,
 		Request: Request{
 			Output: &OutputSchema{
@@ -147,7 +147,7 @@ func TestStructuredOutput_SchemaViolationTerminatesWithoutDone(t *testing.T) {
 		{textEvt("analysis complete"), finishEvt(FinishReasonStop)},
 		{textEvt(`{"age":"not-an-integer"}`), finishEvt(FinishReasonStop)},
 	}}
-	events := collectRunEvents(RunParams{
+	events := collectRunEvents(runConfig{
 		Model: model,
 		Request: Request{Output: &OutputSchema{
 			Type: "object",
@@ -188,7 +188,7 @@ func TestStructuredOutput_ProviderErrorTerminatesWithoutDone(t *testing.T) {
 		{textEvt("analysis complete"), finishEvt(FinishReasonStop)},
 		{{Type: StreamEventError, Error: providerErr}},
 	}}
-	events := collectRunEvents(RunParams{
+	events := collectRunEvents(runConfig{
 		Model: model,
 		Request: Request{Output: &OutputSchema{
 			Type: "object",
@@ -215,7 +215,7 @@ func TestStructuredOutput_PreservesEffectiveProviderOptions(t *testing.T) {
 		{textEvt("draft"), finishEvt(FinishReasonStop)},
 		{textEvt(`{"ok":true}`), finishEvt(FinishReasonStop)},
 	}}}
-	events := collectRunEvents(RunParams{
+	events := collectRunEvents(runConfig{
 		Model: model,
 		Request: Request{
 			Output:          &OutputSchema{Type: "object"},

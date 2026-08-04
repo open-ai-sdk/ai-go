@@ -3,6 +3,7 @@ package aisdkhttp
 import (
 	"context"
 	"errors"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,7 @@ import (
 const sensitiveError = "secret provider request body"
 
 func TestHandlerPreStreamErrorUsesHTTPStatusAndRedacts(t *testing.T) {
-	run := func(context.Context, []aikit.Message) (<-chan aikit.StepEvent, error) {
+	run := func(context.Context, []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
 		return nil, errors.New(sensitiveError)
 	}
 	recorder := httptest.NewRecorder()
@@ -37,13 +38,12 @@ func TestHandlerPreStreamErrorUsesHTTPStatusAndRedacts(t *testing.T) {
 }
 
 func TestHandlerMidStreamErrorUsesRedactedChunk(t *testing.T) {
-	run := func(context.Context, []aikit.Message) (<-chan aikit.StepEvent, error) {
-		events := make(chan aikit.StepEvent, 3)
-		events <- aikit.StepEvent{Type: aikit.StepEventStepStart}
-		events <- aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "partial"}
-		events <- aikit.StepEvent{Type: aikit.StepEventError, Error: errors.New(sensitiveError)}
-		close(events)
-		return events, nil
+	run := func(context.Context, []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
+		return func(yield func(aikit.StepEvent, error) bool) {
+			yield(aikit.StepEvent{Type: aikit.StepEventStepStart}, nil)
+			yield(aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "partial"}, nil)
+			yield(aikit.StepEvent{}, errors.New(sensitiveError))
+		}, nil
 	}
 	recorder := httptest.NewRecorder()
 	Handler(run).ServeHTTP(
@@ -67,7 +67,7 @@ func TestHandlerMidStreamErrorUsesRedactedChunk(t *testing.T) {
 
 func TestHandlerRejectsInvalidRequestsBeforeRunning(t *testing.T) {
 	called := false
-	run := func(context.Context, []aikit.Message) (<-chan aikit.StepEvent, error) {
+	run := func(context.Context, []aikit.Message) (iter.Seq2[aikit.StepEvent, error], error) {
 		called = true
 		return nil, nil
 	}

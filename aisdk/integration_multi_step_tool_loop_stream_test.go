@@ -25,7 +25,7 @@ func toolResultEvent(id, name, args, output string, pm map[string]any) aikit.Ste
 // TestIntegration_MultiStepToolLoop_ChunkSequence verifies a 2-step tool-loop produces
 // the expected chunk sequence: start, step events, tool chunks, text, finish.
 func TestIntegration_MultiStepToolLoop_ChunkSequence(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		// Step 1: model calls tool_A, gets result
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventToolCallStart, ToolCallID: "tc-1", ToolCallName: "search"},
@@ -77,7 +77,7 @@ func TestIntegration_MultiStepToolLoop_ChunkSequence(t *testing.T) {
 // TestIntegration_MultiStepToolLoop_PersistedParts verifies PersistedMessageBuilder
 // accumulates tool-invocation and text parts correctly from a tool-loop stream.
 func TestIntegration_MultiStepToolLoop_PersistedParts(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventToolCallStart, ToolCallID: "tc-2", ToolCallName: "lookup"},
 		toolResultEvent("tc-2", "lookup", `{"key":"x"}`, `"found"`, nil),

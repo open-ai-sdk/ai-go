@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"sync"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 )
@@ -16,7 +18,7 @@ type run struct {
 	ctx                 context.Context
 	out                 chan<- StepEvent
 	logger              *slog.Logger
-	callbacks           *LifecycleCallbacks
+	callbacks           *lifecycleCallbacks
 	approvalKey         []byte
 	approvalReplayGuard ApprovalReplayGuard
 	// tracer is never nil: runLoop substitutes tracing.NoopTracer{} when the
@@ -31,9 +33,61 @@ type run struct {
 	// retains it — so this flag is what keeps the fully-disabled path
 	// allocation-free instead of merely no-op.
 	tracingEnabled bool
-	// traceContent mirrors RunParams.TraceContent — whether spans may carry
+	// traceContent mirrors runConfig.TraceContent — whether spans may carry
 	// prompt/completion/tool-argument content.
 	traceContent bool
+	maxTurns     int
+	modelCalls   int
+	enforceTurns bool
+	hooks        []Hook
+	hookContext  HookContext
+	hookMu       sync.Mutex
+	hookErr      error
+	// These are the prepared request values for the current model turn. They
+	// are snapshotted into every invocation context before a tool starts.
+	toolsContext         aikit.ToolsContext
+	runtimeContext       aikit.RuntimeContext
+	bufferingTurn        bool
+	bufferedStreamEvents []StepEvent
+}
+
+func (r *run) beginTurnBuffer(enabled bool) { r.bufferingTurn = enabled; r.bufferedStreamEvents = nil }
+
+func (r *run) discardTurnBuffer() { r.bufferedStreamEvents = nil; r.bufferingTurn = false }
+
+func (r *run) flushTurnBuffer() bool {
+	buffered := r.bufferedStreamEvents
+	r.bufferedStreamEvents = nil
+	r.bufferingTurn = false
+	for _, event := range buffered {
+		if !r.emitObserved(event) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *run) emitStreamChunk(event StepEvent, callbacks *lifecycleCallbacks) bool {
+	if r.bufferingTurn {
+		r.bufferedStreamEvents = append(r.bufferedStreamEvents, snapshotStepEvent(event))
+		return true
+	}
+	if !r.emit(event) {
+		return false
+	}
+	if callbacks != nil && callbacks.OnChunk != nil {
+		value := snapshotStepEvent(event)
+		r.safeObserver(func() { callbacks.OnChunk(value) })
+	}
+	return true
+}
+
+func (r *run) reserveModelCall() error {
+	if r.enforceTurns && r.modelCalls >= r.maxTurns {
+		return &MaxTurnsError{MaxTurns: r.maxTurns}
+	}
+	r.modelCalls++
+	return nil
 }
 
 // safeObserver invokes an observer callback (one whose return value does not
@@ -51,7 +105,7 @@ func safeObserver(logger *slog.Logger, fn func()) {
 	fn()
 }
 
-func notifyError(logger *slog.Logger, callbacks *LifecycleCallbacks, err error) {
+func notifyError(logger *slog.Logger, callbacks *lifecycleCallbacks, err error) {
 	if callbacks == nil || callbacks.OnError == nil {
 		return
 	}
@@ -66,6 +120,50 @@ func (r *run) emitError(err error) bool {
 	return true
 }
 
+func (r *run) stopError() error {
+	r.hookMu.Lock()
+	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return r.hookErr
+	}
+	return r.ctx.Err()
+}
+
+func (r *run) setHookError(err error) {
+	if err != nil && r.hookErr == nil {
+		r.hookErr = err
+	}
+}
+
+// observeEvent invokes event hooks in registration order. The stack is
+// serialized so parallel tool paths cannot interleave two event callbacks.
+func (r *run) observeEvent(ev StepEvent) bool {
+	r.hookMu.Lock()
+	defer r.hookMu.Unlock()
+	if r.hookErr != nil {
+		return false
+	}
+	for _, hook := range r.hooks {
+		capability, ok := hook.(StreamEventHook)
+		if !ok {
+			continue
+		}
+		var err error
+		r.safeObserver(func() {
+			err = capability.OnStreamEvent(
+				r.ctx,
+				r.hookContext,
+				snapshotStepEvent(ev),
+			)
+		})
+		if err != nil {
+			r.setHookError(hookFailure(hook, "stream_event", err))
+			return false
+		}
+	}
+	return true
+}
+
 // emit delivers ev to the consumer unless the context is cancelled first. A
 // false return means the consumer is gone (ctx cancelled); the caller must
 // unwind without attempting further sends. Because cancellation means "stop",
@@ -73,6 +171,9 @@ func (r *run) emitError(err error) bool {
 // bug — the consumer asked to stop receiving.
 func (r *run) emit(ev StepEvent) bool {
 	if r.ctx.Err() != nil {
+		return false
+	}
+	if !r.observeEvent(ev) {
 		return false
 	}
 	select {

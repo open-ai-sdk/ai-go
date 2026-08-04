@@ -33,7 +33,7 @@ func TestPrepareStep_NilIsNoOp(t *testing.T) {
 		{textEvt("hello"), finishEvt(FinishReasonStop)},
 	}}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:       model,
 		MaxSteps:    5,
 		PrepareStep: nil,
@@ -62,9 +62,9 @@ func TestPrepareStep_ModelOverride(t *testing.T) {
 	}}
 
 	exec := &mockExecutor{}
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: mainModel,
-		Tools: &ToolSet{Executor: exec},
+		Tools: testToolSet(nil, exec),
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			if ctx.StepNumber == 1 {
 				return &PrepareStepResult{Model: altModel}
@@ -98,9 +98,9 @@ func TestPrepareStep_InstructionsOverride(t *testing.T) {
 	}}
 	exec := &mockExecutor{}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:   model,
-		Tools:   &ToolSet{Executor: exec},
+		Tools:   testToolSet(nil, exec),
 		Request: Request{Instructions: "original system"},
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			if ctx.StepNumber == 1 {
@@ -135,9 +135,9 @@ func TestPrepareStep_ToolChoiceOverride(t *testing.T) {
 	}}
 	exec := &mockExecutor{}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: model,
-		Tools: &ToolSet{Executor: exec},
+		Tools: testToolSet(nil, exec),
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			if ctx.StepNumber == 1 {
 				return &PrepareStepResult{ToolChoice: &ToolChoice{Type: "none"}}
@@ -170,9 +170,9 @@ func TestPrepareStep_StepsAccumulated(t *testing.T) {
 	exec := &mockExecutor{}
 
 	var capturedSteps [][]StepResultInfo
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model: model,
-		Tools: &ToolSet{Executor: exec},
+		Tools: testToolSet(nil, exec),
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			copied := make([]StepResultInfo, len(ctx.Steps))
 			copy(copied, ctx.Steps)
@@ -216,7 +216,7 @@ func TestActiveTools_FiltersByName(t *testing.T) {
 		{Name: "write", Description: "write a file"},
 	}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:   model,
 		Request: Request{Tools: allTools},
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
@@ -257,7 +257,7 @@ func TestActiveTools_NilMeansAllTools(t *testing.T) {
 		{Name: "fetch"},
 	}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:   model,
 		Request: Request{Tools: allTools},
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
@@ -287,7 +287,7 @@ func TestActiveTools_EmptySliceClearsTools(t *testing.T) {
 		{Name: "fetch"},
 	}
 
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:   model,
 		Request: Request{Tools: allTools},
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
@@ -314,13 +314,13 @@ func TestLifecycleCallbacks_OnStepEnd(t *testing.T) {
 	}}
 	exec := &mockExecutor{results: map[string]string{"search": `{"ok":true}`}}
 
-	var stepEvents []StepEndEvent
-	ch := Run(context.Background(), RunParams{
+	var stepEvents []stepEndEvent
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: exec},
+		Tools:    testToolSet(nil, exec),
 		MaxSteps: 5,
-		Callbacks: &LifecycleCallbacks{
-			OnStepEnd: func(ev StepEndEvent) {
+		Callbacks: &lifecycleCallbacks{
+			OnStepEnd: func(ev stepEndEvent) {
 				stepEvents = append(stepEvents, ev)
 			},
 		},
@@ -357,13 +357,13 @@ func TestLifecycleCallbacks_OnEnd(t *testing.T) {
 		{textEvt("hello world"), finishEvt(FinishReasonStop)},
 	}}
 
-	var endEvent *EndEvent
-	ch := Run(context.Background(), RunParams{
+	var capturedEnd *endEvent
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
 		MaxSteps: 5,
-		Callbacks: &LifecycleCallbacks{
-			OnEnd: func(ev EndEvent) {
-				endEvent = &ev
+		Callbacks: &lifecycleCallbacks{
+			OnEnd: func(ev endEvent) {
+				capturedEnd = &ev
 			},
 		},
 	})
@@ -374,14 +374,14 @@ func TestLifecycleCallbacks_OnEnd(t *testing.T) {
 		}
 	}
 
-	if endEvent == nil {
+	if capturedEnd == nil {
 		t.Fatal("expected OnEnd to be called")
 	}
-	if endEvent.Text != "hello world" {
-		t.Errorf("expected text 'hello world', got %q", endEvent.Text)
+	if capturedEnd.Text != "hello world" {
+		t.Errorf("expected text 'hello world', got %q", capturedEnd.Text)
 	}
-	if endEvent.FinishReason != FinishReasonStop {
-		t.Errorf("expected FinishReasonStop, got %q", endEvent.FinishReason)
+	if capturedEnd.FinishReason != FinishReasonStop {
+		t.Errorf("expected FinishReasonStop, got %q", capturedEnd.FinishReason)
 	}
 }
 
@@ -391,10 +391,10 @@ func TestLifecycleCallbacks_OnChunk(t *testing.T) {
 	}}
 
 	var chunkCount int
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
 		MaxSteps: 5,
-		Callbacks: &LifecycleCallbacks{
+		Callbacks: &lifecycleCallbacks{
 			OnChunk: func(ev StepEvent) {
 				chunkCount++
 			},
@@ -418,10 +418,10 @@ func TestLifecycleCallbacks_OnError(t *testing.T) {
 	}}
 
 	var gotError error
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
 		MaxSteps: 5,
-		Callbacks: &LifecycleCallbacks{
+		Callbacks: &lifecycleCallbacks{
 			OnError: func(err error) {
 				gotError = err
 			},

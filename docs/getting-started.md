@@ -7,7 +7,7 @@ go get github.com/open-ai-sdk/ai-go
 ```
 
 Set an OpenAI API key, create one provider client, and derive a Responses API
-model. The `ai` facade owns the common generation API; the provider client owns
+model. Package `llm` owns direct model calls; the provider client owns
 credentials and reusable HTTP resources.
 
 ```go
@@ -18,7 +18,7 @@ import (
   "fmt"
   "os"
 
-  "github.com/open-ai-sdk/ai-go/ai"
+  "github.com/open-ai-sdk/ai-go/llm"
   "github.com/open-ai-sdk/ai-go/provider/openai"
 )
 
@@ -30,17 +30,16 @@ func main() {
 
   model := client.CompletionModel("gpt-5")
 
-  result, err := ai.GenerateText(context.Background(), ai.GenerateTextRequest{
-    Model:        model,
-    Instructions: "Answer concisely.",
-    Messages:     []ai.Message{ai.UserMessage("Why is the sky blue?")},
-  })
+  result, err := llm.NewCompletion(model, "Why is the sky blue?").
+    Instructions("Answer concisely.").
+    Send(context.Background())
   if err != nil { panic(err) }
 
   fmt.Println(result.Text)
 }
 ```
 
-Continue with [agents](/core/agents), learn the
-[provider/client model](/core/providers-and-clients), or select another
-[provider integration](/providers/).
+Next, learn the [provider/client model](/core/providers-and-clients) and
+[direct completions](/core/completions). Then build a reusable
+[Agent](/core/agents) and execute through an [Agent Runner](/core/agent-runner), or select
+another [provider integration](/providers/).

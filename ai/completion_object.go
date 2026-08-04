@@ -2,25 +2,49 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
-	"github.com/open-ai-sdk/ai-go/agent/generate"
+	"github.com/open-ai-sdk/ai-go/agent"
+	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/tool"
 )
 
-// CompletionObjectResult is a typed direct completion and its normalized
-// provider response. Response is present even when decoding fails, allowing a
-// caller to inspect usage, finish metadata, and partial output.
-type CompletionObjectResult[T any] = generate.CompletionObjectResult[T]
+// CompletionObjectResult is the decoded value and provider response from one
+// direct structured completion.
+type CompletionObjectResult[T any] = llm.CompletionObjectResult[T]
 
-// CompleteObject makes exactly one direct model call, requests an object schema
-// derived from T, and unmarshals the completion text into T. It does not run an
-// agent tool loop.
-//
-// The provider may enforce the requested schema. Applications that require
-// local semantic validation should validate the returned Object themselves.
+// CompleteObject performs exactly one model call and decodes its text as T.
+// It never enters the Agent runtime or executes tools.
 func CompleteObject[T any](
 	ctx context.Context,
 	model LanguageModel,
 	request CompletionRequest,
 ) (CompletionObjectResult[T], error) {
-	return generate.CompleteObject[T](ctx, model, request)
+	schema, err := tool.Schema[T]()
+	if err != nil {
+		return CompletionObjectResult[T]{}, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindPrompt, Reason: "invalid output request", Cause: err,
+		}
+	}
+	request.Output = &llm.OutputSchema{Type: "object", Schema: schema}
+	response, err := llm.Complete(ctx, model, request)
+	result := CompletionObjectResult[T]{Response: response}
+	if err != nil {
+		return result, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindPrompt, Reason: "completion failed", Cause: err,
+		}
+	}
+	if response == nil || strings.TrimSpace(response.Text) == "" {
+		return result, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty",
+		}
+	}
+	if err := json.Unmarshal([]byte(response.Text), &result.Object); err != nil {
+		return result, &agent.StructuredOutputError{
+			Kind: agent.StructuredOutputErrorKindJSONDecode, Path: "$",
+			Reason: "is invalid JSON: " + err.Error(), Cause: err,
+		}
+	}
+	return result, nil
 }

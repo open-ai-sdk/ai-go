@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"net/http"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -15,11 +16,11 @@ import (
 
 // RunFunc starts an agent run for the messages decoded from a v7 chat request.
 // Returning an error reports a pre-stream failure as HTTP 500. Errors emitted
-// through the returned event channel are redacted and encoded as error chunks.
+// through the returned sequence are redacted and encoded as error chunks.
 type RunFunc func(
 	ctx context.Context,
 	messages []aikit.Message,
-) (<-chan aikit.StepEvent, error)
+) (iter.Seq2[aikit.StepEvent, error], error)
 
 // Handler returns an http.Handler for v7 chat POSTs.
 func Handler(run RunFunc) http.Handler {
@@ -56,13 +57,38 @@ func Handler(run RunFunc) http.Handler {
 		if messageID == "" {
 			messageID = newMessageID()
 		}
-		chunks := aisdk.NewChunkProducer(messageID).Produce(events).Chunks
+		chunks := aisdk.NewChunkProducer(messageID).Produce(eventChannel(ctx, events)).Chunks
 		writer := newSSEWriter(w, cancel)
 		if err := aisdk.WriteSSEStream(writer, chunks); err != nil {
 			cancel()
 			return
 		}
 	})
+}
+
+func eventChannel(
+	ctx context.Context,
+	events iter.Seq2[aikit.StepEvent, error],
+) <-chan aikit.StepEvent {
+	stream := make(chan aikit.StepEvent)
+	go func() {
+		defer close(stream)
+		for event, err := range events {
+			if err != nil {
+				select {
+				case stream <- aikit.StepEvent{Type: aikit.StepEventError, Error: err}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			select {
+			case stream <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return stream
 }
 
 func decodeEnvelope(body io.Reader) (aisdk.ChatRequestEnvelope, error) {

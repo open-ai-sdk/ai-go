@@ -6,35 +6,46 @@ depending directly on one another.
 
 ```mermaid
 flowchart TD
-    Application --> Facade["ai facade"]
-    Facade --> Generate["agent/generate"]
-    Generate --> Runtime["agent runtime"]
-    Generate --> LLM["llm contracts and completions"]
-    Runtime --> LLM
+    Application --> AI["ai non-Agent conveniences"]
+    Application --> Builder["agent.Builder"]
+    Application --> Direct["llm direct completion"]
+    Builder --> Agent["immutable agent.Agent"]
+    Agent --> Runner["per-run agent.Runner"]
+    Runner --> LLM["llm model contract"]
+    Direct --> LLM
+    AI --> LLM
 
     Providers["provider/*"] --> LLM
     Providers --> Transport["transport"]
 
     LLM --> Aikit["aikit shared vocabulary"]
     Transport --> Aikit
-    Runtime --> Tools["tool"]
+    Runner --> Tools["immutable tool.Set"]
     MCP["mcp"] --> Tools
-    UI["aisdk + aisdkhttp"] --> Aikit
+    Runner --> HTTP["aisdkhttp"]
+    HTTP --> UI["aisdk"]
+    HTTP --> Aikit
+    UI --> Aikit
 ```
 
 ## Public layers
 
 ### Application facade
 
-The `ai` package exposes the common generation workflow and aliases the shared
-message, tool, and result vocabulary. Applications can use lower packages
-directly when they need more control.
+The `ai` package contains non-Agent convenience operations. Agent contracts
+are not aliased or forwarded there; applications import their canonical owners
+directly.
 
 ### Completion and agent execution
 
-`llm` owns direct model contracts and request builders. `agent` owns the
-multi-step tool loop, while `agent/generate` aggregates results and provides the
-high-level generation API.
+`llm` owns direct model contracts and completion request builders. `agent` owns
+one public multi-turn lifecycle: a value Builder creates an immutable Agent,
+and each value Runner owns one invocation's ordered messages and overrides.
+`Run` and `Stream` share one driver and Result reducer.
+
+This ordering is reflected in the concept guides: first configure an
+[Agent](/core/agents), then create a Runner and execute through the
+[Agent Runner](/core/agent-runner) lifecycle.
 
 ### Shared vocabulary
 
@@ -51,7 +62,9 @@ handling, cancellation, and provider HTTP errors.
 
 ### Integrations
 
-`mcp` adapts Model Context Protocol tools. `aisdk` and `aisdkhttp` translate
-normalized events into AI SDK v7-compatible UI streams at the HTTP boundary.
+`mcp` adapts Model Context Protocol tools into the immutable registry.
+`aisdkhttp` consumes the Runner's single-owner `aikit.StepEvent` iterator;
+`aisdk` translates only leaf events into AI SDK v7-compatible UI streams and
+does not import `agent`.
 
 See the [package map](/reference/package-map) for package-by-package ownership.

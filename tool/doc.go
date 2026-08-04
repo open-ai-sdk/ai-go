@@ -3,6 +3,13 @@
 //
 // Native tools are created with [New]. Their input schema is derived from the
 // handler's Go input type when the tool is constructed, while invocation uses
-// JSON at the erased runtime boundary. Runtime-described tools such as MCP
-// tools use [NewDynamic].
+// JSON at the erased runtime boundary. Implement [Typed] and call [Adapt] for
+// a struct-based tool with state or a hand-authored schema. Runtime-described
+// tools such as MCP tools use [NewDynamic]. A [Set] is immutable and snapshots
+// definitions with their exact invokers. [ResultInvokable] and
+// [ExecutionResult] add ordered text/JSON/image output and host-only metadata
+// without changing the released [Invokable] API. [Details] produces safe model
+// feedback; operator causes remain in the normal Go error chain. Handler
+// contexts retain cancellation, deadlines, configured tool/run values, and
+// the tool-call ID.
 package tool

@@ -1,5 +1,7 @@
 package agent
 
+import "encoding/json"
+
 // streamResult holds accumulated metadata from consuming a model stream.
 type streamResult struct {
 	text         string
@@ -19,7 +21,7 @@ func consumeStream(
 	r *run,
 	eventCh <-chan StreamEvent,
 	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 ) (streamResult, bool) {
 	var sr streamResult
 	for {
@@ -45,21 +47,18 @@ func applyStreamEvent(
 	ev StreamEvent,
 	sr *streamResult,
 	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 ) bool {
 	emitChunk := func(stepEv StepEvent) bool {
-		if !r.emit(stepEv) {
-			return false
-		}
-		if cb != nil && cb.OnChunk != nil {
-			callbackEvent := snapshotStepEvent(stepEv)
-			r.safeObserver(func() { cb.OnChunk(callbackEvent) })
-		}
-		return true
+		return r.emitStreamChunk(stepEv, cb)
 	}
 	switch ev.Type {
 	case StreamEventTextDelta:
 		sr.text += ev.TextDelta
+		if err := r.observeTextDelta(TextDeltaEvent{Delta: ev.TextDelta, Text: sr.text}); err != nil {
+			r.setHookError(err)
+			return true
+		}
 		return !emitChunk(StepEvent{Type: StepEventTextDelta, TextDelta: ev.TextDelta})
 
 	case StreamEventReasoningDelta:
@@ -101,6 +100,16 @@ func applyStreamEvent(
 		if len(ev.Warnings) > 0 {
 			sr.warnings = append(sr.warnings, ev.Warnings...)
 		}
+		response := CompletionResponseEvent{
+			Text: sr.text, Reasoning: sr.reasoning, MessageID: sr.messageID, FinishReason: sr.finish,
+		}
+		if sr.usage != nil {
+			response.Usage = *sr.usage
+		}
+		if err := r.observeStreamFinish(StreamFinishEvent{CompletionResponseEvent: response}); err != nil {
+			r.setHookError(err)
+			return true
+		}
 
 	case StreamEventError:
 		r.emitError(ev.Error)
@@ -116,7 +125,7 @@ func handleToolCallDelta(
 	r *run,
 	ev StreamEvent,
 	acc *toolCallAccumulator,
-	cb *LifecycleCallbacks,
+	cb *lifecycleCallbacks,
 ) bool {
 	if acc == nil {
 		return true
@@ -131,11 +140,15 @@ func handleToolCallDelta(
 			ToolCallArgsDelta: ev.ToolCallArgsDelta,
 			ThoughtSignature:  ev.ThoughtSignature,
 		}
-		if !r.emit(stepEv) {
+		if err := r.observeToolCallDelta(ToolCallDeltaEvent{
+			ID: ev.ToolCallID, Name: ev.ToolCallName, Index: ev.ToolCallIndex,
+			Delta: json.RawMessage(ev.ToolCallArgsDelta),
+		}); err != nil {
+			r.setHookError(err)
 			return false
 		}
-		if cb != nil && cb.OnChunk != nil {
-			r.safeObserver(func() { cb.OnChunk(stepEv) })
+		if !r.emitStreamChunk(stepEv, cb) {
+			return false
 		}
 	} else if ev.ToolCallArgsDelta != "" {
 		stepEv := StepEvent{
@@ -144,11 +157,14 @@ func handleToolCallDelta(
 			ToolCallID:        ev.ToolCallID,
 			ToolCallArgsDelta: ev.ToolCallArgsDelta,
 		}
-		if !r.emit(stepEv) {
+		if err := r.observeToolCallDelta(ToolCallDeltaEvent{
+			ID: ev.ToolCallID, Index: ev.ToolCallIndex, Delta: json.RawMessage(ev.ToolCallArgsDelta),
+		}); err != nil {
+			r.setHookError(err)
 			return false
 		}
-		if cb != nil && cb.OnChunk != nil {
-			r.safeObserver(func() { cb.OnChunk(stepEv) })
+		if !r.emitStreamChunk(stepEv, cb) {
+			return false
 		}
 	}
 	return true

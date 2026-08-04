@@ -47,8 +47,8 @@ func TestEmitOnEndAddsEveryUsageCounter(t *testing.T) {
 		TotalTokens:        13, ToolUsePromptTokens: 3,
 		Raw: map[string]any{"step": float64(1)},
 	}
-	var got EndEvent
-	emitOnEnd(&LifecycleCallbacks{OnEnd: func(event EndEvent) { got = event }}, []StepResultInfo{
+	var got endEvent
+	emitOnEnd(&lifecycleCallbacks{OnEnd: func(event endEvent) { got = event }}, []StepResultInfo{
 		{Usage: &first},
 		{Usage: &second},
 	}, streamResult{})
@@ -64,9 +64,9 @@ func TestEmitOnEndAddsEveryUsageCounter(t *testing.T) {
 }
 
 func TestEmitOnEndUsesTerminalStreamMessageID(t *testing.T) {
-	var got EndEvent
+	var got endEvent
 	emitOnEnd(
-		&LifecycleCallbacks{OnEnd: func(event EndEvent) { got = event }},
+		&lifecycleCallbacks{OnEnd: func(event endEvent) { got = event }},
 		[]StepResultInfo{{MessageID: "older"}},
 		streamResult{messageID: "terminal"},
 	)

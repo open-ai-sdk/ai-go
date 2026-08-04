@@ -9,18 +9,22 @@ specific service.
 
 - [Get started](/getting-started) — install ai-go, create a provider client,
   and generate text.
-- [Agents](/core/agents) — configure reusable and request-scoped generation
-  workflows.
-- [Tools](/core/tools) — define schema-backed tools and execute multi-step
-  model calls.
+- [Agents](/core/agents) — configure reusable immutable model, tool, and policy
+  defaults.
+- [Agent Runner](/core/agent-runner) — add ordered input and request-local
+  overrides, then execute or stream one invocation.
+- [Hooks](/core/hooks) — add run-local lifecycle observation, policy,
+  model-turn retry, and streaming delta handling.
+- [Tools](/core/tools) — define schema-backed tools with rich output, safe
+  failures, and request context.
 
 ## Understand the architecture
 
 - [Why ai-go](/docs/why-ai-go) explains the design goals and package boundaries.
 - [Architecture](/docs/architecture) maps the public layers and dependency
   direction.
-- [Concepts](/core/) covers providers, completions, streaming, structured
-  output, and tools.
+- [Concepts](/core/) covers providers, completions, messages, Agents, Agent
+  Runner, Hooks, Tools, streaming, and structured output in dependency order.
 
 ## Connect services
 

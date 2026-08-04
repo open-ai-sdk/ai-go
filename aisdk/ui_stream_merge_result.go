@@ -1,20 +1,13 @@
 package aisdk
 
 import (
+	"iter"
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// StreamEventer is satisfied by *ai.StreamResult; using an interface avoids
-// an import cycle between the aisdk and ai packages.
-type StreamEventer interface {
-	Stream() <-chan aikit.StepEvent
-	// DrainUnused prevents fan-out deadlocks when only Stream() is consumed.
-	DrainUnused()
-}
-
-// mergeConfig holds options for MergeStreamResult.
+// mergeConfig holds options for Writer.Merge.
 type mergeConfig struct {
 	toolResultHook     ToolResultHook
 	sourceHook         SourceHook
@@ -22,7 +15,7 @@ type mergeConfig struct {
 	persistenceBuilder *PersistedMessageBuilder
 }
 
-// MergeOption configures MergeStreamResult behavior.
+// MergeOption configures Writer.Merge behavior.
 type MergeOption func(*mergeConfig)
 
 // MergeWithToolResultHook sets a hook called after each tool result is emitted.
@@ -46,7 +39,7 @@ func MergeWithOnEnd(fn func(text string)) MergeOption {
 	}
 }
 
-// MergeStreamResult pipes events from sr through this Writer using a temporary
+// Merge pipes events through this Writer using a temporary
 // Adapter. Custom chunks can be written to wr before and after the call.
 // Returns the full accumulated assistant text.
 //
@@ -55,13 +48,13 @@ func MergeWithOnEnd(fn func(text string)) MergeOption {
 //	wr := aisdk.NewWriter(sseWriter)
 //	wr.WriteStart(msgID)
 //	wr.WriteData("plan", planData)           // custom data before stream
-//	text := wr.MergeStreamResult(result)     // model stream events
+//	text := wr.Merge(events)                 // model stream events
 //	wr.WriteData("sources", sourcesData)     // custom data after stream
 //	wr.WriteFinish()
 //
-// Note: MergeStreamResult does NOT emit start or finish chunks; lifecycle
+// Note: Merge does NOT emit start or finish chunks; lifecycle
 // management (WriteStart / WriteFinish) remains the caller's responsibility.
-func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) string {
+func (wr *Writer) Merge(events iter.Seq2[aikit.StepEvent, error], opts ...MergeOption) string {
 	cfg := &mergeConfig{}
 	for _, o := range opts {
 		o(cfg)
@@ -71,10 +64,7 @@ func (wr *Writer) MergeStreamResult(sr StreamEventer, opts ...MergeOption) strin
 	// chunk — the caller manages start/finish lifecycle.
 	producer := newMergeProducer()
 
-	// Drain unused channels to prevent fan-out goroutine deadlock.
-	sr.DrainUnused()
-
-	ch := sr.Stream()
+	ch := eventChannel(events)
 
 	// If a tool result hook is set, intercept events before the producer.
 	producerCh := ch

@@ -1,28 +1,48 @@
 package aisdk
 
 import (
+	"errors"
+	"iter"
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
 
-// mockStreamEventer implements StreamEventer for testing without importing package ai.
-type mockStreamEventer struct {
-	ch      chan aikit.StepEvent
-	drained bool
-}
-
-func newMockStreamEventer(evs ...aikit.StepEvent) *mockStreamEventer {
-	ch := make(chan aikit.StepEvent, len(evs))
-	for _, e := range evs {
-		ch <- e
+func newEventStream(events ...aikit.StepEvent) iter.Seq2[aikit.StepEvent, error] {
+	return func(yield func(aikit.StepEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
 	}
-	close(ch)
-	return &mockStreamEventer{ch: ch}
 }
 
-func (m *mockStreamEventer) Stream() <-chan aikit.StepEvent { return m.ch }
-func (m *mockStreamEventer) DrainUnused()                   { m.drained = true }
+func TestToUIMessageStream_IteratorErrorBecomesTerminalWireError(t *testing.T) {
+	streamErr := errors.New("provider credentials leaked")
+	events := func(yield func(aikit.StepEvent, error) bool) {
+		if !yield(aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "partial"}, nil) {
+			return
+		}
+		yield(aikit.StepEvent{}, streamErr)
+	}
+
+	chunks := drainChunks(ToUIMessageStream(events, "msg-error", ToUIStreamOptions{}))
+	if _, ok := findChunk(chunks, ChunkTextDelta); !ok {
+		t.Fatal("expected partial text before the iterator error")
+	}
+	errorChunk, ok := findChunk(chunks, ChunkError)
+	if !ok {
+		t.Fatal("expected iterator error to produce an error chunk")
+	}
+	if got, _ := errorChunk.Fields["errorText"].(string); got == streamErr.Error() {
+		t.Fatal("iterator error leaked its raw text to the wire")
+	}
+	finish, ok := findChunk(chunks, ChunkFinish)
+	if !ok || finish.Fields["finishReason"] != "error" {
+		t.Fatalf("expected terminal error finish, got %#v", finish)
+	}
+}
 
 // drainChunks reads all chunks from ch into a slice.
 func drainChunks(ch <-chan Chunk) []Chunk {
@@ -56,7 +76,7 @@ func collectChunks(chunks []Chunk, typ string) []Chunk {
 
 // TestToUIMessageStream_TextDeltas verifies text deltas become text-delta chunks.
 func TestToUIMessageStream_TextDeltas(t *testing.T) {
-	sr := newMockStreamEventer(
+	events := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "Hello "},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "world"},
@@ -64,12 +84,8 @@ func TestToUIMessageStream_TextDeltas(t *testing.T) {
 		aikit.StepEvent{Type: aikit.StepEventDone},
 	)
 
-	ch := ToUIMessageStream(sr, "msg-1", ToUIStreamOptions{SendReasoning: true, SendSources: true})
+	ch := ToUIMessageStream(events, "msg-1", ToUIStreamOptions{SendReasoning: true, SendSources: true})
 	chunks := drainChunks(ch)
-
-	if !sr.drained {
-		t.Error("expected DrainUnused to be called")
-	}
 
 	deltas := collectChunks(chunks, ChunkTextDelta)
 	if len(deltas) != 2 {
@@ -93,7 +109,7 @@ func TestToUIMessageStream_TextDeltas(t *testing.T) {
 
 // TestToUIMessageStream_SendReasoningTrue forwards reasoning chunks.
 func TestToUIMessageStream_SendReasoningTrue(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
@@ -117,7 +133,7 @@ func TestToUIMessageStream_SendReasoningTrue(t *testing.T) {
 
 // TestToUIMessageStream_SendReasoningFalse suppresses reasoning events.
 func TestToUIMessageStream_SendReasoningFalse(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventReasoningDelta, ReasoningDelta: "thinking..."},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "answer"},
@@ -142,7 +158,7 @@ func TestToUIMessageStream_SendReasoningFalse(t *testing.T) {
 
 // TestToUIMessageStream_SendSourcesTrue forwards source events.
 func TestToUIMessageStream_SendSourcesTrue(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventSource, Source: &aikit.Source{
 			ID: "src-1", URL: "https://example.com", Title: "Example",
@@ -162,7 +178,7 @@ func TestToUIMessageStream_SendSourcesTrue(t *testing.T) {
 
 // TestToUIMessageStream_SendSourcesFalse suppresses source events.
 func TestToUIMessageStream_SendSourcesFalse(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventSource, Source: &aikit.Source{
 			ID: "src-1", URL: "https://example.com", Title: "Example",
@@ -185,7 +201,7 @@ func TestToUIMessageStream_SendSourcesFalse(t *testing.T) {
 
 // TestToUIMessageStream_MessageMetadata attaches metadata to finish chunk.
 func TestToUIMessageStream_MessageMetadata(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
 		aikit.StepEvent{Type: aikit.StepEventUsage, Usage: &aikit.Usage{
@@ -239,7 +255,7 @@ func TestToUIMessageStream_MessageMetadata(t *testing.T) {
 
 // TestToUIMessageStream_ChannelCloses verifies the output channel closes when the stream completes.
 func TestToUIMessageStream_ChannelCloses(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "x"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -263,7 +279,7 @@ func boolPtr(b bool) *bool { return &b }
 
 // TestToUIMessageStream_SendStartFalse suppresses the start chunk.
 func TestToUIMessageStream_SendStartFalse(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -287,7 +303,7 @@ func TestToUIMessageStream_SendStartFalse(t *testing.T) {
 
 // TestToUIMessageStream_SendFinishFalse suppresses the finish chunk.
 func TestToUIMessageStream_SendFinishFalse(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -311,7 +327,7 @@ func TestToUIMessageStream_SendFinishFalse(t *testing.T) {
 
 // TestToUIMessageStream_DefaultSendStartFinish verifies both are emitted by default.
 func TestToUIMessageStream_DefaultSendStartFinish(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -335,7 +351,7 @@ func TestToUIMessageStream_DefaultSendStartFinish(t *testing.T) {
 
 // TestToUIMessageStream_NilMetadataCallback uses default path without metadata.
 func TestToUIMessageStream_NilMetadataCallback(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "plain"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},

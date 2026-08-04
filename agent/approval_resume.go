@@ -163,10 +163,10 @@ type approvalResumePlan struct {
 	grantsByCall map[*historyApprovalCall]ApprovalGrant
 }
 
-func prepareApprovalCalls(r *run, params RunParams, calls []*historyApprovalCall) (*approvalResumePlan, error) {
+func prepareApprovalCalls(r *run, params runConfig, calls []*historyApprovalCall) (*approvalResumePlan, error) {
 	activeTools := params.Request.Tools
 	if activeTools == nil && params.Tools != nil {
-		activeTools = params.Tools.Definitions
+		activeTools = params.Tools.DefinitionsSnapshot()
 	}
 	plan := &approvalResumePlan{
 		stepTools:    toolSetForStep(params.Tools, activeTools),
@@ -181,7 +181,7 @@ func prepareApprovalCalls(r *run, params RunParams, calls []*historyApprovalCall
 	return plan, nil
 }
 
-func prepareApprovalCall(r *run, params RunParams, call *historyApprovalCall, plan *approvalResumePlan) error {
+func prepareApprovalCall(r *run, params runConfig, call *historyApprovalCall, plan *approvalResumePlan) error {
 	tc := call.tc
 	policy := params.ToolApproval[tc.name]
 	requiresApproval := false
@@ -243,7 +243,7 @@ func verifyCompletedApprovalCall(r *run, call *historyApprovalCall, request Appr
 // any tool. It then replaces client-only response parts with provider-facing
 // tool results. Correlation and provenance come from signed message history;
 // the runtime retains no per-request state between invocations.
-func resumeToolApprovals(r *run, params RunParams, history []Message) ([]Message, error) {
+func resumeToolApprovals(r *run, params runConfig, history []Message) ([]Message, error) {
 	if len(params.ToolApproval) == 0 {
 		return history, nil
 	}
@@ -397,7 +397,7 @@ func executeReservedToolCall(
 			err = errors.Join(err, fmt.Errorf("agent: complete approval capability: %w", completeErr))
 		}
 	}()
-	result = executeToolCall(r.ctx, tools, tc, definition)
+	result = executeToolCallForRun(r, r.ctx, tools, tc, definition)
 	return result, nil
 }
 

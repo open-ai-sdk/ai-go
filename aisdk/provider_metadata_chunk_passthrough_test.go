@@ -31,7 +31,7 @@ func TestWithProviderMetadata_NilFields_AllocatesMap(t *testing.T) {
 // TestChunkProducer_ProviderMetadata_TextDelta verifies text-delta chunks carry providerMetadata.
 func TestChunkProducer_ProviderMetadata_TextDelta(t *testing.T) {
 	pm := map[string]any{"gemini": map[string]any{"safetyRating": "safe"}}
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi", ProviderMetadata: pm},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},
@@ -52,7 +52,7 @@ func TestChunkProducer_ProviderMetadata_TextDelta(t *testing.T) {
 
 // TestChunkProducer_ProviderMetadata_AbsentWhenNil verifies providerMetadata is absent when engine does not set it.
 func TestChunkProducer_ProviderMetadata_AbsentWhenNil(t *testing.T) {
-	sr := newMockStreamEventer(
+	sr := newEventStream(
 		aikit.StepEvent{Type: aikit.StepEventStepStart},
 		aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hi"},
 		aikit.StepEvent{Type: aikit.StepEventStepEnd, FinishReason: aikit.FinishReasonStop},

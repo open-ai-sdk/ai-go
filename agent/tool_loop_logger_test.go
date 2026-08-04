@@ -31,7 +31,7 @@ func (h *recordingHandler) count() int {
 // TestRunLoop_LoggerReceivesRecoveredPanic reuses the panicExecutor fixture
 // from tool-loop-panic_test.go: a sequential tool-executor panic is a control
 // callback, so safego.Recover surfaces it as a run-ending *PanicError. This
-// test's addition is the Logger assertion — proving RunParams.Logger (set by
+// test's addition is the Logger assertion — proving runConfig.Logger (set by
 // ai.WithLogger at the public API layer) actually receives that event instead
 // of the panic only reaching the returned error.
 func TestRunLoop_LoggerReceivesRecoveredPanic(t *testing.T) {
@@ -41,9 +41,9 @@ func TestRunLoop_LoggerReceivesRecoveredPanic(t *testing.T) {
 	model := &mockModel{calls: [][]StreamEvent{
 		{toolCallEvt(0, "tc1", "boom", `{}`), finishEvt(FinishReasonToolCalls)},
 	}}
-	ch := Run(context.Background(), RunParams{
+	ch := driveStream(context.Background(), runConfig{
 		Model:    model,
-		Tools:    &ToolSet{Executor: panicExecutor{}},
+		Tools:    testToolSet(nil, panicExecutor{}),
 		MaxSteps: 3,
 		Logger:   logger,
 	})

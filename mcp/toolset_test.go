@@ -81,11 +81,10 @@ func TestToolSetFromClient_CreatesInvokableRemoteTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolSetFromClient: %v", err)
 	}
-	if set.Executor != nil {
-		t.Fatal("remote tools should be registered as invokers, not through the legacy executor seam")
-	}
-
 	canonical := QualifiedName("remote", "search")
+	if _, ok := set.Invoker(canonical); !ok {
+		t.Fatal("remote tool should be registered as an invoker")
+	}
 	definition, ok := set.Lookup(canonical)
 	if !ok {
 		t.Fatalf("missing definition %q", canonical)
@@ -104,6 +103,13 @@ func TestToolSetFromClient_CreatesInvokableRemoteTool(t *testing.T) {
 	}
 	if string(output) != "first\nsecond" {
 		t.Fatalf("output = %q, want raw string output %q", output, "first\nsecond")
+	}
+	rich, err := set.InvokeResult(context.Background(), canonical, json.RawMessage(`{"query":"sdk"}`))
+	if err != nil {
+		t.Fatalf("InvokeResult: %v", err)
+	}
+	if parts := rich.Output.Parts(); len(parts) != 2 || parts[0].Text != "first" || parts[1].Text != "second" {
+		t.Fatalf("rich parts = %#v", parts)
 	}
 	if transport.calledName != "search" {
 		t.Fatalf("remote name = %q, want %q", transport.calledName, "search")

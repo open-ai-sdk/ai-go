@@ -25,7 +25,7 @@ type ToolResultHook func(wr *Writer, result ToolResult)
 // Callers can use this to collect grounding sources for persistence.
 type SourceHook func(wr *Writer, sourceID, url, title string)
 
-// Adapter translates a channel of aikit.StepEvents into UI message stream chunks.
+// Adapter translates an iterator of aikit.StepEvents into UI message stream chunks.
 // It is transport-agnostic: callers can write to an http.ResponseWriter, a buffer, etc.
 //
 // For custom data-* chunks or source chunks between or after stream events,

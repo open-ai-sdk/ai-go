@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/internal/safego"
 	"github.com/open-ai-sdk/ai-go/internal/tracing"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// Stream executes the tool loop and streams StepEvents onto the returned
-// channel. The channel is closed when the run completes, the context is
-// cancelled, or an unrecoverable error occurs.
-func Stream(ctx context.Context, params RunParams) <-chan StepEvent {
+// driveStream is the private channel-backed driver used by Runner's iterator.
+// The channel closes on completion, cancellation, or terminal failure.
+func driveStream(ctx context.Context, params runConfig) <-chan StepEvent {
 	ch := make(chan StepEvent, 64)
 	go func() {
 		// This is the package's outer ownership boundary. It deliberately wraps
@@ -39,7 +39,7 @@ func emitTerminalError(
 	ch chan StepEvent,
 	err error,
 	logger *slog.Logger,
-	callbacks *LifecycleCallbacks,
+	callbacks *lifecycleCallbacks,
 ) {
 	event := StepEvent{Type: StepEventError, Error: err}
 	for {
@@ -60,14 +60,8 @@ func emitTerminalError(
 	}
 }
 
-// Run executes the tool loop and returns its event stream. It is equivalent
-// to [Stream]; both names are kept because callers commonly describe the
-// blocking aggregation path as a run and the live path as a stream.
-func Run(ctx context.Context, params RunParams) <-chan StepEvent {
-	return Stream(ctx, params)
-}
-
-func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error {
+//nolint:gocyclo // The driver keeps one explicit state machine and one cleanup boundary.
+func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error {
 	ctx, tracer, tracingEnabled := initializeRunTracing(ctx, params)
 	ctx, runSpan := tracer.Start(ctx, "ai.run")
 
@@ -84,7 +78,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// which of the loop's several exit points was taken. This mirrors the
 	// last completed step's outcome rather than a lifetime sum across steps —
 	// the cumulative total remains available to the caller via
-	// GenerateTextResult.Usage in the ai package.
+	// Result.Usage on the canonical aggregated result.
 	defer func() {
 		if tracingEnabled {
 			runSpan.SetAttributes(stepAttrs(lastSR)...)
@@ -97,6 +91,8 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		approvalKey:         append([]byte(nil), params.ApprovalKey...),
 		approvalReplayGuard: params.ApprovalReplayGuard,
 		tracer:              tracer, tracingEnabled: tracingEnabled, traceContent: params.TraceContent,
+		maxTurns: params.MaxSteps, enforceTurns: params.ErrorOnMaxTurns,
+		hooks: append([]Hook(nil), params.Hooks...), hookContext: params.HookContext,
 	}
 	history, proceed, err := prepareRunHistory(r, params)
 	if err != nil {
@@ -111,21 +107,31 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// gate. A caller that sets neither now gets exactly as many steps as
 	// StopWhen allows, not an implicit cap.
 	for step := 0; params.MaxSteps <= 0 || step < params.MaxSteps; step++ {
+		r.hookContext.Turn = step + 1
+		r.beginTurnBuffer(r.hasModelTurnHooks())
 		// emit's ctx-guarded send subsumes the old explicit ctx.Err() check: a
 		// cancelled context makes the StepStart send return false and unwinds.
-		if !r.emitObserved(StepEvent{Type: StepEventStepStart, StepNumber: step}) {
-			return ctx.Err()
+		if !r.emitStreamChunk(StepEvent{Type: StepEventStepStart, StepNumber: step}, params.Callbacks) {
+			return r.stopError()
 		}
 
 		model := params.Model
-		req := params.Request
+		req := cloneRequest(params.Request)
 		req.Instructions = "" // already prepended as system message in history
 		req.Messages = history
-		if req.Tools == nil && params.Tools != nil && len(params.Tools.Definitions) > 0 {
-			req.Tools = params.Tools.Definitions
+		if req.Tools == nil && params.Tools != nil && params.Tools.Len() > 0 {
+			req.Tools = params.Tools.DefinitionsSnapshot()
 		}
 
 		applyPrepareStep(params, step, completedSteps, &model, &req)
+		var err error
+		req, err = r.beforeCompletion(req)
+		if err != nil {
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
 		lastModel = model
 		lastRequest = req
 
@@ -163,6 +169,17 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 			)
 		}
 
+		if err := r.reserveModelCall(); err != nil {
+			cancelStep()
+			modelSpan.RecordError(err)
+			modelSpan.End()
+			stepSpan.RecordError(err)
+			stepSpan.End()
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
 		eventCh, err := model.Stream(modelCtx, req)
 		if err != nil {
 			// Stream startup failed before there is a channel to consume.
@@ -171,8 +188,10 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 			modelSpan.End()
 			stepSpan.RecordError(err)
 			stepSpan.End()
-			r.emitError(fmt.Errorf("step %d: start stream: %w", step, err))
-			return ctx.Err()
+			if r.emitError(fmt.Errorf("step %d: start stream: %w", step, err)) {
+				return nil
+			}
+			return r.stopError()
 		}
 
 		acc := newToolCallAccumulator()
@@ -189,19 +208,73 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 		}
 		modelSpan.End()
 		if interrupted {
+			r.discardTurnBuffer()
 			stepSpan.End()
-			return ctx.Err()
+			return r.stopError()
 		}
 		lastSR = sr
 		fullText := sr.text
+		response := CompletionResponseEvent{
+			Text: sr.text, Reasoning: sr.reasoning, MessageID: sr.messageID, FinishReason: sr.finish,
+		}
+		if sr.usage != nil {
+			response.Usage = *sr.usage
+		}
+		if err := r.observeCompletionResponse(response); err != nil {
+			r.discardTurnBuffer()
+			stepSpan.End()
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
+		turnAction, err := r.modelTurn(ModelTurnEvent{
+			CompletionResponseEvent: response,
+			HasToolCalls:            acc.hasToolCalls(),
+		})
+		if err != nil {
+			r.discardTurnBuffer()
+			stepSpan.End()
+			if r.emitError(err) {
+				return nil
+			}
+			return r.stopError()
+		}
+		switch turnAction.Kind {
+		case ModelTurnRetry:
+			r.discardTurnBuffer()
+			stepSpan.End()
+			if turnAction.Retry.Feedback != "" {
+				rejected := aikit.Message{
+					ID: sr.messageID, Role: aikit.RoleAssistant,
+					Content: []aikit.ContentPart{aikit.TextPart(sr.text)},
+				}
+				history = append(history,
+					rejected,
+					aikit.UserMessage(turnAction.Retry.Feedback),
+				)
+			}
+			continue
+		}
+		if !r.flushTurnBuffer() {
+			stepSpan.End()
+			return r.stopError()
+		}
 
 		if !acc.hasToolCalls() {
 			return finishTextStep(r, params, step, sr, fullText, model, req, history, completedSteps, stepSpan)
 		}
 
 		if r.executeToolStep(params, step, sr, fullText, acc, model, req, &history, &completedSteps, stepSpan) {
-			return ctx.Err()
+			return r.stopError()
 		}
+	}
+
+	if params.ErrorOnMaxTurns {
+		if r.emitError(&MaxTurnsError{MaxTurns: params.MaxSteps}) {
+			return nil
+		}
+		return r.stopError()
 	}
 
 	// maxSteps exhausted with pending tool_calls — exit honestly using the
@@ -210,17 +283,19 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params RunParams) error 
 	// on a follow-up call) or surface the partial result.
 	// Historical note: this used to fire a tool-less "final generation" pass
 	// which caused gateway Harmony-parsing issues on gpt-oss/gpt-5 family.
-	if !emitStructuredOutput(r, lastModel, lastRequest, history) {
-		return ctx.Err()
+	if !emitStructuredOutput(r, params, lastModel, lastRequest, history, completedSteps) {
+		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, lastSR) })
-	r.emitObserved(StepEvent{Type: StepEventDone})
+	if !r.emitObserved(StepEvent{Type: StepEventDone}) {
+		return r.stopError()
+	}
 	return nil
 }
 
 func finishTextStep(
 	r *run,
-	params RunParams,
+	params runConfig,
 	step int,
 	sr streamResult,
 	fullText string,
@@ -238,7 +313,7 @@ func finishTextStep(
 		Type: StepEventStepEnd, StepNumber: step, MessageID: sr.messageID, FinishReason: sr.finish,
 		RawFinishReason: sr.rawFinish, ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	}) {
-		return r.ctx.Err()
+		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnStepEnd(params.Callbacks, step, nil, nil, sr) })
 	completedSteps = append(completedSteps, StepResultInfo{
@@ -246,15 +321,17 @@ func finishTextStep(
 		FinishReason: sr.finish, RawFinishReason: sr.rawFinish,
 		ProviderMetadata: sr.providerMeta, Warnings: sr.warnings,
 	})
-	if !emitStructuredOutput(r, model, req, history) {
-		return r.ctx.Err()
+	if !emitStructuredOutput(r, params, model, req, history, completedSteps) {
+		return r.stopError()
 	}
 	r.safeObserver(func() { emitOnEnd(params.Callbacks, completedSteps, sr) })
-	r.emitObserved(StepEvent{Type: StepEventDone})
+	if !r.emitObserved(StepEvent{Type: StepEventDone}) {
+		return r.stopError()
+	}
 	return nil
 }
 
-func initializeRunTracing(ctx context.Context, params RunParams) (context.Context, tracing.Tracer, bool) {
+func initializeRunTracing(ctx context.Context, params runConfig) (context.Context, tracing.Tracer, bool) {
 	tracer := params.Tracer
 	enabled := tracer != nil
 	if !enabled {
@@ -266,7 +343,7 @@ func initializeRunTracing(ctx context.Context, params RunParams) (context.Contex
 	return ctx, tracer, enabled
 }
 
-func prepareRunHistory(r *run, params RunParams) ([]Message, bool, error) {
+func prepareRunHistory(r *run, params runConfig) ([]Message, bool, error) {
 	if err := params.Tools.Validate(); err != nil {
 		r.emitError(err)
 		return nil, false, nil
@@ -287,7 +364,7 @@ func prepareRunHistory(r *run, params RunParams) ([]Message, bool, error) {
 // true when the run should stop — a control emit failed (consumer gone), or
 // StopWhen fired (in which case it has already emitted the terminal Done event).
 func (r *run) executeToolStep(
-	params RunParams,
+	params runConfig,
 	step int,
 	sr streamResult,
 	fullText string,
@@ -298,8 +375,11 @@ func (r *run) executeToolStep(
 	completedSteps *[]StepResultInfo,
 	stepSpan tracing.Span,
 ) bool {
+	// The prepared request is the only source of per-turn tool context.
+	r.toolsContext = cloneMap(req.ToolsContext)
+	r.runtimeContext = cloneMap(req.RuntimeContext)
 	toolCalls := acc.completed()
-	preparedToolCalls := prepareToolCalls(r.ctx, params.Tools, params.RepairToolCall, req, toolCalls)
+	preparedToolCalls := prepareToolCalls(r, params.Tools, params.RepairToolCall, req, toolCalls)
 	*history = append(
 		*history,
 		buildAssistantToolCallMessage(sr.messageID, fullText, sr.reasoning, preparedToolCallStates(preparedToolCalls)),
@@ -390,7 +470,7 @@ func (r *run) executeToolStep(
 	if params.StopWhen != nil {
 		stopResult := &StepResult{HasToolCalls: true, ToolNames: toolNames, Text: fullText}
 		if params.StopWhen(step+1, stopResult) {
-			if !emitStructuredOutput(r, model, req, *history) {
+			if !emitStructuredOutput(r, params, model, req, *history, *completedSteps) {
 				return true
 			}
 			r.safeObserver(func() { emitOnEnd(params.Callbacks, *completedSteps, sr) })
@@ -403,7 +483,7 @@ func (r *run) executeToolStep(
 
 // applyPrepareStep runs the PrepareStep callback (if configured) and applies its
 // non-nil overrides to the current step's model and request in place.
-func applyPrepareStep(params RunParams, step int, completedSteps []StepResultInfo, model *Model, req *Request) {
+func applyPrepareStep(params runConfig, step int, completedSteps []StepResultInfo, model *Model, req *Request) {
 	if params.PrepareStep == nil {
 		return
 	}

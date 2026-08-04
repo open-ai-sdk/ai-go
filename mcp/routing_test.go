@@ -222,10 +222,11 @@ func TestFilterToolSet_BasicPreferredFiltering(t *testing.T) {
 	got := FilterToolSet(ts, &Routing{
 		PreferredServers: []string{"browsermcp"},
 	})
-	if len(got.Definitions) != 2 {
-		t.Fatalf("preferred filtering: expected 2 tools, got %d", len(got.Definitions))
+	definitions := got.DefinitionsSnapshot()
+	if len(definitions) != 2 {
+		t.Fatalf("preferred filtering: expected 2 tools, got %d", len(definitions))
 	}
-	for _, def := range got.Definitions {
+	for _, def := range definitions {
 		server := ServerFromQualifiedName(def.Name)
 		if server != "browsermcp" {
 			t.Errorf("expected only browsermcp tools, got server=%s (name=%s)", server, def.Name)
@@ -260,10 +261,11 @@ func TestFilterToolSet_BlockedServer(t *testing.T) {
 	got := FilterToolSet(ts, &Routing{
 		BlockedServers: []string{"serena"},
 	})
-	if len(got.Definitions) != 2 {
-		t.Fatalf("blocked filtering: expected 2 tools, got %d", len(got.Definitions))
+	definitions := got.DefinitionsSnapshot()
+	if len(definitions) != 2 {
+		t.Fatalf("blocked filtering: expected 2 tools, got %d", len(definitions))
 	}
-	for _, def := range got.Definitions {
+	for _, def := range definitions {
 		server := ServerFromQualifiedName(def.Name)
 		if server == "serena" {
 			t.Errorf("blocked server 'serena' should not appear in results")
@@ -280,8 +282,8 @@ func TestFilterToolSet_FallbackAllowed(t *testing.T) {
 		PreferredServers: []string{"nonexistent"},
 		FallbackAllowed:  boolPtr(true),
 	})
-	if len(got.Definitions) != 2 {
-		t.Fatalf("fallback allowed: expected 2 tools, got %d", len(got.Definitions))
+	if got.Len() != 2 {
+		t.Fatalf("fallback allowed: expected 2 tools, got %d", got.Len())
 	}
 }
 
@@ -293,8 +295,8 @@ func TestFilterToolSet_NoFallback(t *testing.T) {
 		PreferredServers: []string{"nonexistent"},
 		FallbackAllowed:  boolPtr(false),
 	})
-	if len(got.Definitions) != 0 {
-		t.Fatalf("no fallback: expected 0 tools, got %d", len(got.Definitions))
+	if got.Len() != 0 {
+		t.Fatalf("no fallback: expected 0 tools, got %d", got.Len())
 	}
 }
 
