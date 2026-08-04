@@ -18,7 +18,11 @@ type ObjectResult[T any] struct {
 func RunObject[T any](ctx context.Context, r Runner) (ObjectResult[T], error) {
 	schema, err := tool.StrictSchema[T]()
 	if err != nil {
-		return ObjectResult[T]{}, &StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "invalid output type", Cause: err}
+		return ObjectResult[T]{}, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindPrompt,
+			Reason: "invalid output type",
+			Cause:  err,
+		}
 	}
 	result, err := r.Output(llm.OutputSchema{Type: "object", Schema: schema}).Run(ctx)
 	output := ObjectResult[T]{Result: result}
@@ -28,6 +32,9 @@ func RunObject[T any](ctx context.Context, r Runner) (ObjectResult[T], error) {
 	if result == nil {
 		return output, &StructuredOutputError{Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty"}
 	}
-	output.Object, err = llm.DecodeStructured[T](string(result.StructuredOutput), &llm.OutputSchema{Type: "object", Schema: schema})
+	output.Object, err = llm.DecodeStructured[T](
+		string(result.StructuredOutput),
+		&llm.OutputSchema{Type: "object", Schema: schema},
+	)
 	return output, err
 }

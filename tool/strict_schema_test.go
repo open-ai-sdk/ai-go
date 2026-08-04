@@ -7,7 +7,7 @@ type strictChild struct {
 }
 
 type strictParent struct {
-	Name     *string       `json:"name" enum:"a,b"`
+	Name     *string       `json:"name"     enum:"a,b"`
 	Children []strictChild `json:"children"`
 }
 

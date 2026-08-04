@@ -14,16 +14,28 @@ type CompletionObjectResult[T any] struct {
 }
 
 // CompleteObject performs one typed completion from an explicit request.
-func CompleteObject[T any](ctx context.Context, model Model, request CompletionRequest) (CompletionObjectResult[T], error) {
+func CompleteObject[T any](
+	ctx context.Context,
+	model Model,
+	request CompletionRequest,
+) (CompletionObjectResult[T], error) {
 	schema, err := tool.StrictSchema[T]()
 	if err != nil {
-		return CompletionObjectResult[T]{}, &StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "invalid output request", Cause: err}
+		return CompletionObjectResult[T]{}, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindPrompt,
+			Reason: "invalid output request",
+			Cause:  err,
+		}
 	}
 	request.Output = &OutputSchema{Type: "object", Schema: schema}
 	response, err := Complete(ctx, model, request)
 	result := CompletionObjectResult[T]{Response: response}
 	if err != nil {
-		return result, &StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "completion failed", Cause: err}
+		return result, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindPrompt,
+			Reason: "completion failed",
+			Cause:  err,
+		}
 	}
 	if response == nil {
 		return result, &StructuredOutputError{Kind: StructuredOutputErrorKindEmpty, Path: "$", Reason: "is empty"}

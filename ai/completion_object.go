@@ -11,7 +11,11 @@ type (
 	TypedCompletion[T any]        = llm.TypedCompletion[T]
 )
 
-func CompleteObject[T any](ctx context.Context, model LanguageModel, request CompletionRequest) (CompletionObjectResult[T], error) {
+func CompleteObject[T any](
+	ctx context.Context,
+	model LanguageModel,
+	request CompletionRequest,
+) (CompletionObjectResult[T], error) {
 	return llm.CompleteObject[T](ctx, model, request)
 }
 

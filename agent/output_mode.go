@@ -15,7 +15,11 @@ const (
 	OutputModeTool   OutputMode = "tool"
 )
 
-func resolveOutputMode(requested OutputMode, hasSchema, hasTools, outputToolCallable bool, native llm.NativeSchemaSupport) (OutputMode, error) {
+func resolveOutputMode(
+	requested OutputMode,
+	hasSchema, hasTools, outputToolCallable bool,
+	native llm.NativeSchemaSupport,
+) (OutputMode, error) {
 	if !hasSchema {
 		return OutputModeNative, nil
 	}

@@ -20,13 +20,22 @@ func DecodeStructured[T any](text string, output *OutputSchema) (T, error) {
 	}
 	raw := FirstJSONValue(text)
 	if raw == nil {
-		return value, &StructuredOutputError{Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON"}
+		return value, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindJSONDecode,
+			Path:   "$",
+			Reason: "is invalid JSON",
+		}
 	}
 	if err := ValidateStructuredOutput(raw, output); err != nil {
 		return value, err
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return value, &StructuredOutputError{Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "cannot decode JSON: " + err.Error(), Cause: err}
+		return value, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindJSONDecode,
+			Path:   "$",
+			Reason: "cannot decode JSON: " + err.Error(),
+			Cause:  err,
+		}
 	}
 	return value, nil
 }
@@ -58,7 +67,12 @@ func ValidateStructuredOutput(raw json.RawMessage, output *OutputSchema) error {
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
-		return &StructuredOutputError{Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON: " + err.Error(), Cause: err}
+		return &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindJSONDecode,
+			Path:   "$",
+			Reason: "is invalid JSON: " + err.Error(),
+			Cause:  err,
+		}
 	}
 	if value == nil && output != nil && output.Type == "json" && output.Schema == nil {
 		return &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$", Reason: "must not be null"}
@@ -75,7 +89,11 @@ func ValidateOutputConfiguration(output *OutputSchema) error {
 	switch output.Type {
 	case "json", "json_object", "object", "array":
 	default:
-		return &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$schema.type", Reason: fmt.Sprintf("has unsupported output type %q", output.Type)}
+		return &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindValidation,
+			Path:   "$schema.type",
+			Reason: fmt.Sprintf("has unsupported output type %q", output.Type),
+		}
 	}
 	_, err := compileStructuredSchema(output)
 	return err
@@ -87,7 +105,12 @@ func validateSchema(output *OutputSchema, value any) error {
 		return err
 	}
 	if err := compiled.Validate(value); err != nil {
-		return &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$", Reason: fmt.Sprintf("is invalid: %v", err), Cause: err}
+		return &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindValidation,
+			Path:   "$",
+			Reason: fmt.Sprintf("is invalid: %v", err),
+			Cause:  err,
+		}
 	}
 	return nil
 }
@@ -108,11 +131,21 @@ func compileStructuredSchema(output *OutputSchema) (*jsonschema.Schema, error) {
 	}
 	schemaJSON, err := json.Marshal(schema)
 	if err != nil {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$schema", Reason: "is invalid: " + err.Error(), Cause: err}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindValidation,
+			Path:   "$schema",
+			Reason: "is invalid: " + err.Error(),
+			Cause:  err,
+		}
 	}
 	normalized, err := jsonschema.UnmarshalJSON(bytes.NewReader(schemaJSON))
 	if err != nil {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$schema", Reason: "is invalid: " + err.Error(), Cause: err}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindValidation,
+			Path:   "$schema",
+			Reason: "is invalid: " + err.Error(),
+			Cause:  err,
+		}
 	}
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
@@ -120,11 +153,21 @@ func compileStructuredSchema(output *OutputSchema) (*jsonschema.Schema, error) {
 	compiler.AssertContent()
 	const schemaURL = "urn:ai-go:structured-output-schema"
 	if err := compiler.AddResource(schemaURL, normalized); err != nil {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$schema", Reason: "is invalid: " + err.Error(), Cause: err}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindValidation,
+			Path:   "$schema",
+			Reason: "is invalid: " + err.Error(),
+			Cause:  err,
+		}
 	}
 	compiled, err := compiler.Compile(schemaURL)
 	if err != nil {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindValidation, Path: "$schema", Reason: "is invalid: " + err.Error(), Cause: err}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindValidation,
+			Path:   "$schema",
+			Reason: "is invalid: " + err.Error(),
+			Cause:  err,
+		}
 	}
 	return compiled, nil
 }

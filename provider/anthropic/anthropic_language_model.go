@@ -179,8 +179,10 @@ func (m *LanguageModel) encodeRequest(req llm.Request, streaming bool) ([]byte, 
 	ar.Tools = encodeTools(req.Tools)
 	if req.Output != nil && req.Output.Type != "text" {
 		if !m.supportsStructuredOutput() {
-			return nil, nil, &llm.StructuredOutputError{Kind: llm.StructuredOutputErrorKindPrompt,
-				Reason: "anthropic model does not support native structured output"}
+			return nil, nil, &llm.StructuredOutputError{
+				Kind:   llm.StructuredOutputErrorKindPrompt,
+				Reason: "anthropic model does not support native structured output",
+			}
 		}
 		schema := req.Output.Schema
 		if schema == nil {

@@ -17,8 +17,26 @@ func TestResolveOutputMode(t *testing.T) {
 	}{
 		{"no schema", OutputModeAuto, false, true, false, llm.NativeSchemaNone, OutputModeNative, false},
 		{"openai auto", OutputModeAuto, true, true, true, llm.NativeSchemaFull, OutputModeNative, false},
-		{"gemini native with tools", OutputModeAuto, true, true, true, llm.NativeSchemaSuppressesTools, OutputModeTool, false},
-		{"gemini native alone", OutputModeAuto, true, false, false, llm.NativeSchemaSuppressesTools, OutputModeNative, false},
+		{
+			"gemini native with tools",
+			OutputModeAuto,
+			true,
+			true,
+			true,
+			llm.NativeSchemaSuppressesTools,
+			OutputModeTool,
+			false,
+		},
+		{
+			"gemini native alone",
+			OutputModeAuto,
+			true,
+			false,
+			false,
+			llm.NativeSchemaSuppressesTools,
+			OutputModeNative,
+			false,
+		},
 		{"forced native rejected", OutputModeNative, true, true, true, llm.NativeSchemaSuppressesTools, "", true},
 		{"forced tool rejected", OutputModeTool, true, false, false, llm.NativeSchemaFull, "", true},
 	}

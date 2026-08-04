@@ -66,15 +66,26 @@ type ExtractionError = agent.ExtractionError
 func (e *Extractor[T]) Extract(ctx context.Context, text string) (T, error) {
 	return e.inner.Extract(ctx, text)
 }
+
 func (e *Extractor[T]) ExtractWithUsage(ctx context.Context, text string) (Result[T], error) {
 	return resultOf(e.inner.ExtractWithUsage(ctx, text))
 }
-func (e *Extractor[T]) ExtractWithHistory(ctx context.Context, text string, history []aikit.Message) (Result[T], error) {
+
+func (e *Extractor[T]) ExtractWithHistory(
+	ctx context.Context,
+	text string,
+	history []aikit.Message,
+) (Result[T], error) {
 	return resultOf(e.inner.ExtractWithHistory(ctx, text, history))
 }
 
 func resultOf[T any](value agent.ExtractionResult[T], err error) (Result[T], error) {
-	return Result[T]{Object: value.Object, Usage: value.Usage, Attempts: value.Attempts, OutputToolCalls: value.OutputToolCalls}, err
+	return Result[T]{
+		Object:          value.Object,
+		Usage:           value.Usage,
+		Attempts:        value.Attempts,
+		OutputToolCalls: value.OutputToolCalls,
+	}, err
 }
 
 func cloneOptions(value map[string]any) map[string]any {

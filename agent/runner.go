@@ -468,7 +468,13 @@ func (r Runner) runParams(ctx context.Context, runID string, streaming bool) (ru
 	if capable, ok := r.config.model.(llm.NativeSchemaCapable); ok {
 		native = capable.NativeSchemaSupport()
 	}
-	mode, err := resolveOutputMode(r.config.outputMode, r.config.output != nil && r.config.output.Type != "text", len(definitions) > 0, outputToolCallable(r.config.toolChoice, "structured_output"), native)
+	mode, err := resolveOutputMode(
+		r.config.outputMode,
+		r.config.output != nil && r.config.output.Type != "text",
+		len(definitions) > 0,
+		outputToolCallable(r.config.toolChoice, "structured_output"),
+		native,
+	)
 	if err != nil {
 		return runConfig{}, &RunError{Field: "OutputMode", Err: err}
 	}

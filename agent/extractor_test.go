@@ -21,7 +21,10 @@ func (*extractionModel) ModelID() string { return "extractor-test" }
 
 func (m *extractionModel) Stream(_ context.Context, request llm.Request) (<-chan aikit.StreamEvent, error) {
 	if request.Output == nil || request.Output.Schema == nil {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "missing strict output schema"}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindPrompt,
+			Reason: "missing strict output schema",
+		}
 	}
 	text := m.responses[m.calls]
 	m.calls++
@@ -58,7 +61,8 @@ func TestRunObjectReturnsDecodedValueAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunObject() error = %v", err)
 	}
-	if result.Object.Name != "Grace" || result.Result == nil || string(result.Result.StructuredOutput) != `{"name":"Grace"}` {
+	if result.Object.Name != "Grace" || result.Result == nil ||
+		string(result.Result.StructuredOutput) != `{"name":"Grace"}` {
 		t.Fatalf("result = %#v", result)
 	}
 }

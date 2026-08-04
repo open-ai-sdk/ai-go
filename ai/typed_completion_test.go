@@ -9,8 +9,13 @@ import (
 
 func TestNewTypedCompletion(t *testing.T) {
 	model := &directCompletionObjectModel{text: `{"answer":"Hanoi"}`}
-	result, err := ai.NewTypedCompletion[directCompletionObject](model, "capital").Instructions("Return JSON.").Complete(context.Background())
-	if err != nil || result.Object.Answer != "Hanoi" || len(model.requests) != 1 || model.requests[0].Instructions != "Return JSON." {
+	result, err := ai.NewTypedCompletion[directCompletionObject](
+		model,
+		"capital",
+	).Instructions("Return JSON.").
+		Complete(context.Background())
+	if err != nil || result.Object.Answer != "Hanoi" || len(model.requests) != 1 ||
+		model.requests[0].Instructions != "Return JSON." {
 		t.Fatalf("result=%#v err=%v requests=%#v", result, err, model.requests)
 	}
 }

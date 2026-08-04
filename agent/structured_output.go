@@ -112,7 +112,9 @@ func emitStructuredOutputValue(r *run, raw string, output *OutputSchema) bool {
 	}
 	parsed := parseStructuredOutput(raw)
 	if parsed == nil {
-		r.emitError(&StructuredOutputError{Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON"})
+		r.emitError(
+			&StructuredOutputError{Kind: StructuredOutputErrorKindJSONDecode, Path: "$", Reason: "is invalid JSON"},
+		)
 		return false
 	}
 	if err := validateStructuredOutput(parsed, output); err != nil {
@@ -160,7 +162,13 @@ func consumeStructuredStreamSilent(
 				result.warnings = append(result.warnings, event.Warnings...)
 			case StreamEventError:
 				span.RecordError(event.Error)
-				r.emitError(&StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "prompt failed", Cause: event.Error})
+				r.emitError(
+					&StructuredOutputError{
+						Kind:   StructuredOutputErrorKindPrompt,
+						Reason: "prompt failed",
+						Cause:  event.Error,
+					},
+				)
 				return result, true
 			}
 		}

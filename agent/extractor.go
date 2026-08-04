@@ -84,7 +84,11 @@ func NewExtractor[T any](model llm.Model, options ...ExtractorOption) (*Extracto
 	}
 	schema, err := tool.StrictSchema[T]()
 	if err != nil {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "invalid output type", Cause: err}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindPrompt,
+			Reason: "invalid output type",
+			Cause:  err,
+		}
 	}
 	config := extractorConfig{}
 	for _, option := range options {
@@ -93,7 +97,10 @@ func NewExtractor[T any](model llm.Model, options ...ExtractorOption) (*Extracto
 		}
 	}
 	if config.retries < 0 {
-		return nil, &StructuredOutputError{Kind: StructuredOutputErrorKindPrompt, Reason: "retries must not be negative"}
+		return nil, &StructuredOutputError{
+			Kind:   StructuredOutputErrorKindPrompt,
+			Reason: "retries must not be negative",
+		}
 	}
 	return &Extractor[T]{model: model, schema: schema, config: config}, nil
 }
@@ -110,7 +117,11 @@ func (e *Extractor[T]) ExtractWithUsage(ctx context.Context, text string) (Extra
 }
 
 // ExtractWithHistory appends text after the supplied history for each attempt.
-func (e *Extractor[T]) ExtractWithHistory(ctx context.Context, text string, history []Message) (ExtractionResult[T], error) {
+func (e *Extractor[T]) ExtractWithHistory(
+	ctx context.Context,
+	text string,
+	history []Message,
+) (ExtractionResult[T], error) {
 	var result ExtractionResult[T]
 	if e == nil || e.model == nil {
 		return result, &ExtractionError{Kind: StructuredOutputErrorKindPrompt, Cause: errors.New("extractor is nil")}
@@ -131,7 +142,10 @@ func (e *Extractor[T]) ExtractWithHistory(ctx context.Context, text string, hist
 			result.Usage.Accumulate(response.Usage)
 		}
 		if err == nil && response != nil {
-			result.Object, err = llm.DecodeStructured[T](response.Text, &llm.OutputSchema{Type: "object", Schema: e.schema})
+			result.Object, err = llm.DecodeStructured[T](
+				response.Text,
+				&llm.OutputSchema{Type: "object", Schema: e.schema},
+			)
 		}
 		if err == nil {
 			return result, nil
