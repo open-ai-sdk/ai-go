@@ -253,30 +253,39 @@ func (r Runner) Hook(value Hook) Runner {
 
 // Run executes and aggregates the same event driver exposed by Stream.
 func (r Runner) Run(ctx context.Context) (*Result, error) {
-	reducer := newResultReducer(r.initialTranscript(), r.config.tools)
-	sequence, err := r.sequence(ctx, false, reducer)
+	stream, err := r.newStepStream(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	for _, streamErr := range sequence {
+	for _, streamErr := range stream.Events() {
 		if streamErr != nil {
-			return reducer.result, streamErr
+			return stream.reducer.result, streamErr
 		}
 	}
-	return reducer.result, nil
+	return stream.reducer.result, nil
 }
 
 // Stream validates the run and returns a single-use, single-owner event
 // iterator. Breaking iteration cancels and drains the underlying runtime.
+//
+// It is StreamRun without the aggregate; use StreamRun when the run's *Result
+// is wanted alongside its events.
 func (r Runner) Stream(ctx context.Context) (iter.Seq2[aikit.StepEvent, error], error) {
-	return r.sequence(ctx, true, nil)
+	stream, err := r.StreamRun(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return stream.Events(), nil
 }
 
-func (r Runner) sequence(
-	ctx context.Context,
-	streaming bool,
-	reducer *resultReducer,
-) (iter.Seq2[aikit.StepEvent, error], error) {
+// StreamRun validates the run and returns its event sequence together with the
+// Result that sequence aggregates. The aggregate costs nothing extra: the same
+// reducer already ran behind Stream and was discarded.
+func (r Runner) StreamRun(ctx context.Context) (*StepStream, error) {
+	return r.newStepStream(ctx, true)
+}
+
+func (r Runner) newStepStream(ctx context.Context, streaming bool) (*StepStream, error) {
 	if ctx == nil {
 		return nil, &RunError{Field: "Context", Err: errors.New("context is nil")}
 	}
@@ -288,23 +297,47 @@ func (r Runner) sequence(
 	if err != nil {
 		return nil, err
 	}
+	stream := &StepStream{reducer: newResultReducer(r.initialTranscript(), r.config.tools)}
+	stream.events = r.sequence(ctx, params, stream)
+	return stream, nil
+}
+
+func (r Runner) sequence(
+	ctx context.Context,
+	params runConfig,
+	stream *StepStream,
+) iter.Seq2[aikit.StepEvent, error] {
 	var used atomic.Bool
+	reducer := stream.reducer
 	return func(yield func(aikit.StepEvent, error) bool) {
 		if !used.CompareAndSwap(false, true) {
+			// A second range must not overwrite the first range's terminal
+			// state; Result still answers for the run that happened.
 			yield(aikit.StepEvent{}, ErrStreamUsed)
 			return
 		}
 		child, cancel := context.WithCancel(ctx)
 		ch := driveStream(child, params)
-		if reducer == nil {
-			reducer = newResultReducer(r.initialTranscript(), r.config.tools)
-		}
 		hookContext := params.HookContext
 		var runErr error
+		completed := false
 		defer func() {
 			cancel()
+			if !completed && runErr == nil {
+				// A panic or runtime.Goexit in the consumer's range body unwinds
+				// through here without reaching any exit branch. Result must not
+				// then report an abort with a nil error.
+				runErr = context.Canceled
+			}
+			stream.err = runErr
+			if completed {
+				stream.state = StreamCompleted
+			} else {
+				stream.state = StreamAborted
+			}
 			r.notifyFinished(ctx, hookContext, reducer.result, runErr)
 		}()
+		sawDone := false
 		for event := range ch {
 			if event.Type == aikit.StepEventStepStart {
 				hookContext.Turn = event.StepNumber + 1
@@ -330,15 +363,24 @@ func (r Runner) sequence(
 				}
 				return
 			}
+			sawDone = sawDone || event.Type == aikit.StepEventDone
 			if !yield(snapshotStepEvent(event), nil) {
-				runErr = context.Canceled
+				// Stopping on StepEventDone is a normal early exit with a whole
+				// aggregate. Reporting it as a cancellation would hand Result a
+				// failure that did not happen.
+				if sawDone {
+					completed = true
+				} else {
+					runErr = context.Canceled
+				}
 				cancel()
 				for range ch {
 				}
 				return
 			}
 		}
-	}, nil
+		completed = true
+	}
 }
 
 func (r Runner) validate() error {

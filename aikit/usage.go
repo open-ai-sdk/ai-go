@@ -71,3 +71,51 @@ func (u Usage) Add(other Usage) Usage {
 func (u *Usage) Accumulate(other Usage) {
 	*u = u.Add(other)
 }
+
+// Merge returns u with each non-zero field of incoming applied. Providers report
+// usage across several events within one model call — Anthropic emits input and
+// cache tokens up front and the final output count later — so a later zero must
+// never clobber an earlier count. This is the partial-report strategy; Add is
+// the strategy for two independently reported usages.
+//
+// Raw follows the latest non-nil snapshot policy and is cloned to the same depth
+// as Add, so a merged usage never aliases a provider-owned nested container.
+func (u Usage) Merge(incoming Usage) Usage {
+	take := func(current, next int) int {
+		if next != 0 {
+			return next
+		}
+		return current
+	}
+	merged := u
+	merged.InputTokens = take(u.InputTokens, incoming.InputTokens)
+	merged.OutputTokens = take(u.OutputTokens, incoming.OutputTokens)
+	merged.TotalTokens = take(u.TotalTokens, incoming.TotalTokens)
+	merged.ToolUsePromptTokens = take(u.ToolUsePromptTokens, incoming.ToolUsePromptTokens)
+	merged.InputTokenDetails.NoCacheTokens = take(
+		u.InputTokenDetails.NoCacheTokens,
+		incoming.InputTokenDetails.NoCacheTokens,
+	)
+	merged.InputTokenDetails.CacheReadTokens = take(
+		u.InputTokenDetails.CacheReadTokens,
+		incoming.InputTokenDetails.CacheReadTokens,
+	)
+	merged.InputTokenDetails.CacheWriteTokens = take(
+		u.InputTokenDetails.CacheWriteTokens,
+		incoming.InputTokenDetails.CacheWriteTokens,
+	)
+	merged.OutputTokenDetails.TextTokens = take(
+		u.OutputTokenDetails.TextTokens,
+		incoming.OutputTokenDetails.TextTokens,
+	)
+	merged.OutputTokenDetails.ReasoningTokens = take(
+		u.OutputTokenDetails.ReasoningTokens,
+		incoming.OutputTokenDetails.ReasoningTokens,
+	)
+	raw := u.Raw
+	if incoming.Raw != nil {
+		raw = incoming.Raw
+	}
+	merged.Raw = jsonclone.Map(raw)
+	return merged
+}

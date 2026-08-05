@@ -31,7 +31,10 @@ function base64url(bytes: Buffer): string {
 }
 
 const vectors = JSON.parse(
-  readFileSync(new URL('../../aisdk/testdata/tool_approval_vectors.json', import.meta.url), 'utf8'),
+  readFileSync(
+    new URL('../../uistream/ainode/testdata/tool_approval_vectors.json', import.meta.url),
+    'utf8',
+  ),
 ) as Vector[];
 
 describe('tool approval signature vectors', () => {

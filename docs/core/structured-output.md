@@ -118,7 +118,7 @@ tool-free structured response. A terminal tool turn can still need one
 constrained finishing call; that JSON is emitted only as
 `StepEventStructuredOutput`, never as `Result.Text` or a transcript message.
 
-Structured output is server-side only today. `aisdk` does not map
+Structured output is server-side only today. Neither bundled protocol adapter maps
 `StepEventStructuredOutput` to a `useChat` data chunk, and partial objects are
 not streamed. Consume `Result.StructuredOutput` or the server-side event.
 

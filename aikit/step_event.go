@@ -25,6 +25,16 @@ const (
 	StepEventSource
 	// StepEventFileDelta carries a file/image output part from the model.
 	StepEventFileDelta
+	// StepEventClientToolRequest reports a call to a tool declared as
+	// client-executed. The turn ends after it; the UI runs the tool and returns
+	// the result in the next request's history. Appended last so the existing
+	// iota-derived values stay stable.
+	StepEventClientToolRequest
+	// StepEventStateSnapshot carries the complete run state as a JSON document.
+	StepEventStateSnapshot
+	// StepEventStateDelta carries an RFC-6902 patch against the last published
+	// state. The engine never applies it; it is forwarded to the UI verbatim.
+	StepEventStateDelta
 )
 
 // StepEvent is a single event emitted by the engine's Run goroutine.
@@ -79,6 +89,14 @@ type StepEvent struct {
 
 	// Structured output (final step only).
 	StructuredOutput json.RawMessage
+
+	// State is the full state document for StepEventStateSnapshot. It is
+	// forwarded to the browser verbatim, so it must never carry secrets, API
+	// keys, or raw provider responses.
+	State json.RawMessage
+	// StatePatch is the RFC-6902 operation array for StepEventStateDelta. The
+	// engine validates its shape but never applies it.
+	StatePatch json.RawMessage
 
 	// Error.
 	Error error

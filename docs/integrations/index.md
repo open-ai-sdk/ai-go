@@ -17,7 +17,13 @@ formats, and typed provider options.
 - [Model Context Protocol](/integrations/mcp) turns MCP capabilities into tools
   that the agent runtime can call.
 - [AI SDK v7 UI streams](/integrations/ui-streams) translates normalized events
-  into the browser-facing SSE protocol.
+  into the browser-facing SSE protocol that `useChat` consumes.
+- [AG-UI and TanStack AI](/integrations/ag-ui) serves the AG-UI event stream that
+  TanStack AI clients consume.
+- [UI stream protocol extensions](/integrations/protocol-extensions) explains the
+  event-driven protocol seam both adapters are built on.
+- [Write a UI stream adapter](/integrations/writing-ui-stream-adapter) is the
+  minimal copyable template for a new protocol.
 
 For the provider/client mental model, start with
 [Providers and clients](/core/providers-and-clients).

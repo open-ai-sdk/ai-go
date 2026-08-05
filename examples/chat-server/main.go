@@ -66,6 +66,7 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.Handle("/chat", scenarioHandler())
+	mux.Handle("/ag-ui", aguiScenarioHandler())
 
 	fmt.Printf("LISTEN http://%s\n", listener.Addr())
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}

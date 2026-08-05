@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -13,7 +12,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-//nolint:gocyclo // Tool actions intentionally share one ordered commit path.
 func executeToolCalls(
 	r *run,
 	tools *ToolSet,
@@ -25,9 +23,7 @@ func executeToolCalls(
 	for _, preparedCall := range prepared {
 		tc := preparedCall.tc
 		if preparedCall.controlErr != nil {
-			if controlErr == nil {
-				controlErr = preparedCall.controlErr
-			}
+			controlErr = preferControlErr(controlErr, preparedCall.controlErr)
 			break
 		}
 		if preparedCall.invalidErr != nil {
@@ -55,9 +51,7 @@ func executeToolCalls(
 			var hookErr error
 			tc, skip, skipReason, hookErr = r.beforeTool(tc)
 			if hookErr != nil {
-				if controlErr == nil {
-					controlErr = hookErr
-				}
+				controlErr = preferControlErr(controlErr, hookErr)
 				break
 			}
 		}
@@ -80,6 +74,23 @@ func executeToolCalls(
 			ThoughtSignature: tc.thoughtSignature,
 		})
 
+		// A client-executed tool is declared to the model but never run here.
+		// The call has already been streamed; suspending now lets the UI run it
+		// and return the result in the next request's history. Siblings still
+		// run, mirroring how a pending approval is handled below.
+		if !skip && preparedCall.def.ClientExecuted {
+			if !r.emitObserved(StepEvent{
+				Type:              StepEventClientToolRequest,
+				ToolCallID:        tc.id,
+				ToolCallName:      tc.name,
+				ToolCallArgsDelta: tc.args,
+			}) {
+				return toolNames, stepToolCalls, stepToolResults, r.stopError()
+			}
+			controlErr = preferControlErr(controlErr, errClientToolPending)
+			continue
+		}
+
 		var result *ToolResult
 		approvalResolved := false
 		var approvalErr error
@@ -91,16 +102,12 @@ func executeToolCalls(
 			)
 		}
 		if approvalErr != nil {
-			if controlErr == nil {
-				controlErr = approvalErr
-			}
+			controlErr = preferControlErr(controlErr, approvalErr)
 			continue
 		}
 		result, hookErr := r.afterTool(result)
 		if hookErr != nil {
-			if controlErr == nil {
-				controlErr = hookErr
-			}
+			controlErr = preferControlErr(controlErr, hookErr)
 			break
 		}
 		// Apply ToModelOutput transform for history; event keeps original output.
@@ -113,17 +120,13 @@ func executeToolCalls(
 			if !r.emitObserved(StepEvent{Type: StepEventToolResult, ToolResult: result}) {
 				return toolNames, stepToolCalls, stepToolResults, r.stopError()
 			}
-			if controlErr == nil {
-				controlErr = transformErr
-			}
+			controlErr = preferControlErr(controlErr, transformErr)
 			continue
 		}
 		result.ModelOutput = modelOutput
 		result.ModelOutputSet = true
 		if err := attachApprovalReceipt(r, tc, result, approvalResolved, modelOutput); err != nil {
-			if controlErr == nil {
-				controlErr = err
-			}
+			controlErr = preferControlErr(controlErr, err)
 			continue
 		}
 		if result.ApprovalID != "" {
@@ -222,6 +225,23 @@ func executeToolCallsParallel(
 			ThoughtSignature:  tc.thoughtSignature,
 		}) {
 			results[i] = indexedResult{tc: tc, valid: true, controlErr: r.stopError()}
+			continue
+		}
+
+		// Suspend before g.Go so no tool body is ever scheduled for a
+		// client-executed tool. Placing this inside the goroutine would race
+		// with execution the client owns.
+		if !skip && preparedCall.def.ClientExecuted {
+			if !r.emitObserved(StepEvent{
+				Type:              StepEventClientToolRequest,
+				ToolCallID:        tc.id,
+				ToolCallName:      tc.name,
+				ToolCallArgsDelta: tc.args,
+			}) {
+				results[i] = indexedResult{tc: tc, valid: true, controlErr: r.stopError()}
+				continue
+			}
+			results[i] = indexedResult{tc: tc, valid: true, controlErr: errClientToolPending}
 			continue
 		}
 
@@ -362,10 +382,7 @@ func executeToolCallsParallel(
 		if res.result != nil {
 			stepToolResults = append(stepToolResults, *res.result)
 		}
-		if res.controlErr != nil && (controlErr == nil ||
-			(errors.Is(controlErr, errApprovalPending) && !errors.Is(res.controlErr, errApprovalPending))) {
-			controlErr = res.controlErr
-		}
+		controlErr = preferControlErr(controlErr, res.controlErr)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
 }

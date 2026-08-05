@@ -23,6 +23,24 @@
 bin/
 dist/
 
+# Compiled binaries left in the repo root by `go build ./examples/<name>`, which
+# names each one after its main package's directory. Go binaries have no
+# extension, so the rules above miss them and a 10 MB file lands next to go.mod.
+# Anchored to the root so the source directories under examples/ still track.
+/chat-server
+/hooks
+/multi-protocol
+/rich-tools
+/checks
+
+# Compiled binaries left in the repo root by `go build ./...`, which names each
+# one after its main package's directory. Listed explicitly because a Go binary
+# has no extension, so no pattern can distinguish one from a source directory.
+/chat-server
+/hooks
+/multi-protocol
+/rich-tools
+
 # Test binary, built with `go test -c`
 *.test
 

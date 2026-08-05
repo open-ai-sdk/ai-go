@@ -22,10 +22,14 @@ flowchart TD
     Transport --> Aikit
     Runner --> Tools["immutable tool.Set"]
     MCP["mcp"] --> Tools
-    Runner --> HTTP["aisdkhttp"]
-    HTTP --> UI["aisdk"]
-    HTTP --> Aikit
-    UI --> Aikit
+    Application --> HTTP["aisdkhttp"]
+    HTTP --> Stream["uistream"]
+    HTTP --> AINode["uistream/ainode"]
+    HTTP --> AGUI["uistream/agui"]
+    AINode --> Stream
+    AGUI --> Stream
+    Stream --> Aikit
+    Compat["aisdk compatibility"] --> AINode
 ```
 
 ## Public layers
@@ -63,8 +67,9 @@ handling, cancellation, and provider HTTP errors.
 ### Integrations
 
 `mcp` adapts Model Context Protocol tools into the immutable registry.
-`aisdkhttp` consumes the Runner's single-owner `aikit.StepEvent` iterator;
-`aisdk` translates only leaf events into AI SDK v7-compatible UI streams and
-does not import `agent`.
+`aisdkhttp` consumes the Runner's single-owner `aikit.StepEvent` iterator
+through `uistream.Pipe`. Protocol adapters translate leaf events without
+importing `agent`; `aisdk` preserves the original AI SDK v7 public surface as
+aliases and forwarders to `uistream/ainode`.
 
 See the [package map](/reference/package-map) for package-by-package ownership.

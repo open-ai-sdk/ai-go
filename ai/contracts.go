@@ -46,6 +46,20 @@ type (
 	CompletionFile           = llm.GeneratedFile
 )
 
+// Streaming surface. StreamingResponse and ModelStream are the model layer's;
+// the three interfaces are vocabulary-neutral and are also satisfied at the
+// agent layer, so code can accept either without importing both packages.
+type (
+	StreamingResponse = llm.StreamingResponse
+	ModelStream       = llm.ModelStream
+	StreamState       = llm.StreamState
+
+	Stream[E any]                       = aikit.Stream[E]
+	StreamingPrompt[E any, S Stream[E]] = aikit.StreamingPrompt[E, S]
+	StreamingChat[E any, S Stream[E]]   = aikit.StreamingChat[E, S]
+	StreamingCompletion[B any]          = aikit.StreamingCompletion[B]
+)
+
 const (
 	RoleSystem    = aikit.RoleSystem
 	RoleUser      = aikit.RoleUser
@@ -83,11 +97,19 @@ const (
 	ToolResultContentTypeFile  = aikit.ToolResultContentTypeFile
 	ToolResultContentTypeJSON  = aikit.ToolResultContentTypeJSON
 	ToolResultContentTypeImage = aikit.ToolResultContentTypeImage
+
+	StreamNotDrained = llm.StreamNotDrained
+	StreamCompleted  = llm.StreamCompleted
+	StreamAborted    = llm.StreamAborted
 )
 
 var (
 	ErrInvalidMessage   = aikit.ErrInvalidMessage
 	ErrWrongMessageRole = aikit.ErrWrongMessageRole
+	// ErrStreamUsed and ErrStreamNotDrained are the model layer's; the agent
+	// layer has its own ErrStreamUsed.
+	ErrStreamUsed       = llm.ErrStreamUsed
+	ErrStreamNotDrained = llm.ErrStreamNotDrained
 	ToolChoiceAuto      = aikit.ToolChoice{Type: "auto"}
 	ToolChoiceNone      = aikit.ToolChoice{Type: "none"}
 	ToolChoiceRequired  = aikit.ToolChoice{Type: "required"}

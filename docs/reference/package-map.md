@@ -13,8 +13,11 @@ providers.
 | `tool` | Typed/dynamic tools, canonical rich results, safe errors, immutable registry, and execution context |
 | `transport` | Provider HTTP policy, retries, SSE reading, cancellation, and API error mapping |
 | `provider/*` | Provider-specific constructors and wire codecs |
-| `aisdk` | Frozen AI SDK v7 chunks, SSE framing, leaf-event conversion, and approval signatures |
-| `aisdkhttp` | HTTP request/SSE boundary that consumes a single-owner `aikit.StepEvent` iterator |
+| `uistream` | Protocol-neutral request, frame, encoder/decoder/framer contracts, and event drain driver |
+| `uistream/ainode` | AI SDK v7 wire implementation, imperative writer, persistence, and approvals |
+| `uistream/agui` | AG-UI RunAgentInput and event-stream adapter for TanStack AI clients |
+| `aisdk` | Compatibility aliases and forwarders to `uistream/ainode` |
+| `aisdkhttp` | Protocol-parameterized HTTP/SSE boundary consuming one `aikit.StepEvent` iterator |
 | `mcp` | MCP clients and dynamic tool integration |
 
 Agent code follows one ownership path:

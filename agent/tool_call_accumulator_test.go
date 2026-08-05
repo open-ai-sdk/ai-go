@@ -12,78 +12,41 @@ func makeToolCallDelta(idx int, id, name, argsDelta string) StreamEvent {
 	}
 }
 
-func TestAccumulator_PartialDeltas(t *testing.T) {
+// Assembly rules are covered by aikit's ToolCallFold tests. These cover the
+// adaptation the run engine depends on: index ordering, the new-index signal
+// that drives tool-call-start emission, and the field mapping onto
+// toolCallState.
+func TestAccumulatorReportsNewIndexOnce(t *testing.T) {
 	acc := newToolCallAccumulator()
-	// Simulate fragmented JSON arriving in pieces.
-	acc.add(makeToolCallDelta(0, "tc1", "search", `{"q`))
-	acc.add(makeToolCallDelta(0, "tc1", "search", `":"hel`))
-	acc.add(makeToolCallDelta(0, "tc1", "search", `lo"}`))
-
-	calls := acc.completed()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	if !acc.add(makeToolCallDelta(0, "tc1", "search", `{"q`)) {
+		t.Fatal("add() = false for a previously unseen index, want true")
 	}
-	if calls[0].args != `{"q":"hello"}` {
-		t.Errorf("unexpected args: %q", calls[0].args)
+	if acc.add(makeToolCallDelta(0, "tc1", "search", `":"hello"}`)) {
+		t.Fatal("add() = true for a continuation delta, want false")
 	}
-	if !calls[0].hasFinished {
-		t.Error("expected hasFinished=true after valid JSON")
+	if !acc.hasToolCalls() {
+		t.Fatal("hasToolCalls() = false after a tool-call delta, want true")
 	}
 }
 
-func TestAccumulator_SingleCompleteDelta(t *testing.T) {
+func TestAccumulatorMapsDraftsOntoToolCallState(t *testing.T) {
 	acc := newToolCallAccumulator()
-	acc.add(makeToolCallDelta(0, "tc1", "get_time", `{"tz":"UTC"}`))
+	event := makeToolCallDelta(0, "tc1", "search", `{"q":"hello"}`)
+	event.ThoughtSignature = "sig"
+	acc.add(event)
 
 	calls := acc.completed()
 	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
+		t.Fatalf("completed() len = %d, want 1", len(calls))
 	}
-	if calls[0].args != `{"tz":"UTC"}` {
-		t.Errorf("unexpected args: %q", calls[0].args)
-	}
-	if !calls[0].hasFinished {
-		t.Error("expected hasFinished=true")
+	want := toolCallState{id: "tc1", name: "search", args: `{"q":"hello"}`, thoughtSignature: "sig"}
+	if calls[0] != want {
+		t.Errorf("completed()[0] = %+v, want %+v", calls[0], want)
 	}
 }
 
-func TestAccumulator_HasFinishedPreventsOverAppend(t *testing.T) {
+func TestAccumulatorOrdersByProviderIndex(t *testing.T) {
 	acc := newToolCallAccumulator()
-	// First delta completes the JSON.
-	acc.add(makeToolCallDelta(0, "tc1", "echo", `{}`))
-	// Further deltas should be ignored.
-	acc.add(makeToolCallDelta(0, "tc1", "echo", `,"extra":true`))
-	acc.add(makeToolCallDelta(0, "tc1", "echo", `}`))
-
-	calls := acc.completed()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
-	}
-	if calls[0].args != `{}` {
-		t.Errorf("expected just {}, got %q", calls[0].args)
-	}
-}
-
-func TestAccumulator_IncompleteJSON_EmittedAsIs(t *testing.T) {
-	acc := newToolCallAccumulator()
-	// Simulate stream ending before JSON is complete.
-	acc.add(makeToolCallDelta(0, "tc1", "broken", `{"partial`))
-
-	calls := acc.completed()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
-	}
-	if calls[0].args != `{"partial` {
-		t.Errorf("unexpected args: %q", calls[0].args)
-	}
-	if calls[0].hasFinished {
-		t.Error("expected hasFinished=false for incomplete JSON")
-	}
-}
-
-func TestAccumulator_MultipleConcurrentCalls(t *testing.T) {
-	acc := newToolCallAccumulator()
-	// Two tool calls interleaved by index.
 	acc.add(makeToolCallDelta(0, "tc1", "search", `{"q`))
 	acc.add(makeToolCallDelta(1, "tc2", "fetch", `{"url`))
 	acc.add(makeToolCallDelta(0, "tc1", "search", `":"a"}`))
@@ -91,63 +54,55 @@ func TestAccumulator_MultipleConcurrentCalls(t *testing.T) {
 
 	calls := acc.completed()
 	if len(calls) != 2 {
-		t.Fatalf("expected 2 tool calls, got %d", len(calls))
+		t.Fatalf("completed() len = %d, want 2", len(calls))
 	}
 	if calls[0].args != `{"q":"a"}` {
-		t.Errorf("call 0 unexpected args: %q", calls[0].args)
+		t.Errorf("call 0 args = %q, want %q", calls[0].args, `{"q":"a"}`)
 	}
 	if calls[1].args != `{"url":"b"}` {
-		t.Errorf("call 1 unexpected args: %q", calls[1].args)
-	}
-	if !calls[0].hasFinished || !calls[1].hasFinished {
-		t.Error("expected both calls to have hasFinished=true")
+		t.Errorf("call 1 args = %q, want %q", calls[1].args, `{"url":"b"}`)
 	}
 }
 
-func TestAccumulator_EmptyArgs(t *testing.T) {
-	acc := newToolCallAccumulator()
-	// Tool call with no arguments at all.
-	acc.add(makeToolCallDelta(0, "tc1", "noop", ""))
-
-	calls := acc.completed()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
-	}
-	if calls[0].args != "" {
-		t.Errorf("expected empty args, got %q", calls[0].args)
-	}
-}
-
-func TestAccumulator_NonZeroBasedIndex(t *testing.T) {
-	// Claude's OpenAI-compatible API sends tool calls starting at index=1.
+// Anthropic's OpenAI-compatible API sends tool calls starting at index 1.
+func TestAccumulatorHandlesNonZeroBasedIndex(t *testing.T) {
 	acc := newToolCallAccumulator()
 	acc.add(makeToolCallDelta(1, "tc1", "bash", `{"command":"ls"}`))
 
 	calls := acc.completed()
 	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
+		t.Fatalf("completed() len = %d, want 1", len(calls))
 	}
 	if calls[0].name != "bash" {
-		t.Errorf("expected tool name 'bash', got %q", calls[0].name)
+		t.Errorf("name = %q, want bash", calls[0].name)
 	}
 	if calls[0].args != `{"command":"ls"}` {
-		t.Errorf("unexpected args: %q", calls[0].args)
+		t.Errorf("args = %q, want %q", calls[0].args, `{"command":"ls"}`)
 	}
 }
 
-func TestAccumulator_TemporarilyValidJSON_StillAppends(t *testing.T) {
-	// This is the key bug scenario: JSON becomes temporarily valid during
-	// streaming but more deltas are expected. The old code would stop
-	// accumulating here. The new code correctly marks hasFinished and ignores
-	// further deltas — which is the correct behavior since `{}` IS valid JSON.
+func TestAccumulatorEmptyHasNoToolCalls(t *testing.T) {
 	acc := newToolCallAccumulator()
-	acc.add(makeToolCallDelta(0, "tc1", "tool", `{}`))
-
-	state := acc.states[0]
-	if !state.hasFinished {
-		t.Error("expected hasFinished=true after valid JSON `{}`")
+	if acc.hasToolCalls() {
+		t.Error("hasToolCalls() = true before any delta, want false")
 	}
-	if state.args != `{}` {
-		t.Errorf("expected `{}`, got %q", state.args)
+	if acc.completed() != nil {
+		t.Error("completed() is non-nil before any delta, want nil")
+	}
+}
+
+// The tool name may arrive after the first chunk on OpenAI-compatible
+// providers; the run engine needs it to look up the tool definition.
+func TestAccumulatorAdoptsLateToolName(t *testing.T) {
+	acc := newToolCallAccumulator()
+	acc.add(makeToolCallDelta(0, "tc1", "", `{"a`))
+	acc.add(makeToolCallDelta(0, "tc1", "search", `":1}`))
+
+	calls := acc.completed()
+	if len(calls) != 1 {
+		t.Fatalf("completed() len = %d, want 1", len(calls))
+	}
+	if calls[0].name != "search" {
+		t.Errorf("name = %q, want search", calls[0].name)
 	}
 }

@@ -48,6 +48,9 @@ const docsSidebar = [
       },
       { text: 'Model Context Protocol', link: '/integrations/mcp' },
       { text: 'AI SDK v7 UI streams', link: '/integrations/ui-streams' },
+      { text: 'AG-UI and TanStack AI', link: '/integrations/ag-ui' },
+      { text: 'Protocol extensions', link: '/integrations/protocol-extensions' },
+      { text: 'Write a UI stream adapter', link: '/integrations/writing-ui-stream-adapter' },
     ],
   },
   {

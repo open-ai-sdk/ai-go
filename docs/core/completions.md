@@ -148,9 +148,10 @@ A direct completion follows a predictable path:
    fallback path folds normalized `ai.StreamEvent` values into the response.
 5. Tool calls are returned to the caller and are never executed automatically.
 
-`Build` stops after step 1. Calling `Stream` explicitly always exposes the
-normalized event channel. `Send` performs the native-or-stream selection and
-returns any tool calls described in step 5 to the application.
+`Build` stops after step 1. `StreamSend` always takes the stream path and
+exposes the normalized events as they arrive, alongside the same aggregate.
+`Send` performs the native-or-stream selection and returns any tool calls
+described in step 5 to the application.
 
 ### Request builder
 
@@ -258,41 +259,61 @@ message IDs, cloning, and rich tool-result content.
 
 ## Streaming
 
-Call `Stream` to consume the provider's normalized events directly:
+Every direct-completion entrypoint has a streaming twin. They deliver the
+provider's normalized events *and* the same aggregate the non-streaming form
+returns, so choosing one no longer costs you the other.
+
+| Aggregated | Streamed |
+|---|---|
+| `builder.Send(ctx)` | `builder.StreamSend(ctx)` |
+| `ai.Prompt(ctx, model, prompt)` | `ai.StreamPrompt(ctx, model, prompt)` |
+| `ai.Chat(ctx, model, prompt, history...)` | `ai.StreamChat(ctx, model, prompt, history...)` |
 
 ```go
-events, err := ai.NewCompletion(model, "Explain Go interfaces").Stream(ctx)
+stream, err := ai.NewCompletion(model, "Explain Go interfaces").StreamSend(ctx)
 if err != nil {
-  return err
+	return err
 }
 
-for event := range events {
-  switch event.Type {
-  case ai.StreamEventTextDelta:
-    fmt.Print(event.TextDelta)
-  case ai.StreamEventUsage:
-    if event.Usage != nil {
-      fmt.Printf("\n%d tokens\n", event.Usage.TotalTokens)
-    }
-  case ai.StreamEventError:
-    return event.Error
-  }
+for event, err := range stream.Events() {
+	if err != nil {
+		return err
+	}
+	if event.Type == ai.StreamEventTextDelta {
+		fmt.Print(event.TextDelta)
+	}
 }
+
+response, err := stream.Response()
+if err != nil {
+	return err
+}
+fmt.Printf("\n%d tokens\n", response.Usage.TotalTokens)
+return nil
 ```
 
 The stream may contain text, reasoning, tool-call argument fragments, usage,
-sources, generated file data, finish metadata, warnings, and errors. Drain the
-channel to receive terminal metadata and allow the provider to release response
-resources. Cancel `ctx` when the consumer stops early.
+sources, generated file data, finish metadata, and warnings. Range it to the end
+to receive terminal metadata and let the provider release its resources; break
+out or cancel `ctx` to stop early.
 
 An error can occur in two places:
 
-- `Stream` can return an error before a channel is created, such as invalid
-  configuration or failure to start the request.
-- The channel can emit `ai.StreamEventError` after partial output has arrived.
+- `StreamSend` returns an error before you get a sequence, for invalid request
+  configuration.
+- The sequence yields an error — through its **error half**, not as an
+  `ai.StreamEventError` value — when the provider fails, including a failure to
+  start the request, which surfaces on the first pull.
 
 `Send` handles both paths and returns a partial response together with the
 stream error when aggregation had already begun.
+
+::: warning `CompletionRequestBuilder.Stream` was removed
+The older `Stream(ctx)` method returned a bare `<-chan ai.StreamEvent` and gave
+no way to reach the aggregate. `StreamSend` replaces it and is a strict
+superset. See [Streaming](/core/streaming#migrating-from-completionrequestbuilder-stream)
+for a before/after migration.
+:::
 
 ## Completion response
 

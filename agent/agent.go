@@ -69,6 +69,9 @@ const (
 	StepEventError               = aikit.StepEventError
 	StepEventSource              = aikit.StepEventSource
 	StepEventFileDelta           = aikit.StepEventFileDelta
+	StepEventClientToolRequest   = aikit.StepEventClientToolRequest
+	StepEventStateSnapshot       = aikit.StepEventStateSnapshot
+	StepEventStateDelta          = aikit.StepEventStateDelta
 
 	FinishReasonStop          = aikit.FinishReasonStop
 	FinishReasonToolCalls     = aikit.FinishReasonToolCalls

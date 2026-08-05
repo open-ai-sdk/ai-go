@@ -127,13 +127,25 @@ jobs:
 
       - name: Enforce AI SDK wire boundary
         run: |
-          forbidden="$(go list -deps ./aisdk/... \
-            | grep -E '^github.com/open-ai-sdk/ai-go/(agent|provider|transport)(/|$)' || true)"
+          forbidden="$(go list -f '{{range .Imports}}{{println .}}{{end}}' ./aisdk \
+            | grep -E '^github.com/open-ai-sdk/ai-go/' \
+            | grep -vE '^github.com/open-ai-sdk/ai-go/(aikit|uistream/ainode)$' || true)"
           test -z "$forbidden" || {
-            echo "aisdk must not depend on agent, provider, or transport:"
+            echo "aisdk may import only aikit and uistream/ainode:"
             echo "$forbidden"
             exit 1
           }
+
+      - name: Enforce UI stream protocol boundaries
+        run: |
+          core_forbidden="$(go list -f '{{range .Imports}}{{println .}}{{end}}' ./uistream \
+            | grep -E '^github.com/open-ai-sdk/ai-go/' \
+            | grep -vE '^github.com/open-ai-sdk/ai-go/aikit$' || true)"
+          test -z "$core_forbidden" || { echo "uistream may import only aikit:"; echo "$core_forbidden"; exit 1; }
+          adapter_forbidden="$(go list -f '{{range .Imports}}{{println .}}{{end}}' ./uistream/ainode ./uistream/agui \
+            | grep -E '^github.com/open-ai-sdk/ai-go/' \
+            | grep -vE '^github.com/open-ai-sdk/ai-go/(aikit|uistream)$' || true)"
+          test -z "$adapter_forbidden" || { echo "uistream adapters may import only uistream and aikit:"; echo "$adapter_forbidden"; exit 1; }
 
       - name: Enforce provider dependency boundary
         run: |

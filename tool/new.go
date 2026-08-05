@@ -53,6 +53,27 @@ func New[In, Out any](
 	}, nil
 }
 
+// NewClient declares a tool the caller's UI executes, not this process. It has
+// no handler by construction: the runtime streams the call, suspends the turn,
+// and expects the result to arrive in the next request's message history.
+//
+// The returned output is untrusted — the executor is the client, so there is
+// nothing for this side to authenticate. Do not name or describe a client tool
+// in a way that implies server-side authority.
+func NewClient(name, description string, inputSchema map[string]any) (*Tool, error) {
+	if name == "" {
+		return nil, errors.New("tool.NewClient: empty name")
+	}
+	return &Tool{
+		definition: aikit.ToolDefinition{
+			Name:           name,
+			Description:    description,
+			InputSchema:    cloneJSONMap(inputSchema),
+			ClientExecuted: true,
+		},
+	}, nil
+}
+
 // NewDynamic creates a tool whose schema is known only at runtime. The
 // handler receives and returns the raw output bytes used by the agent loop.
 func NewDynamic(

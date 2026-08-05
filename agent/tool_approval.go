@@ -17,6 +17,38 @@ import (
 
 var errApprovalPending = errors.New("agent: tool approval pending")
 
+// errClientToolPending suspends a run whose next move belongs to the client:
+// the tool was declared client-executed, so this process streamed the call and
+// stops rather than running anything.
+var errClientToolPending = errors.New("agent: client tool execution pending")
+
+// isSuspendedRun reports a control error that hands the turn back to the caller
+// instead of failing it. A suspended run still closes its step and emits a
+// terminal Done event, so the UI protocol sees a success finish, not an error.
+// Keeping both sentinels behind one predicate stops the two paths from drifting.
+func isSuspendedRun(err error) bool {
+	return errors.Is(err, errApprovalPending) || errors.Is(err, errClientToolPending)
+}
+
+// preferControlErr picks which of two control errors a step reports.
+//
+// First-wins is wrong here: a suspension makes the run end as a *success*
+// finish, so a suspension recorded before a sibling genuinely failed would
+// swallow that failure and report the turn as complete. A real failure
+// therefore outranks a suspension, and otherwise the first error wins.
+func preferControlErr(current, next error) error {
+	switch {
+	case next == nil:
+		return current
+	case current == nil:
+		return next
+	case isSuspendedRun(current) && !isSuspendedRun(next):
+		return next
+	default:
+		return current
+	}
+}
+
 const minApprovalKeyBytes = 32
 
 var (

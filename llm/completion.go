@@ -3,10 +3,13 @@ package llm
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
+
+// errNilCompletionModel is the one wording every entrypoint reports when no
+// model is bound, so Send, StreamSend, and StreamCompletion cannot drift apart.
+var errNilCompletionModel = errors.New("llm: completion model is required")
 
 // CompletionRequest is the normalized input for one direct model call.
 // It is an alias of Request so provider implementations have one canonical
@@ -169,23 +172,21 @@ func (b CompletionRequestBuilder) RuntimeContext(value aikit.RuntimeContext) Com
 // Build returns an independent top-level request value.
 func (b CompletionRequestBuilder) Build() CompletionRequest { return cloneRequest(b.request) }
 
-// Stream starts exactly one provider model call. It does not invoke tools or
+// StreamSend starts exactly one provider model call and returns both its event
+// sequence and the aggregate that sequence builds. It does not invoke tools or
 // apply agent stop conditions.
-func (b CompletionRequestBuilder) Stream(ctx context.Context) (<-chan aikit.StreamEvent, error) {
+//
+// The provider call is made on the first pull from Events, so a response that
+// is never ranged opens no connection; Close releases it. Request validation
+// still happens here and is reported immediately.
+func (b CompletionRequestBuilder) StreamSend(ctx context.Context) (*StreamingResponse, error) {
 	if b.model == nil {
 		return nil, &CompletionError{
 			Kind: CompletionErrorKindRequest, Operation: "stream",
-			Cause: errors.New("completion model is required"),
+			Cause: errNilCompletionModel,
 		}
 	}
-	stream, err := b.model.Stream(ctx, b.Build())
-	if err != nil {
-		return nil, wrapCompletionError(err, CompletionErrorKindProvider, "stream")
-	}
-	if stream == nil {
-		return nil, invalidCompletionResponse("stream", "model returned a nil stream")
-	}
-	return stream, nil
+	return newStreamingResponse(ctx, b.model, b.Build()), nil
 }
 
 // Send runs exactly one provider model call and aggregates its normalized
@@ -193,12 +194,7 @@ func (b CompletionRequestBuilder) Stream(ctx context.Context) (<-chan aikit.Stre
 // error are returned together.
 func (b CompletionRequestBuilder) Send(ctx context.Context) (*CompletionResponse, error) {
 	if b.model == nil {
-		return nil, NewCompletionError(
-			CompletionErrorKindRequest,
-			"send",
-			"",
-			errors.New("llm: completion model is required"),
-		)
+		return nil, NewCompletionError(CompletionErrorKindRequest, "send", "", errNilCompletionModel)
 	}
 	if model, ok := b.model.(CompletionModel); ok {
 		response, err := model.Complete(ctx, b.Build())
@@ -210,11 +206,13 @@ func (b CompletionRequestBuilder) Send(ctx context.Context) (*CompletionResponse
 		}
 		return response, nil
 	}
-	stream, err := b.Stream(ctx)
+	stream, err := b.StreamSend(ctx)
 	if err != nil {
 		return nil, err
 	}
-	response, err := collectCompletion(ctx, stream)
+	for range stream.Events() {
+	}
+	response, err := stream.Response()
 	if err != nil {
 		return response, wrapCompletionError(err, CompletionErrorKindProvider, "collect")
 	}
@@ -244,161 +242,4 @@ func Chat(ctx context.Context, model Model, prompt string, history ...aikit.Mess
 		return "", err
 	}
 	return response.Text, err
-}
-
-func collectCompletion(ctx context.Context, stream <-chan aikit.StreamEvent) (*CompletionResponse, error) {
-	response := &CompletionResponse{Message: aikit.Message{Role: aikit.RoleAssistant}}
-	toolParts := make(map[int]int)
-	for {
-		select {
-		case <-ctx.Done():
-			return response, ctx.Err()
-		case event, ok := <-stream:
-			if !ok {
-				return response, nil
-			}
-			switch event.Type {
-			case aikit.StreamEventTextDelta:
-				response.Text += event.TextDelta
-				appendText(&response.Message.Content, event.TextDelta, event.ThoughtSignature)
-			case aikit.StreamEventReasoningDelta:
-				response.Reasoning += event.TextDelta
-				appendReasoning(&response.Message.Content, event.TextDelta, event.ThoughtSignature)
-			case aikit.StreamEventToolCallDelta:
-				appendToolCall(&response.Message.Content, toolParts, event)
-			case aikit.StreamEventUsage:
-				if event.Usage != nil {
-					response.Usage = mergeUsage(response.Usage, *event.Usage)
-				}
-			case aikit.StreamEventSource:
-				if event.Source != nil {
-					response.Sources = append(response.Sources, *event.Source)
-				}
-			case aikit.StreamEventFileDelta:
-				if len(event.FileData) != 0 {
-					data := append([]byte(nil), event.FileData...)
-					response.Files = append(response.Files, GeneratedFile{Data: data, MediaType: event.FileMediaType})
-					response.Message.Content = append(response.Message.Content, aikit.ContentPart{
-						Type:      aikit.ContentPartTypeFile,
-						Data:      append([]byte(nil), data...),
-						MediaType: event.FileMediaType,
-					})
-				}
-			case aikit.StreamEventFinish:
-				response.MessageID = event.MessageID
-				response.Message.ID = event.MessageID
-				response.FinishReason = event.FinishReason
-				response.RawFinishReason = event.RawFinishReason
-				response.ProviderMetadata = cloneMap(event.ProviderMetadata)
-				response.Warnings = append(response.Warnings, event.Warnings...)
-			case aikit.StreamEventError:
-				if event.Error == nil {
-					return response, fmt.Errorf("llm: completion stream emitted a nil error")
-				}
-				return response, event.Error
-			}
-		}
-	}
-}
-
-func appendText(parts *[]aikit.ContentPart, value, signature string) {
-	if value == "" {
-		return
-	}
-	if n := len(*parts); n > 0 &&
-		(*parts)[n-1].Type == aikit.ContentPartTypeText &&
-		(*parts)[n-1].ThoughtSignature == signature {
-		(*parts)[n-1].Text += value
-		return
-	}
-	*parts = append(
-		*parts,
-		aikit.ContentPart{Type: aikit.ContentPartTypeText, Text: value, ThoughtSignature: signature},
-	)
-}
-
-func appendReasoning(parts *[]aikit.ContentPart, value, signature string) {
-	if value == "" {
-		return
-	}
-	if n := len(*parts); n > 0 &&
-		(*parts)[n-1].Type == aikit.ContentPartTypeReasoning &&
-		(*parts)[n-1].ThoughtSignature == signature {
-		(*parts)[n-1].ReasoningText += value
-		return
-	}
-	*parts = append(
-		*parts,
-		aikit.ContentPart{Type: aikit.ContentPartTypeReasoning, ReasoningText: value, ThoughtSignature: signature},
-	)
-}
-
-func appendToolCall(parts *[]aikit.ContentPart, indexes map[int]int, event aikit.StreamEvent) {
-	index, found := indexes[event.ToolCallIndex]
-	if !found {
-		index = len(*parts)
-		indexes[event.ToolCallIndex] = index
-		*parts = append(
-			*parts,
-			aikit.ContentPart{
-				Type:             aikit.ContentPartTypeToolCall,
-				ToolCallID:       event.ToolCallID,
-				ToolCallName:     event.ToolCallName,
-				ThoughtSignature: event.ThoughtSignature,
-			},
-		)
-	}
-	part := &(*parts)[index]
-	if event.ToolCallID != "" {
-		part.ToolCallID = event.ToolCallID
-	}
-	if event.ToolCallName != "" {
-		part.ToolCallName = event.ToolCallName
-	}
-	if event.ThoughtSignature != "" {
-		part.ThoughtSignature = event.ThoughtSignature
-	}
-	if event.ToolCallArgsDelta != "" {
-		part.ToolCallArgs = append(part.ToolCallArgs, event.ToolCallArgsDelta...)
-	}
-}
-
-func mergeUsage(prior, incoming aikit.Usage) aikit.Usage {
-	take := func(current, next int) int {
-		if next != 0 {
-			return next
-		}
-		return current
-	}
-	merged := prior
-	merged.InputTokens = take(prior.InputTokens, incoming.InputTokens)
-	merged.OutputTokens = take(prior.OutputTokens, incoming.OutputTokens)
-	merged.TotalTokens = take(prior.TotalTokens, incoming.TotalTokens)
-	merged.ToolUsePromptTokens = take(prior.ToolUsePromptTokens, incoming.ToolUsePromptTokens)
-	merged.InputTokenDetails.NoCacheTokens = take(
-		prior.InputTokenDetails.NoCacheTokens,
-		incoming.InputTokenDetails.NoCacheTokens,
-	)
-	merged.InputTokenDetails.CacheReadTokens = take(
-		prior.InputTokenDetails.CacheReadTokens,
-		incoming.InputTokenDetails.CacheReadTokens,
-	)
-	merged.InputTokenDetails.CacheWriteTokens = take(
-		prior.InputTokenDetails.CacheWriteTokens,
-		incoming.InputTokenDetails.CacheWriteTokens,
-	)
-	merged.OutputTokenDetails.TextTokens = take(
-		prior.OutputTokenDetails.TextTokens,
-		incoming.OutputTokenDetails.TextTokens,
-	)
-	merged.OutputTokenDetails.ReasoningTokens = take(
-		prior.OutputTokenDetails.ReasoningTokens,
-		incoming.OutputTokenDetails.ReasoningTokens,
-	)
-	if incoming.Raw != nil {
-		merged.Raw = cloneMap(incoming.Raw)
-	} else {
-		merged.Raw = cloneMap(prior.Raw)
-	}
-	return merged
 }
