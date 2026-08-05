@@ -22,6 +22,8 @@ formats, and typed provider options.
   TanStack AI clients consume.
 - [UI stream protocol extensions](/integrations/protocol-extensions) explains the
   event-driven protocol seam both adapters are built on.
+- [Write a UI stream adapter](/integrations/writing-ui-stream-adapter) is the
+  minimal copyable template for a new protocol.
 
 For the provider/client mental model, start with
 [Providers and clients](/core/providers-and-clients).

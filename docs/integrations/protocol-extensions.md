@@ -58,3 +58,6 @@ preserves an API error's HTTP status while dropping provider detail.
 Behavioral conformance against a real client is a separate gate: the browser
 suite in `conformance/` drives both adapters with the actual client libraries,
 while the Go tests pin JSON shape, ordering, pairing, and terminal behavior.
+
+For a copyable minimal implementation and its test shape, see
+[Write a UI stream adapter](/integrations/writing-ui-stream-adapter).
