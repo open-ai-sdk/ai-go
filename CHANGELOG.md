@@ -196,6 +196,76 @@ The package table above records the earlier cross-package moves.
 - Approval requests use the AI SDK v7 HMAC/canonical-JSON contract and are stateless across HTTP
   requests. The signature authenticates the gated tool call and input, not the user's approval
   decision.
+- **Fixed:** a decoded conversation containing a completed tool call was rejected by the agent's own
+  validation. `ToAIMessages` placed the synthesized `tool_result` inside the assistant message, but
+  `tool_result` is only valid content for the tool role — so every multi-turn request whose history
+  included a resolved tool call failed pre-stream with `content part N of type "tool_result" is not
+  valid for role "assistant"` (HTTP 500). Tool results now move to their own `RoleTool` message,
+  matching what the agent itself writes into history. A user turn carrying a tool result is
+  unaffected.
+- A tool that fails now reaches the client as `tool-output-error`. The v7 chunk producer previously
+  ignored `ToolResult.Disposition` and emitted `tool-output-available` for every outcome, so a
+  failure arrived as a *successful* tool part with the error string sitting in `output` and the
+  client's `output-error` state unreachable outside the imperative `Writer` API. Success, denied,
+  refused, and skipped dispositions are unchanged.
+- **Behavior change, security-relevant:** `tool-output-error` `errorText` is no longer redacted, on
+  both the engine path and `Writer.WriteToolOutputError`. Redacting it left the client with a correct
+  failure state and no usable reason, while `tool-output-available`'s `output` field has always
+  reached the wire verbatim. `error` chunks — terminal and provider errors — remain redacted.
+- On the engine path `errorText` is taken from `ToolResult.Output`, the scrubbed model-visible text
+  `tool.Details` produced, and falls back to `ToolResult.Error` only when `Output` is empty. The two
+  fields are not interchangeable: `Error` retains the full Go chain, including wrapped causes such as
+  internal hostnames or credentials in a URL, which is why it is not what goes to the browser. A tool
+  that wants a specific failure message should implement `tool.DetailedError`; its text lands in
+  `Output` and reaches the client unchanged.
+
+### AG-UI adapter
+
+- New: **client-executed tools**. `tool.NewClient` declares a tool this process
+  never runs; `aikit.ToolDefinition.ClientExecuted` marks it, and
+  `aikit.StepEventClientToolRequest` reports the call. The runtime streams
+  `TOOL_CALL_START`/`ARGS`/`END`, then suspends the turn through the same
+  clean-exit path as tool approval — `RUN_FINISHED` with a client-tool interrupt,
+  never `RUN_ERROR`. The browser executes the tool and its output returns in the
+  next request as an ordinary `role: "tool"` message.
+  No `tanstack:interruptBinding` is attached: TanStack honors a binding only when
+  it carries schema digests computed by its own canonicalizer, and one that fails
+  that check routes to the same metadata-marked path as no binding at all.
+  **The client tool's output is untrusted** — the browser is the executor, so
+  unlike an approval resume there is nothing for the server to authenticate.
+- New: `aikit.StepEventStateSnapshot` and `StepEventStateDelta` produce
+  `STATE_SNAPSHOT` and `STATE_DELTA`. This reverses a prior decision to omit
+  `STATE_DELTA`; two of its three reasons still hold and are documented. `ai-go`
+  never derives a patch by diffing and never applies one — the producer says what
+  changed, and a malformed operation array fails the run rather than being
+  dropped. **TanStack's stream processor still ignores `STATE_*` entirely**, so
+  these reach an application only through `useChat`'s `onChunk` callback.
+- New: `agui.WithStructuredOutputStart()` emits `CUSTOM`
+  `structured-output.start` after `RUN_STARTED`. Without it the client routes
+  assistant JSON into a plain text part and its progressively parsed `partial`
+  never populates. Opt-in, because the engine reports structured output only at
+  the end of a run.
+- New: `aisdkhttp.HandlerForRequest` and `RequestRunFunc` hand a run the whole
+  decoded `uistream.Request`. `RunFunc` sees only messages, which left
+  `forwardedProps`, `resume`, client tool declarations, and run state
+  unreachable — and tool-approval decisions travel **only** in `resume`, so that
+  round trip was impossible from outside the package. `HandlerFor` is now an
+  adapter over `HandlerForRequest`, so the two cannot drift on status codes,
+  headers, or cancellation; its signature, panics, and behavior are unchanged.
+- `agui.ResumeEntry` is exported, so `Request.Extra["resume"]` can be
+  type-asserted from outside the package. Both it and interrupt resume support
+  are new in this release.
+- **Fixed:** `MESSAGES_SNAPSHOT` at an interrupt published only the assistant
+  turn. The event's payload is typed `Message[]`, and TanStack *replaces* its
+  transcript with it rather than merging, so every suspended run deleted the
+  user's own message and all earlier turns from the UI — and the resumed request
+  reached the model with no user text. It now carries the request's history
+  followed by the assistant turn, with prior messages forwarded verbatim so
+  unmodelled fields survive.
+- **Fixed:** a request with no `state` key echoed `{"snapshot":null}` at an
+  interrupt. A `json.RawMessage(nil)` boxed in an `any` is not a nil interface,
+  so the absence check never fired; a conforming AG-UI client would have
+  clobbered its own state with null.
 
 ### Verification
 

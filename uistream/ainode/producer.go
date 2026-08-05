@@ -45,6 +45,9 @@ type ChunkProducer struct {
 	checker          *InvariantChecker
 	reporter         func(InvariantViolation)
 	logger           *slog.Logger
+	// usage folds per-step snapshots into a run total. v7 has no usage chunk
+	// field, so the total is published through messageMetadata on finish.
+	usage usageAccumulator
 
 	// lastFinishReason stores the finish reason from the most recent StepEventStepEnd.
 	lastFinishReason string
@@ -132,7 +135,11 @@ func (cp *ChunkProducer) emit(out chan<- Chunk, chunk Chunk) {
 func (cp *ChunkProducer) translateEvent(ev aikit.StepEvent) ([]Chunk, string) {
 	switch ev.Type {
 	case aikit.StepEventStepStart:
+		cp.usage.startStep()
 		return cp.chunksStepStart(), ""
+	case aikit.StepEventUsage:
+		cp.usage.apply(ev.Usage)
+		return nil, ""
 	case aikit.StepEventTextDelta:
 		return cp.chunksTextDelta(ev)
 	case aikit.StepEventReasoningDelta:
@@ -183,6 +190,10 @@ func (cp *ChunkProducer) translateTerminalEvent(ev aikit.StepEvent) ([]Chunk, st
 		return cp.chunksToolCallInvalid(ev), ""
 	case aikit.StepEventSource:
 		return cp.chunksSource(ev), ""
+	case aikit.StepEventFileDelta:
+		return cp.chunksFile(ev), ""
+	case aikit.StepEventStructuredOutput:
+		return cp.chunksStructuredOutput(ev), ""
 	case aikit.StepEventStepEnd:
 		if ev.FinishReason == "" {
 			cp.lastFinishReason = ""
@@ -194,10 +205,23 @@ func (cp *ChunkProducer) translateTerminalEvent(ev aikit.StepEvent) ([]Chunk, st
 		}
 		cp.lastFinishReason = finishReason
 		return cp.chunksStepEnd(), ""
+	case aikit.StepEventClientToolRequest:
+		// No chunk: in AI SDK v7 a tool call with no result followed by a clean
+		// finish already *is* the client-tool contract, and the surrounding
+		// TOOL_CALL_* events produced it. AG-UI needs an explicit interrupt
+		// because its client only executes frontend tools from one.
+		return nil, ""
+	case aikit.StepEventStateSnapshot, aikit.StepEventStateDelta:
+		// AI SDK v7 has no run-state channel. Dropping these is the honest
+		// mapping; a server that needs shared state uses the AG-UI adapter.
+		return nil, ""
 	case aikit.StepEventDone:
 		fields := map[string]any{}
 		if cp.lastFinishReason != "" {
 			fields["finishReason"] = cp.lastFinishReason
+		}
+		if metadata := cp.usageMetadata(); metadata != nil {
+			fields["messageMetadata"] = metadata
 		}
 		return []Chunk{
 			{Type: ChunkFinish, Fields: fields},

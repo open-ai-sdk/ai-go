@@ -145,6 +145,14 @@ func (r *resultReducer) consume(event aikit.StepEvent) (bool, error) {
 		r.finishStep(event)
 	case aikit.StepEventStructuredOutput:
 		r.result.StructuredOutput = append(json.RawMessage(nil), event.StructuredOutput...)
+	case aikit.StepEventClientToolRequest,
+		aikit.StepEventStateSnapshot,
+		aikit.StepEventStateDelta:
+		// Deliberately not aggregated. A client-tool request suspends the run
+		// for the UI, which a non-streaming Run cannot serve; state events
+		// belong to the UI stream, not to the run's own result. Listed rather
+		// than left to the implicit default so a new event type is a visible
+		// decision here.
 	case aikit.StepEventDone:
 		return true, nil
 	case aikit.StepEventError:

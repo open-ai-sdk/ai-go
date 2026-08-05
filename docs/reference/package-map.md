@@ -15,7 +15,7 @@ providers.
 | `provider/*` | Provider-specific constructors and wire codecs |
 | `uistream` | Protocol-neutral request, frame, encoder/decoder/framer contracts, and event drain driver |
 | `uistream/ainode` | AI SDK v7 wire implementation, imperative writer, persistence, and approvals |
-| `uistream/agui` | Minimal AG-UI RunAgentInput and event-stream adapter |
+| `uistream/agui` | AG-UI RunAgentInput and event-stream adapter for TanStack AI clients |
 | `aisdk` | Compatibility aliases and forwarders to `uistream/ainode` |
 | `aisdkhttp` | Protocol-parameterized HTTP/SSE boundary consuming one `aikit.StepEvent` iterator |
 | `mcp` | MCP clients and dynamic tool integration |

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -401,11 +400,11 @@ func (r *run) executeToolStep(
 	}
 
 	if controlErr != nil {
-		if !errors.Is(controlErr, errApprovalPending) {
+		if !isSuspendedRun(controlErr) {
 			stepSpan.RecordError(controlErr)
 		}
 		stepSpan.End()
-		if errors.Is(controlErr, errApprovalPending) {
+		if isSuspendedRun(controlErr) {
 			r.emitObserved(StepEvent{
 				Type:         StepEventStepEnd,
 				StepNumber:   step,

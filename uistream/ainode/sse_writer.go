@@ -39,7 +39,12 @@ func encodeChunkPayload(c Chunk, trustedError bool) ([]byte, error) {
 	for k, v := range c.Fields {
 		payload[k] = v
 	}
-	if (c.Type == ChunkError || c.Type == ChunkToolOutputError) && !trustedError {
+	// Only ChunkError is redacted. It carries terminal and provider errors the
+	// app never authored. ChunkToolOutputError carries a message the app's own
+	// tool wrote, in the same trust domain as the already-unredacted `output`
+	// field on ChunkToolOutputAvailable — redacting it would leave the client
+	// with a correct failure state and no usable reason.
+	if c.Type == ChunkError && !trustedError {
 		if raw, ok := payload["errorText"].(string); ok {
 			if !isRedactedStreamError(raw) {
 				payload["errorText"] = redactStreamError(errors.New(raw))

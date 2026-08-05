@@ -376,11 +376,14 @@ goroutine and never blocks the caller.
 | `StepEventToolCallInvalid` | arguments failed to parse; execution skipped |
 | `StepEventToolResult` | `ToolResult` |
 | `StepEventToolApprovalRequest` | `ApprovalID`, `ApprovalSignature` |
+| `StepEventClientToolRequest` | a call to a client-executed tool; the run suspends |
 | `StepEventToolOutputDenied` | an approval was refused |
 | `StepEventUsage` | `Usage`, merged within the step |
 | `StepEventSource` | `Source` |
 | `StepEventFileDelta` | `FileData`, `FileMediaType` |
 | `StepEventStructuredOutput` | `StructuredOutput` |
+| `StepEventStateSnapshot` | `State` — a full run-state document |
+| `StepEventStateDelta` | `StatePatch` — an RFC-6902 patch, forwarded unapplied |
 | `StepEventDone` | the run's terminator |
 | `StepEventError` | `Error` — surfaced through the sequence's error half |
 

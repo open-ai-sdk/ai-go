@@ -10,25 +10,26 @@ import (
 
 func TestBrowserBoundErrorPathsAreRedacted(t *testing.T) {
 	const secret = "org-secret request-body-leak"
-	tests := []struct {
-		name  string
-		write func(*Writer) error
-	}{
-		{"error chunk", func(writer *Writer) error { return writer.WriteError(secret) }},
-		{"tool output error", func(writer *Writer) error {
-			return writer.WriteToolOutputError("call-1", secret, nil)
-		}},
+	var output bytes.Buffer
+	if err := NewWriter(&output).WriteError(secret); err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			var output bytes.Buffer
-			if err := test.write(NewWriter(&output)); err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(output.String(), secret) || !strings.Contains(output.String(), "stream error") {
-				t.Fatalf("unredacted browser payload: %s", output.String())
-			}
-		})
+	if strings.Contains(output.String(), secret) || !strings.Contains(output.String(), "stream error") {
+		t.Fatalf("unredacted browser payload: %s", output.String())
+	}
+}
+
+// Tool failure text is app-authored, in the same trust domain as the tool's
+// success output, which already reaches the wire verbatim. Redacting it would
+// make the output-error state display-useless.
+func TestToolOutputErrorTextReachesTheWireUnredacted(t *testing.T) {
+	const detail = "order 42 not found in region eu-west-1"
+	var output bytes.Buffer
+	if err := NewWriter(&output).WriteToolOutputError("call-1", detail, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), detail) {
+		t.Fatalf("tool errorText was redacted: %s", output.String())
 	}
 }
 

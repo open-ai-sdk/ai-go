@@ -19,11 +19,20 @@ func ToAIMessages(msgs []EnvelopeMessage) []aikit.Message {
 		} else {
 			parts = []aikit.ContentPart{{Type: aikit.ContentPartTypeText, Text: m.Content}}
 		}
-		if len(parts) > 0 {
-			result = append(result, aikit.Message{
-				Role:    aikit.Role(m.Role),
-				Content: parts,
-			})
+		role := aikit.Role(m.Role)
+		// A completed tool part decodes into a tool_call *and* a tool_result.
+		// Only the call belongs to the assistant turn: tool_result is valid
+		// content for the tool role (which is what the agent itself emits in
+		// history) and for a user turn, but never for an assistant one, so
+		// leaving them together makes the decoder produce a message its own
+		// validator rejects — and every multi-turn run with a prior tool call
+		// fails before it starts.
+		own, results := splitToolResults(role, parts)
+		if len(own) > 0 {
+			result = append(result, aikit.Message{Role: role, Content: own})
+		}
+		if len(results) > 0 {
+			result = append(result, aikit.Message{Role: aikit.RoleTool, Content: results})
 		}
 		responses := approvalResponseParts(m.Parts)
 		if len(responses) > 0 {
@@ -31,6 +40,26 @@ func ToAIMessages(msgs []EnvelopeMessage) []aikit.Message {
 		}
 	}
 	return result
+}
+
+// splitToolResults separates tool_result parts out of an assistant turn,
+// preserving order within each group. Other roles keep their parts as-is: a
+// user message may legitimately carry a tool result.
+func splitToolResults(
+	role aikit.Role,
+	parts []aikit.ContentPart,
+) (own, results []aikit.ContentPart) {
+	if role != aikit.RoleAssistant {
+		return parts, nil
+	}
+	for _, part := range parts {
+		if part.Type == aikit.ContentPartTypeToolResult {
+			results = append(results, part)
+			continue
+		}
+		own = append(own, part)
+	}
+	return own, results
 }
 
 // ToAIContentParts converts a slice of EnvelopePartUnion to ai.ContentPart values.

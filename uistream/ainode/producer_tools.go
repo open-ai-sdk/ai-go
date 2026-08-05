@@ -67,9 +67,39 @@ func (cp *ChunkProducer) chunksToolResult(event aikit.StepEvent) []Chunk {
 			"toolCallId": result.ID, "toolName": result.Name, "input": parseToolArgs(result.Args),
 		}, event.ProviderMetadata)})
 	}
+	// A failing tool is a distinct v7 terminal state, not a success carrying an
+	// error string. Every other disposition keeps the success chunk: denied has
+	// its own StepEventToolOutputDenied, and refused/skipped have no v7 mapping.
+	if result.Disposition == aikit.ToolResultError {
+		return append(chunks, Chunk{Type: ChunkToolOutputError, Fields: withProviderMetadata(map[string]any{
+			"toolCallId": result.ID, "errorText": toolResultErrorText(result),
+		}, event.ProviderMetadata)})
+	}
 	return append(chunks, Chunk{Type: ChunkToolOutputAvailable, Fields: withProviderMetadata(map[string]any{
 		"toolCallId": result.ID, "output": result.Output,
 	}, event.ProviderMetadata)})
+}
+
+// toolResultErrorText picks the client-visible failure message.
+//
+// Output wins because the two fields are deliberately different on the engine
+// path: Output is the scrubbed text tool.Details produced for the model, while
+// Error keeps the full Go chain including wrapped causes — internal hostnames,
+// connection strings, credentials in a URL. Preferring Error would put in front
+// of the browser exactly what the library already decided was unsafe to show
+// the model. A tool that wants a specific failure message implements
+// tool.DetailedError, whose text lands in Output and reaches the client intact.
+//
+// Error remains the fallback for callers that construct a ToolResult directly
+// and set only the error; an empty errorText would render as a blank failure.
+func toolResultErrorText(result *aikit.ToolResult) string {
+	if result.Output != "" {
+		return result.Output
+	}
+	if result.Error != nil {
+		return result.Error.Error()
+	}
+	return ""
 }
 
 func parseToolArgs(args string) any {

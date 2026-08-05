@@ -17,22 +17,41 @@ The seam covers only event-driven streams. The `aisdk.Writer` and related
 imperative APIs intentionally remain AI Node-specific, since they can emit
 arbitrary protocol chunks that have no corresponding engine event.
 
-The bundled `agui` adapter is a minimal subset: text and tool lifecycle events
-are supported; state synchronization, approvals, reasoning, source/file
-events, durability, and resume are deliberately not supported.
+## Bundled adapters
 
-The adapter accepts the core `RunAgentInput` fields (`threadId`, `runId`,
-`messages`, `state`, `tools`, `context`, and `forwardedProps`) and emits
-`RUN_*`, `STEP_*`, `TEXT_MESSAGE_*`, and `TOOL_CALL_*` events. Usage snapshots
-are folded per step and returned under `RUN_FINISHED.result.usage`.
+| Adapter | Protocol | Terminator |
+| --- | --- | --- |
+| `uistream/ainode` | AI SDK v7 UI message stream | `finish` chunk then `data: [DONE]` |
+| `uistream/agui` | AG-UI, as consumed by TanStack AI | `RUN_FINISHED` |
 
-`StepEventDone` is swallowed because the driver's `Finish` call owns the one
-terminal AG-UI event. Reasoning, structured-output, source, and file events are
-deliberately dropped. An approval request returns
-`agui.ErrToolApprovalUnsupported` and terminates with `RUN_ERROR`; AG-UI's
-interrupt/resume lifecycle is outside this minimal adapter.
+Both cover the full `aikit.StepEvent` vocabulary: text, reasoning, tool
+lifecycle, tool approval, sources, files, structured output, and usage. They
+differ in how each is spelled, because each protocol's client enforces its own
+schema. See [AG-UI and TanStack AI](/integrations/ag-ui) and
+[AI SDK v7 UI streams](/integrations/ui-streams) for the per-protocol contract.
 
-This subset follows the official AG-UI core event and `RunAgentInput`
-documentation as reviewed on 2026-08-04. Behavioral conformance against a real
-AG-UI client remains a separate integration gate; the local golden tests prove
-JSON shape, ordering, pairing, and terminal behavior only.
+`StepEventDone` is swallowed by both adapters: the driver's `Finish` call owns
+the single terminal event, so an adapter never emits one from `Encode`.
+
+## Writing an adapter
+
+An adapter supplies three pieces to `uistream.Protocol`:
+
+- `NewEncoder(Options) Encoder` — a per-run encoder. `Start` opens the stream,
+  `Encode` maps one engine event to zero or more frames, and `Finish` is called
+  exactly once with the terminal error, or `nil` on success.
+- `Decoder` — parses the request body into `uistream.Request`.
+- `Framer` — sets response headers and writes one frame.
+
+Two invariants are the driver's, not the adapter's. `Pipe` normalizes
+`StepEventError` into the terminal error before it reaches `Encode`, so an
+adapter that receives one should treat it as a bug. And `Finish` runs even when
+`Start` or `Encode` failed, so terminal cleanup belongs there rather than at the
+end of the event loop.
+
+Errors reaching the wire must pass through `uistream.RedactStreamError`, which
+preserves an API error's HTTP status while dropping provider detail.
+
+Behavioral conformance against a real client is a separate gate: the browser
+suite in `conformance/` drives both adapters with the actual client libraries,
+while the Go tests pin JSON shape, ordering, pairing, and terminal behavior.

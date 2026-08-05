@@ -18,6 +18,14 @@ type RunFunc func(
 	messages []aikit.Message,
 ) (iter.Seq2[aikit.StepEvent, error], error)
 
+// RequestRunFunc starts an agent run with the whole decoded request, including
+// the protocol extras a RunFunc cannot see: forwarded props, interrupt resume
+// decisions, client tool declarations, and run state.
+type RequestRunFunc func(
+	ctx context.Context,
+	request uistream.Request,
+) (iter.Seq2[aikit.StepEvent, error], error)
+
 // Handler returns an http.Handler for AI SDK v7 chat POSTs.
 func Handler(run RunFunc) http.Handler {
 	return HandlerFor(ainode.Protocol(), run)
@@ -25,7 +33,26 @@ func Handler(run RunFunc) http.Handler {
 
 // HandlerFor returns a handler driven by a UI stream protocol. Handler keeps
 // the established AI Node v7 behavior by selecting ainode.Protocol.
+//
+// Use HandlerForRequest instead when the run needs anything the decoder
+// recovered beyond the messages.
 func HandlerFor(protocol uistream.Protocol, run RunFunc) http.Handler {
+	if run == nil {
+		panic("aisdkhttp: nil RunFunc")
+	}
+	// Adapting rather than duplicating the handler body keeps the two entry
+	// points from drifting on status codes, headers, or cancellation.
+	return HandlerForRequest(protocol, func(
+		ctx context.Context,
+		request uistream.Request,
+	) (iter.Seq2[aikit.StepEvent, error], error) {
+		return run(ctx, request.Messages)
+	})
+}
+
+// HandlerForRequest is HandlerFor with the whole decoded request. HandlerFor
+// remains the message-only form.
+func HandlerForRequest(protocol uistream.Protocol, run RequestRunFunc) http.Handler {
 	if run == nil {
 		panic("aisdkhttp: nil RunFunc")
 	}
@@ -49,7 +76,7 @@ func HandlerFor(protocol uistream.Protocol, run RunFunc) http.Handler {
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
-		events, err := run(ctx, request.Messages)
+		events, err := run(ctx, request)
 		if err != nil || events == nil {
 			writeHTTPError(w, http.StatusInternalServerError, streamErrorMessage)
 			return
