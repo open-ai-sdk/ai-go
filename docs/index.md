@@ -3,44 +3,63 @@ layout: home
 
 hero:
   name: ai-go
-  text: AI application primitives for Go
-  tagline: Provider-neutral generation, typed tools, multi-step agents, and AI SDK v7 UI streams.
+  text: Provider-neutral AI application primitives for Go
+  tagline: Model calls, typed tools, multi-step agents, and browser UI streams from focused Go packages.
   actions:
     - theme: brand
       text: Get started
       link: /getting-started
     - theme: alt
-      text: Read the docs
+      text: Explore the docs
       link: /docs/
 
 features:
   - icon: ⚡
-    title: Focused Go APIs
-    details: Use llm for direct model calls, then build an immutable Agent and create a fresh Runner for each invocation.
+    title: Model foundations
+    details: Keep messages, completions, streaming, embeddings, and media behind small provider-neutral contracts.
   - icon: 🧰
-    title: Typed tools and agents
-    details: Build schema-validated Go tools and let the runtime execute multi-step tool loops.
+    title: Agents and typed tools
+    details: Build an immutable Agent once, create a Runner per invocation, and let the runtime execute tool loops.
   - icon: 🔌
-    title: Provider-neutral by design
-    details: Use OpenAI, Anthropic, Gemini, Kie, or OpenAI-compatible models behind focused contracts.
+    title: Concrete integrations
+    details: Use focused provider clients, MCP tools, and explicit extension points instead of a single monolithic abstraction.
   - icon: 🌊
-    title: UI-stream ready
-    details: Produce AI SDK v7-compatible SSE streams from a small net/http boundary.
+    title: One UI-stream boundary
+    details: Serve AI SDK v7 and AG-UI from the shared uistream lifecycle, or add a protocol adapter of your own.
 ---
 
-## Start with a model
+ai-go is heavily inspired by [Rig](https://rig.rs/), adapted to Go's type
+system, explicit package ownership, and standard library conventions.
 
-Install the module, configure a provider, then use `llm.NewCompletion` for one
-model call or `agent.New(...).Build()` for reusable multi-turn execution.
-Canonical packages keep contract ownership explicit without Agent aliases or
-compatibility shims.
+## Choose a path
 
-Read [Agents](/core/agents) before [Agent Runner](/core/agent-runner): the first
-defines reusable configuration, while the second owns input, overrides, and
-execution.
+### Make your first model call
+
+Install ai-go and configure a provider in [Get started](/getting-started). Then
+learn [Providers and clients](/core/providers-and-clients) and
+[Completions](/core/completions).
 
 ```sh
 go get github.com/open-ai-sdk/ai-go
 ```
 
-[Read the quickstart →](/getting-started) · [Browse the documentation →](/docs/)
+### Build an agent workflow
+
+Start with [Agents](/core/agents), create a per-request
+[Agent Runner](/core/agent-runner), and add [Tools](/core/tools) when the model
+must call application code.
+
+### Connect a client or service
+
+Browse [Integrations](/integrations/) for providers and MCP. For browser
+responses, begin at [UI streams](/integrations/uistream): it groups the AI SDK
+v7, AG-UI, and custom-adapter documentation around one shared boundary.
+
+### Find a focused answer
+
+[Documentation](/docs/) follows the recommended reading order. Use
+[Tutorials & Guides](/guides/) for end-to-end workflows,
+[Examples](/examples/) for runnable source, and the
+[package map](/reference/package-map) or
+[Go API reference](https://pkg.go.dev/github.com/open-ai-sdk/ai-go) for exact
+package ownership and identifiers.
