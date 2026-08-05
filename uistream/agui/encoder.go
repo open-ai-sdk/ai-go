@@ -12,8 +12,9 @@ import (
 
 // encoder holds the per-run AG-UI state for one Pipe invocation.
 type encoder struct {
-	runID    string
-	threadID string
+	runID       string
+	threadID    string
+	parentRunID string
 	// state mirrors RunAgentInput.state so an interrupt boundary can echo it.
 	state    any
 	hasState bool
@@ -57,8 +58,11 @@ func (e *encoder) event(typ string, data map[string]any) ([]uistream.Frame, erro
 }
 
 func (e *encoder) Start() ([]uistream.Frame, error) {
-	frames, err := e.event(eventRunStarted,
-		map[string]any{"threadId": e.threadID, "runId": e.runID})
+	started := map[string]any{"threadId": e.threadID, "runId": e.runID}
+	if e.parentRunID != "" {
+		started["parentRunId"] = e.parentRunID
+	}
+	frames, err := e.event(eventRunStarted, started)
 	if err != nil || !e.structuredStart {
 		return frames, err
 	}

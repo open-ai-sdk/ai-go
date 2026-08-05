@@ -75,6 +75,9 @@ func newEncoder(c config, options uistream.Options) *encoder {
 	if value, ok := options.Extra["threadId"].(string); ok {
 		e.threadID = value
 	}
+	if value, ok := options.Extra["parentRunId"].(string); ok {
+		e.parentRunID = value
+	}
 	// A json.RawMessage(nil) boxed in an any is a non-nil interface, so an
 	// absent "state" key would otherwise echo {"snapshot":null} and a
 	// conforming client would clobber its own state with it.

@@ -19,19 +19,22 @@ arbitrary protocol chunks that have no corresponding engine event.
 
 ## Bundled adapters
 
-| Adapter | Protocol | Terminator |
-| --- | --- | --- |
-| `uistream/ainode` | AI SDK v7 UI message stream | `finish` chunk then `data: [DONE]` |
-| `uistream/agui` | AG-UI, as consumed by TanStack AI | `RUN_FINISHED` |
+| Adapter | Protocol | Terminator | State events |
+| --- | --- | --- | --- |
+| `uistream/ainode` | AI SDK v7 UI message stream | `finish` chunk then `data: [DONE]` | Not representable in this protocol; dropped |
+| `uistream/agui` | AG-UI, as consumed by TanStack AI | `RUN_FINISHED` | `STATE_SNAPSHOT`, `STATE_DELTA` |
 
-Both cover the full `aikit.StepEvent` vocabulary: text, reasoning, tool
-lifecycle, tool approval, sources, files, structured output, and usage. They
-differ in how each is spelled, because each protocol's client enforces its own
-schema. See [AG-UI and TanStack AI](/integrations/ag-ui) and
-[AI SDK v7 UI streams](/integrations/ui-streams) for the per-protocol contract.
+Both adapters map text, reasoning, tool lifecycle, approvals, sources, files,
+structured output, and usage. State is the intentional exception: AI SDK v7
+has no run-state wire channel, while AG-UI carries it natively. They differ in
+how each feature is spelled because each client enforces its own schema. See
+[AG-UI and TanStack AI](/integrations/ag-ui) and [AI SDK v7 UI streams](/integrations/ui-streams)
+for the per-protocol contract.
 
-`StepEventDone` is swallowed by both adapters: the driver's `Finish` call owns
-the single terminal event, so an adapter never emits one from `Encode`.
+`StepEventDone` supplies final metadata to the AI SDK v7 adapter when present.
+`Pipe` still guarantees termination: if an event iterator ends without it,
+AINode emits a default `finish` chunk and `[DONE]`; AG-UI always emits its
+terminal event from `Finish`.
 
 ## Writing an adapter
 

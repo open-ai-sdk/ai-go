@@ -37,6 +37,7 @@ func (framer) WriteFrame(w io.Writer, frame uistream.Frame) error {
 
 type encoder struct {
 	producer *ChunkProducer
+	finished bool
 }
 
 func (e *encoder) Start() ([]uistream.Frame, error) {
@@ -45,6 +46,12 @@ func (e *encoder) Start() ([]uistream.Frame, error) {
 
 func (e *encoder) Encode(event aikit.StepEvent) ([]uistream.Frame, error) {
 	chunks, _ := e.producer.translateEvent(event)
+	for _, chunk := range chunks {
+		if chunk.Type == ChunkFinish {
+			e.finished = true
+			break
+		}
+	}
 	return e.frames(chunks)
 }
 
@@ -54,8 +61,16 @@ func (e *encoder) Finish(terminal error) ([]uistream.Frame, error) {
 			reportInvariant(e.producer.logger, e.producer.reporter, violation)
 		}
 	}()
-	if terminal == nil {
+	if terminal == nil && e.finished {
 		return nil, nil
+	}
+	if terminal == nil {
+		// StepEventDone normally carries the finish metadata. Pipe nevertheless
+		// owns normal termination, so a well-formed iterator that simply ends
+		// must still close the AI SDK stream.
+		chunks, _ := e.producer.translateEvent(aikit.StepEvent{Type: aikit.StepEventDone})
+		e.finished = true
+		return e.frames(chunks)
 	}
 	return e.frames(e.producer.chunksError(terminal))
 }

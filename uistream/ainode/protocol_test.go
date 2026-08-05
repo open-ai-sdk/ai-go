@@ -83,6 +83,21 @@ func TestProtocolErrorMatchesChunkProducerBytes(t *testing.T) {
 	}
 }
 
+func TestProtocolFinishesWhenIteratorEndsWithoutDone(t *testing.T) {
+	sequence := iter.Seq2[aikit.StepEvent, error](func(yield func(aikit.StepEvent, error) bool) {
+		yield(aikit.StepEvent{Type: aikit.StepEventTextDelta, TextDelta: "hello"}, nil)
+	})
+	var output bytes.Buffer
+	if err := uistream.Pipe(
+		context.Background(), &output, sequence, Protocol(), uistream.Options{MessageID: "msg_1"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"type":"finish"`) || !strings.Contains(output.String(), "data: [DONE]") {
+		t.Fatalf("normal iterator end did not close the stream: %q", output.String())
+	}
+}
+
 func TestDecoderPreservesMultipartAndApprovalSemantics(t *testing.T) {
 	req, err := (decoder{}).Decode(
 		strings.NewReader(

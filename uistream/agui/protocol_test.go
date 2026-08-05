@@ -40,6 +40,23 @@ func TestProtocolProducesOrderedRunLifecycle(t *testing.T) {
 	}
 }
 
+func TestProtocolPropagatesParentRunIDToRunStarted(t *testing.T) {
+	var output bytes.Buffer
+	if err := uistream.Pipe(
+		context.Background(),
+		&output,
+		sequence(aikit.StepEvent{Type: aikit.StepEventDone}),
+		Protocol(WithRunID(func() string { return "run_2" })),
+		uistream.Options{Extra: map[string]any{"threadId": "thread_1", "parentRunId": "run_1"}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	started := firstEvent(t, output.String())
+	if started["parentRunId"] != "run_1" {
+		t.Fatalf("RUN_STARTED parentRunId = %#v, want run_1", started["parentRunId"])
+	}
+}
+
 func TestProtocolClosesTextAndToolsBeforeTerminalError(t *testing.T) {
 	wantErr := errors.New("provider failure")
 	events := iter.Seq2[aikit.StepEvent, error](func(yield func(aikit.StepEvent, error) bool) {
@@ -489,6 +506,22 @@ func lastEvent(t *testing.T, stream string) map[string]any {
 		t.Fatalf("stream has no events: %s", stream)
 	}
 	return last
+}
+
+func firstEvent(t *testing.T, stream string) map[string]any {
+	t.Helper()
+	for _, line := range strings.Split(stream, "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		event := map[string]any{}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			t.Fatalf("decode event %q: %v", line, err)
+		}
+		return event
+	}
+	t.Fatalf("stream has no events: %s", stream)
+	return nil
 }
 
 func equalStrings(left, right []string) bool {

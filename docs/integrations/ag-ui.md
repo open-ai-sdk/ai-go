@@ -75,6 +75,7 @@ The decoder accepts AG-UI's `RunAgentInput`:
 | Field | Use |
 | --- | --- |
 | `threadId`, `runId` | required; echoed on every lifecycle event |
+| `parentRunId` | optional; echoed on `RUN_STARTED` for run lineage/branching |
 | `messages` | converted to `[]aikit.Message` and passed to the Runner |
 | `state` | echoed as `STATE_SNAPSHOT` at an interrupt boundary |
 | `resume` | client decisions resolving pending interrupts |
