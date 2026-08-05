@@ -227,3 +227,64 @@ func TestToAIMessages_PartsOverrideContent(t *testing.T) {
 		t.Errorf("expected parts to override content, got %+v", got[0].Content)
 	}
 }
+
+// TestToAIContentParts_CanonicalFilename verifies that the v7 canonical
+// "filename" field is preserved on the provider-facing file part.
+func TestToAIContentParts_CanonicalFilename(t *testing.T) {
+	parts := []EnvelopePartUnion{
+		{
+			Type:     EnvelopePartTypeFile,
+			URL:      "https://example.com/report.pdf",
+			MediaType: "application/pdf",
+			Filename: "report.pdf",
+		},
+	}
+	got := ToAIContentParts(parts)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(got))
+	}
+	if got[0].Filename != "report.pdf" {
+		t.Errorf("expected Filename=report.pdf, got %q", got[0].Filename)
+	}
+}
+
+// TestToAIContentParts_LegacyNameFallback verifies that the legacy "name"
+// field is still honored when "filename" is absent.
+func TestToAIContentParts_LegacyNameFallback(t *testing.T) {
+	parts := []EnvelopePartUnion{
+		{
+			Type:     EnvelopePartTypeFile,
+			URL:      "https://example.com/legacy.pdf",
+			MediaType: "application/pdf",
+			Name:     "legacy.pdf",
+		},
+	}
+	got := ToAIContentParts(parts)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(got))
+	}
+	if got[0].Filename != "legacy.pdf" {
+		t.Errorf("expected Filename=legacy.pdf (from legacy name), got %q", got[0].Filename)
+	}
+}
+
+// TestToAIContentParts_FilenamePrecedence verifies that "filename" takes
+// precedence over the legacy "name" when both are present.
+func TestToAIContentParts_FilenamePrecedence(t *testing.T) {
+	parts := []EnvelopePartUnion{
+		{
+			Type:     EnvelopePartTypeFile,
+			URL:      "https://example.com/doc.pdf",
+			MediaType: "application/pdf",
+			Filename: "canonical.pdf",
+			Name:     "legacy.pdf",
+		},
+	}
+	got := ToAIContentParts(parts)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(got))
+	}
+	if got[0].Filename != "canonical.pdf" {
+		t.Errorf("expected Filename=canonical.pdf (precedence), got %q", got[0].Filename)
+	}
+}
