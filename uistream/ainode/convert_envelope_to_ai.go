@@ -71,22 +71,26 @@ func ToAIContentParts(parts []EnvelopePartUnion) []aikit.ContentPart {
 		case EnvelopePartTypeText:
 			out = append(out, aikit.ContentPart{Type: aikit.ContentPartTypeText, Text: p.Text})
 		case EnvelopePartTypeImage:
+			ifn := filenameOf(p)
 			switch {
 			case p.FileID != "":
-				out = append(out, filePart("", "image", nil, p.FileID, ""))
+				out = append(out, filePart("", "image", nil, p.FileID, ifn))
 			case len(p.Data) > 0:
-				out = append(out, filePart("", p.MediaType, p.Data, "", ""))
+				out = append(out, filePart("", p.MediaType, p.Data, "", ifn))
 			default:
-				out = append(out, filePart(p.URL, "image", nil, "", ""))
+				out = append(out, filePart(p.URL, "image", nil, "", ifn))
 			}
 		case EnvelopePartTypeFile:
+			// Filename is canonical (v7); Name is the legacy fallback.
+			// One normalized value reaches the provider-facing file part.
+			fn := filenameOf(p)
 			switch {
 			case p.FileID != "":
-				out = append(out, filePart("", p.MediaType, nil, p.FileID, p.Name))
+				out = append(out, filePart("", p.MediaType, nil, p.FileID, fn))
 			case len(p.Data) > 0:
-				out = append(out, filePart("", p.MediaType, p.Data, "", p.Name))
+				out = append(out, filePart("", p.MediaType, p.Data, "", fn))
 			default:
-				out = append(out, filePart(p.URL, p.MediaType, nil, "", p.Name))
+				out = append(out, filePart(p.URL, p.MediaType, nil, "", fn))
 			}
 		case EnvelopePartTypeToolInvocation, EnvelopePartTypeDynamicTool:
 			out = append(out, toolInvocationParts(p)...)
@@ -184,4 +188,14 @@ func filePart(url, mediaType string, data []byte, fileID, filename string) aikit
 		Type: aikit.ContentPartTypeFile, FileURL: url, MediaType: mediaType,
 		Data: data, FileID: fileID, Filename: filename,
 	}
+}
+
+// filenameOf resolves the provider-facing filename for a file/image part.
+// Canonical v7 Filename takes precedence; legacy Name is the fallback so
+// older wire payloads that only carry "name" keep working.
+func filenameOf(p EnvelopePartUnion) string {
+	if p.Filename != "" {
+		return p.Filename
+	}
+	return p.Name
 }

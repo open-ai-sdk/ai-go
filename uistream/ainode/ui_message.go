@@ -132,7 +132,12 @@ type EnvelopePartUnion struct {
 	// MediaType is the MIME type for image/file parts (e.g. "image/png", "application/pdf").
 	MediaType string `json:"mediaType,omitempty"`
 
-	// Name is the original filename for file parts.
+	// Filename is the canonical filename for file parts (v7 wire field).
+	// Preferred over the legacy Name field when both are present.
+	Filename string `json:"filename,omitempty"`
+
+	// Name is the legacy filename for file parts. Kept for backward
+	// compatibility with older wire payloads; Filename takes precedence.
 	Name string `json:"name,omitempty"`
 
 	// FileID is a provider-specific file identifier (e.g. OpenAI "file-abc123").
