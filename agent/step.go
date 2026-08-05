@@ -12,7 +12,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-//nolint:gocyclo // Tool actions intentionally share one ordered commit path.
 func executeToolCalls(
 	r *run,
 	tools *ToolSet,

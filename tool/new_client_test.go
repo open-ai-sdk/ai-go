@@ -67,7 +67,8 @@ func TestNewClientJoinsToolSet(t *testing.T) {
 	}
 	server, err := tool.New("echo", "Echo", func(_ context.Context, in struct {
 		Value string `json:"value"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return in.Value, nil
 	})
 	if err != nil {

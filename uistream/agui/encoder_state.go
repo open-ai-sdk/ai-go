@@ -41,7 +41,7 @@ func (e *encoder) stateSnapshotEvent(event aikit.StepEvent) ([]uistream.Frame, e
 	}
 	// Emitted as RawMessage so key order and number formatting survive the
 	// round trip; re-marshalling a decoded value would reorder both.
-	return e.event(eventStateSnapshot, map[string]any{"snapshot": json.RawMessage(event.State)})
+	return e.event(eventStateSnapshot, map[string]any{"snapshot": event.State})
 }
 
 // stateDeltaEvent publishes an RFC-6902 patch. The engine never applies it — the
@@ -54,7 +54,7 @@ func (e *encoder) stateDeltaEvent(event aikit.StepEvent) ([]uistream.Frame, erro
 	if err := validatePatch(event.StatePatch); err != nil {
 		return nil, err
 	}
-	return e.event(eventStateDelta, map[string]any{"delta": json.RawMessage(event.StatePatch)})
+	return e.event(eventStateDelta, map[string]any{"delta": event.StatePatch})
 }
 
 func validatePatch(raw json.RawMessage) error {
