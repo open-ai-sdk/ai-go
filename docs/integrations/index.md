@@ -1,29 +1,31 @@
 # Integrations
 
-Integrations connect ai-go's model and event contracts to external services and
-protocols.
+Integrations connect ai-go's provider-neutral contracts to a concrete remote
+service or browser client. Start with the group your application needs; each
+page owns configuration and wire-protocol specifics.
 
 ## Model providers
 
-Use concrete packages under `provider/*` for authentication, endpoints, wire
-formats, and typed provider options.
+Concrete `provider/*` packages own authentication, endpoints, wire formats, and
+typed options. Start from the [provider overview](/providers/), then choose
+[OpenAI](/providers/openai) or [another provider](/providers/other-providers).
 
-- [Model provider overview](/providers/)
-- [OpenAI](/providers/openai)
-- [Other providers](/providers/other-providers)
+## Agent and tool protocols
 
-## Protocol integrations
+[Model Context Protocol](/integrations/mcp) adapts MCP capabilities into tools
+that the Agent runtime can call.
 
-- [Model Context Protocol](/integrations/mcp) turns MCP capabilities into tools
-  that the agent runtime can call.
-- [AI SDK v7 UI streams](/integrations/ui-streams) translates normalized events
-  into the browser-facing SSE protocol that `useChat` consumes.
-- [AG-UI and TanStack AI](/integrations/ag-ui) serves the AG-UI event stream that
-  TanStack AI clients consume.
-- [UI stream protocol extensions](/integrations/protocol-extensions) explains the
-  event-driven protocol seam both adapters are built on.
-- [Write a UI stream adapter](/integrations/writing-ui-stream-adapter) is the
-  minimal copyable template for a new protocol.
+## UI streams
 
-For the provider/client mental model, start with
+[UI streams](/integrations/uistream) is the shared `uistream` subsystem for
+browser-facing event streams. From its hub, choose [AI SDK v7 UI streams](/integrations/ui-streams)
+for `useChat`, [AG-UI and TanStack AI](/integrations/ag-ui) for TanStack, or
+the shared protocol seam for a custom client.
+
+## Build an integration
+
+Use [Extension points](/docs/extensions) for a new model or provider. For a
+browser protocol, begin at the [UI streams hub](/integrations/uistream).
+
+For the shared provider/client mental model, see
 [Providers and clients](/core/providers-and-clients).

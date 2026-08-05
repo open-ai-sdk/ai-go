@@ -5,30 +5,36 @@ const repository = 'https://github.com/open-ai-sdk/ai-go'
 
 const docsSidebar = [
   {
-    text: 'Documentation',
+    text: 'Start here',
     items: [
       { text: 'Overview', link: '/docs/' },
-      { text: 'Quickstart', link: '/getting-started' },
+      { text: 'Get started', link: '/getting-started' },
       { text: 'Why ai-go', link: '/docs/why-ai-go' },
       { text: 'Architecture', link: '/docs/architecture' },
     ],
   },
   {
-    text: 'Concepts',
-    collapsed: false,
+    text: 'Core concepts',
+    collapsed: true,
     items: [
       { text: 'Overview', link: '/core/' },
+      { text: 'Messages and content', link: '/core/messages-and-content' },
       { text: 'Providers and clients', link: '/core/providers-and-clients' },
       { text: 'Completions', link: '/core/completions' },
-      { text: 'Messages and content', link: '/core/messages-and-content' },
-      { text: 'Agents', link: '/core/agents' },
-      { text: 'Agent Runner', link: '/core/agent-runner' },
-      { text: 'Hooks', link: '/core/hooks' },
-      { text: 'Tools', link: '/core/tools' },
       { text: 'Streaming', link: '/core/streaming' },
-      { text: 'Structured output', link: '/core/structured-output' },
       { text: 'Embeddings', link: '/core/embeddings' },
       { text: 'Media generation', link: '/core/media-generation' },
+    ],
+  },
+  {
+    text: 'Agents and tools',
+    collapsed: true,
+    items: [
+      { text: 'Agents', link: '/core/agents' },
+      { text: 'Agent Runner', link: '/core/agent-runner' },
+      { text: 'Tools', link: '/core/tools' },
+      { text: 'Structured output', link: '/core/structured-output' },
+      { text: 'Hooks', link: '/core/hooks' },
       { text: 'Observability', link: '/core/observability' },
     ],
   },
@@ -39,7 +45,7 @@ const docsSidebar = [
       { text: 'Overview', link: '/integrations/' },
       {
         text: 'Model providers',
-        collapsed: false,
+        collapsed: true,
         items: [
           { text: 'Overview', link: '/providers/' },
           { text: 'OpenAI', link: '/providers/openai' },
@@ -47,15 +53,28 @@ const docsSidebar = [
         ],
       },
       { text: 'Model Context Protocol', link: '/integrations/mcp' },
-      { text: 'AI SDK v7 UI streams', link: '/integrations/ui-streams' },
-      { text: 'AG-UI and TanStack AI', link: '/integrations/ag-ui' },
-      { text: 'Protocol extensions', link: '/integrations/protocol-extensions' },
-      { text: 'Write a UI stream adapter', link: '/integrations/writing-ui-stream-adapter' },
+      {
+        text: 'UI streams',
+        collapsed: false,
+        items: [
+          { text: 'Overview', link: '/integrations/uistream' },
+          { text: 'AI SDK v7 UI streams', link: '/integrations/ui-streams' },
+          { text: 'AG-UI and TanStack AI', link: '/integrations/ag-ui' },
+          { text: 'Protocol extensions', link: '/integrations/protocol-extensions' },
+          { text: 'Write a UI stream adapter', link: '/integrations/writing-ui-stream-adapter' },
+        ],
+      },
     ],
   },
   {
-    text: 'Extensions',
-    items: [{ text: 'Extend ai-go', link: '/docs/extensions' }],
+    text: 'Extend ai-go',
+    collapsed: true,
+    items: [{ text: 'Extension points', link: '/docs/extensions' }],
+  },
+  {
+    text: 'Reference',
+    collapsed: true,
+    items: [{ text: 'Package map', link: '/reference/package-map' }],
   },
 ]
 

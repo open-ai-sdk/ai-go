@@ -1,38 +1,41 @@
 # Documentation
 
-ai-go separates provider integrations, model contracts, agent workflows, and
-transport protocols into focused Go packages. Start with the quickstart, then
-use concepts to understand the abstractions and integrations to configure a
-specific service.
+ai-go is arranged around a small set of stable contracts. Read this site in the
+same order you build an application: start a model call, learn the core
+abstractions, connect an integration, then reach for a guide or example.
 
-## Quickstart
+## 1. Start here
 
-- [Get started](/getting-started) — install ai-go, create a provider client,
-  and generate text.
-- [Agents](/core/agents) — configure reusable immutable model, tool, and policy
-  defaults.
-- [Agent Runner](/core/agent-runner) — add ordered input and request-local
-  overrides, then execute or stream one invocation.
-- [Hooks](/core/hooks) — add run-local lifecycle observation, policy,
-  model-turn retry, and streaming delta handling.
-- [Tools](/core/tools) — define schema-backed tools with rich output, safe
-  failures, and request context.
+- [Get started](/getting-started) installs ai-go and makes one provider-backed
+  model call.
+- [Why ai-go](/docs/why-ai-go) explains the package and compatibility goals.
+- [Architecture](/docs/architecture) shows dependency direction and public
+  ownership.
 
-## Understand the architecture
+## 2. Learn the core concepts
 
-- [Why ai-go](/docs/why-ai-go) explains the design goals and package boundaries.
-- [Architecture](/docs/architecture) maps the public layers and dependency
-  direction.
-- [Concepts](/core/) covers providers, completions, messages, Agents, Agent
-  Runner, Hooks, Tools, streaming, and structured output in dependency order.
+[Core concepts](/core/) groups the contracts by responsibility:
 
-## Connect services
+- model input and output: [Messages](/core/messages-and-content),
+  [Providers and clients](/core/providers-and-clients),
+  [Completions](/core/completions), and [Streaming](/core/streaming);
+- reusable agent workflows: [Agents](/core/agents),
+  [Agent Runner](/core/agent-runner), [Tools](/core/tools), and
+  [Hooks](/core/hooks);
+- additional capabilities: [Structured output](/core/structured-output),
+  [Embeddings](/core/embeddings), [Media generation](/core/media-generation),
+  and [Observability](/core/observability).
 
-- [Integrations](/integrations/) covers model providers, MCP, and AI SDK UI
-  streams.
-- [Extend ai-go](/docs/extensions) explains the existing extension seams for
-  custom models and OpenAI-compatible services.
+## 3. Connect services and clients
 
-For runnable walkthroughs, continue to [Tutorials & Guides](/guides/) or browse
-the [Examples](/examples/). Exact exported identifiers live in the
-[Go API reference](https://pkg.go.dev/github.com/open-ai-sdk/ai-go).
+[Integrations](/integrations/) is where concrete external contracts live:
+[model providers](/providers/), [MCP](/integrations/mcp), and the shared
+[UI streams](/integrations/uistream) subsystem. Use [Extension points](/docs/extensions)
+when the existing integrations do not match your service.
+
+## 4. Build an application
+
+[Tutorials & Guides](/guides/) combine several concepts into one workflow;
+[Examples](/examples/) link to runnable repository programs. For exported
+identifiers and package ownership, use the [package map](/reference/package-map)
+and [Go API reference](https://pkg.go.dev/github.com/open-ai-sdk/ai-go).
