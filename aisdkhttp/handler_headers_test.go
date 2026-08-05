@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
+	"github.com/open-ai-sdk/ai-go/uistream/agui"
 )
 
 func TestHandlerSetsAllProtocolHeaders(t *testing.T) {
@@ -29,6 +30,27 @@ func TestHandlerSetsAllProtocolHeaders(t *testing.T) {
 		if got := recorder.Header().Get(name); got != value {
 			t.Errorf("%s = %q, want %q", name, got, value)
 		}
+	}
+}
+
+func TestHandlerForAGUIUsesOnlyGenericSSEHeaders(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	HandlerFor(agui.Protocol(), successfulRun).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/ag-ui", strings.NewReader(`{
+			"threadId":"thread_1","runId":"run_1","state":{},"messages":[],
+			"tools":[],"context":[],"forwardedProps":{}
+		}`)),
+	)
+	if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := recorder.Header().Get("x-vercel-ai-ui-message-stream"); got != "" {
+		t.Fatalf("AI Node header leaked into AG-UI response: %q", got)
+	}
+	if !strings.Contains(recorder.Body.String(), `"type":"RUN_STARTED"`) ||
+		!strings.Contains(recorder.Body.String(), `"type":"RUN_FINISHED"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
 

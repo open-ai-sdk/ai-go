@@ -12,7 +12,15 @@ import (
 
 // Pipe drains events through p. It always calls Finish exactly once after a
 // successful encoder construction, including failures in Start or Encode.
-func Pipe(ctx context.Context, w io.Writer, events iter.Seq2[aikit.StepEvent, error], p Protocol, opts Options) (retErr error) {
+//
+//nolint:gocyclo // The branches are the protocol driver's explicit terminal-state contract.
+func Pipe(
+	ctx context.Context,
+	w io.Writer,
+	events iter.Seq2[aikit.StepEvent, error],
+	p Protocol,
+	opts Options,
+) (retErr error) {
 	if p.NewEncoder == nil || p.Framer == nil {
 		return fmt.Errorf("uistream: incomplete protocol")
 	}
@@ -22,11 +30,15 @@ func Pipe(ctx context.Context, w io.Writer, events iter.Seq2[aikit.StepEvent, er
 	write := func(frames []Frame) bool {
 		for _, frame := range frames {
 			if err := p.Framer.WriteFrame(w, frame); err != nil {
-				if !writeFailed && opts.OnWriteError != nil {
-					opts.OnWriteError(err)
-				}
-				writeFailed = true
 				terminal = err
+				if !writeFailed {
+					writeFailed = true
+					safeObserver(func() {
+						if opts.OnWriteError != nil {
+							opts.OnWriteError(err)
+						}
+					})
+				}
 				return false
 			}
 			if f, ok := w.(http.Flusher); ok {
@@ -57,7 +69,9 @@ func Pipe(ctx context.Context, w io.Writer, events iter.Seq2[aikit.StepEvent, er
 				write(frames)
 			}
 		}
-		retErr = terminal
+		if terminal != nil {
+			retErr = terminal
+		}
 	}()
 	e = p.NewEncoder(opts)
 	if e == nil {
@@ -69,6 +83,10 @@ func Pipe(ctx context.Context, w io.Writer, events iter.Seq2[aikit.StepEvent, er
 		return nil
 	}
 	if !write(frames) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		terminal = err
 		return nil
 	}
 	if events == nil {
@@ -98,6 +116,9 @@ func Pipe(ctx context.Context, w io.Writer, events iter.Seq2[aikit.StepEvent, er
 		if !write(frames) {
 			return nil
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		terminal = err
 	}
 	return nil
 }

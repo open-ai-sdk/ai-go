@@ -1,4 +1,5 @@
-// Package agui implements the minimal AG-UI event stream subset supported by
-// ai-go. It intentionally omits state synchronization, approvals, reasoning,
-// files, sources, and durability/resume.
+// Package agui implements a minimal AG-UI event stream subset based on the
+// official core event and RunAgentInput contracts as documented on 2026-08-04.
+// It intentionally omits state synchronization, interrupts/approval resume,
+// reasoning, files, sources, activities, durability, and multi-run sessions.
 package agui

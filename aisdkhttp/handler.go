@@ -2,21 +2,15 @@ package aisdkhttp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"io"
 	"iter"
 	"net/http"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
-	"github.com/open-ai-sdk/ai-go/aisdk"
 	"github.com/open-ai-sdk/ai-go/uistream"
 	"github.com/open-ai-sdk/ai-go/uistream/ainode"
 )
 
-// RunFunc starts an agent run for the messages decoded from a v7 chat request.
+// RunFunc starts an agent run for the messages decoded by a UI protocol.
 // Returning an error reports a pre-stream failure as HTTP 500. Errors emitted
 // through the returned sequence are redacted and encoded as error chunks.
 type RunFunc func(
@@ -24,43 +18,9 @@ type RunFunc func(
 	messages []aikit.Message,
 ) (iter.Seq2[aikit.StepEvent, error], error)
 
-// Handler returns an http.Handler for v7 chat POSTs.
+// Handler returns an http.Handler for AI SDK v7 chat POSTs.
 func Handler(run RunFunc) http.Handler {
 	return HandlerFor(ainode.Protocol(), run)
-}
-
-func legacyHandler(run RunFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
-			writeHTTPError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		defer func() { _ = r.Body.Close() }()
-		envelope, err := decodeEnvelope(r.Body)
-		if err != nil {
-			writeHTTPError(w, http.StatusBadRequest, invalidRequestMessage)
-			return
-		}
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		events, err := run(ctx, aisdk.ToAIMessages(envelope.Messages))
-		if err != nil || events == nil {
-			writeHTTPError(w, http.StatusInternalServerError, streamErrorMessage)
-			return
-		}
-		messageID := ""
-		if envelope.Trigger == "regenerate-message" {
-			messageID = envelope.MessageID
-		}
-		if messageID == "" {
-			messageID = newMessageID()
-		}
-		chunks := aisdk.NewChunkProducer(messageID).Produce(eventChannel(ctx, events)).Chunks
-		if err := aisdk.WriteSSEStream(newSSEWriter(w, cancel), chunks); err != nil {
-			cancel()
-		}
-	})
 }
 
 // HandlerFor returns a handler driven by a UI stream protocol. Handler keeps
@@ -97,57 +57,19 @@ func HandlerFor(protocol uistream.Protocol, run RunFunc) http.Handler {
 
 		protocol.Framer.ApplyHeaders(w.Header())
 		writer := newFramingWriter(w, cancel)
-		if err := uistream.Pipe(ctx, writer, events, protocol, uistream.Options{MessageID: request.MessageID, Extra: request.Extra, OnWriteError: func(error) { cancel() }}); err != nil {
+		if err := uistream.Pipe(
+			ctx,
+			writer,
+			events,
+			protocol,
+			uistream.Options{
+				MessageID:    request.MessageID,
+				Extra:        request.Extra,
+				OnWriteError: func(error) { cancel() },
+			},
+		); err != nil {
 			cancel()
 			return
 		}
 	})
-}
-
-func eventChannel(ctx context.Context, events iter.Seq2[aikit.StepEvent, error]) <-chan aikit.StepEvent {
-	stream := make(chan aikit.StepEvent)
-	go func() {
-		defer close(stream)
-		for event, err := range events {
-			if err != nil {
-				select {
-				case stream <- aikit.StepEvent{Type: aikit.StepEventError, Error: err}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			select {
-			case stream <- event:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return stream
-}
-
-func decodeEnvelope(body io.Reader) (aisdk.ChatRequestEnvelope, error) {
-	var envelope *aisdk.ChatRequestEnvelope
-	decoder := json.NewDecoder(body)
-	if err := decoder.Decode(&envelope); err != nil {
-		return aisdk.ChatRequestEnvelope{}, err
-	}
-	if envelope == nil {
-		return aisdk.ChatRequestEnvelope{}, errors.New("null request envelope")
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return aisdk.ChatRequestEnvelope{}, errors.New("multiple JSON values")
-		}
-		return aisdk.ChatRequestEnvelope{}, err
-	}
-	return *envelope, nil
-}
-func newMessageID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "msg"
-	}
-	return "msg_" + hex.EncodeToString(b[:])
 }

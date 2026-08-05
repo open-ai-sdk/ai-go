@@ -1,11 +1,10 @@
 # AI SDK v7 UI streams
 
-The `uistream/ainode` package provides an event-driven AI SDK v7 encoder and
-decoder for protocol-aware handlers. `aisdk` remains the compatibility and
-imperative-writer surface for
-the frozen chunk union, UI-message conversion, and approval signatures.
-`aisdkhttp` is the small
-`net/http` boundary: it decodes a v7 chat request, passes the complete ordered
+The `uistream` package owns the protocol-neutral event drain and framing
+driver. `uistream/ainode` provides the AI SDK v7 encoder and decoder;
+`uistream/agui` provides a minimal AG-UI adapter. `aisdk` remains the compatible
+AI Node type-alias, forwarder, and imperative-writer surface. `aisdkhttp` is the
+small `net/http` boundary that decodes a protocol request, passes its ordered
 message history to an Agent Runner, and flushes the resulting event stream.
 
 Build the Agent once and create a fresh Runner for every request:
@@ -39,7 +38,7 @@ error chunks followed by `[DONE]`.
 The Go Agent rewrite does not change the v7 wire contract: chunk fields,
 finish-reason translation, response headers, approval signatures, and SSE
 termination stay compatible. The protocol adapters depend only on the leaf
-`aikit` vocabulary and does not import `agent`.
+`aikit` vocabulary and the `uistream` driver; they do not import `agent`.
 
 The included `examples/chat-server` is the runnable reference implementation
 with `/chat` and `/healthz`, and is exercised by the browser conformance suite.
