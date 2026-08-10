@@ -313,6 +313,7 @@ func TestSeedreamAspectRatioInputValidation(t *testing.T) {
 			name: "unsupported quality",
 			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
 			opts: ImageOptions{Quality: "ultra"},
+			cfg:  seedreamAspectRatioConfig{},
 			want: "quality",
 		},
 		{
@@ -336,6 +337,29 @@ func TestSeedreamAspectRatioInputValidation(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestSeedream5LiteAcceptsUltraQuality(t *testing.T) {
+	model := &ImageModel{modelID: ModelSeedreamV5LiteTextToImage}
+	input, err := model.buildInput(
+		llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+		ImageOptions{Quality: "ultra"},
+	)
+	if err != nil {
+		t.Fatalf("buildInput() error = %v", err)
+	}
+	if input["quality"] != "ultra" {
+		t.Fatalf("quality = %v, want ultra", input["quality"])
+	}
+
+	model = &ImageModel{modelID: ModelSeedreamV5ProTextToImage}
+	_, err = model.buildInput(
+		llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+		ImageOptions{Quality: "ultra"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "quality") {
+		t.Fatalf("pro quality error = %v, want rejection", err)
 	}
 }
 

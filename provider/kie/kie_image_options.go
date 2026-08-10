@@ -33,7 +33,8 @@ type ImageOptions struct {
 	// explicit output format, including nano-banana-2 and Seedream 5.0 Pro.
 	OutputFormat string `json:"outputFormat"`
 
-	// Quality maps to Seedream 4.5/5's input.quality: "basic" | "high".
+	// Quality maps to Seedream input.quality: "basic" | "high"; Seedream 5
+	// Lite additionally accepts "ultra".
 	Quality string `json:"quality"`
 
 	// GuidanceScale maps to Seedream 3.0's input.guidance_scale. A pointer
@@ -325,9 +326,10 @@ var seedreamAspectRatioReservedInputKeys = map[string]struct{}{
 }
 
 type seedreamAspectRatioConfig struct {
-	edit           bool
-	outputFormat   bool
-	maxInputImages int
+	edit              bool
+	allowUltraQuality bool
+	outputFormat      bool
+	maxInputImages    int
 }
 
 // buildSeedreamAspectRatioInput builds the shared Seedream 4.5/5 input
@@ -367,7 +369,8 @@ func buildSeedreamAspectRatioInput(
 	if opts.Quality == "" {
 		return nil, fmt.Errorf("kie: seedream quality is required")
 	}
-	if opts.Quality != "basic" && opts.Quality != "high" {
+	if opts.Quality != "basic" && opts.Quality != "high" &&
+		(!cfg.allowUltraQuality || opts.Quality != "ultra") {
 		return nil, fmt.Errorf("kie: seedream quality must be \"basic\" or \"high\"")
 	}
 	in["quality"] = opts.Quality

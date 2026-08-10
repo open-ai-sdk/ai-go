@@ -115,7 +115,7 @@ func TestLegacyLanguageModelStillDefersInvalidTransportError(t *testing.T) {
 	}
 }
 
-func TestLegacyLanguageModelRetainsNegativeTimeoutBehavior(t *testing.T) {
+func TestLegacyLanguageModelRejectsNegativeTimeout(t *testing.T) {
 	t.Parallel()
 
 	model := NewLanguageModel("gpt-5", Config{
@@ -123,7 +123,16 @@ func TestLegacyLanguageModelRetainsNegativeTimeoutBehavior(t *testing.T) {
 		Timeout:      -1,
 		ChunkTimeout: -1,
 	})
-	if model.clientErr != nil || model.client == nil {
-		t.Fatalf("legacy timeout configuration was rejected: %v", model.clientErr)
+	if model.clientErr == nil || !strings.Contains(model.clientErr.Error(), "timeout must not be negative") {
+		t.Fatalf("language model error = %v, want negative timeout validation", model.clientErr)
+	}
+}
+
+func TestLegacyImageModelRejectsNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	model := NewImageModel("gpt-image-2", Config{Timeout: -1})
+	if model.clientErr == nil || !strings.Contains(model.clientErr.Error(), "timeout must not be negative") {
+		t.Fatalf("image model error = %v, want negative timeout validation", model.clientErr)
 	}
 }

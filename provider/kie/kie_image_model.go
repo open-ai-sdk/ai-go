@@ -220,13 +220,13 @@ func (m *ImageModel) buildInput(
 		return buildSeedreamAspectRatioInput(
 			req,
 			opts,
-			seedreamAspectRatioConfig{outputFormat: true},
+			seedreamAspectRatioConfig{allowUltraQuality: true, outputFormat: true},
 		)
 	case ModelSeedreamV5LiteImageToImage:
 		return buildSeedreamAspectRatioInput(
 			req,
 			opts,
-			seedreamAspectRatioConfig{edit: true, outputFormat: true, maxInputImages: 14},
+			seedreamAspectRatioConfig{edit: true, allowUltraQuality: true, outputFormat: true, maxInputImages: 14},
 		)
 	case ModelSeedreamV5ProTextToImage:
 		return buildSeedreamAspectRatioInput(

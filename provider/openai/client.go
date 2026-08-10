@@ -47,6 +47,9 @@ func NewClient(cfg Config) (*Client, error) {
 }
 
 func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
+	if cfg.Timeout < 0 {
+		return nil, fmt.Errorf("openai: timeout must not be negative")
+	}
 	if requireAPIKey && strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, fmt.Errorf("openai: API key is required")
 	}
@@ -59,9 +62,6 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 		timeout = defaultTimeout
 	}
 	if requireAPIKey {
-		if timeout < 0 {
-			return nil, fmt.Errorf("openai: timeout must not be negative")
-		}
 		if cfg.ChunkTimeout < 0 {
 			return nil, fmt.Errorf("openai: chunk timeout must not be negative")
 		}
