@@ -27,6 +27,7 @@ type fakeKieServer struct {
 	lastInput   map[string]any
 	authHeader  string
 	httpResult  bool // when true, recordInfo returns an http:// result URL
+	terminalRaw []byte
 }
 
 func newFakeKieServer(t *testing.T, pollsToWait int) *fakeKieServer {
@@ -64,6 +65,10 @@ func newFakeKieServer(t *testing.T, pollsToWait int) *fakeKieServer {
 		var resultURLs []string
 		if n > f.pollsToWait {
 			state = "success"
+			if len(f.terminalRaw) > 0 {
+				_, _ = w.Write(f.terminalRaw)
+				return
+			}
 			if f.httpResult {
 				resultURLs = []string{f.server.URL + "/result/img1.jpg"}
 			} else {
@@ -92,6 +97,26 @@ func newFakeKieServer(t *testing.T, pollsToWait int) *fakeKieServer {
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+func TestGeneratePreservesExactTerminalRawResponse(t *testing.T) {
+	srv := newFakeKieServer(t, 0)
+	srv.terminalRaw = []byte(`{"code":200,"msg":"success","data":{"taskId":"task-fake-1","state":"success","resultUrls":["https://api.kie.ai/result/img1.jpg"],"creditsConsumed":12}}`)
+	cfg := Config{
+		APIKey: "k", PollInterval: time.Millisecond, PollTimeout: time.Second,
+		HTTPClient: &http.Client{Transport: rewriteTransport{
+			from: "https://api.kie.ai", to: srv.server.URL, base: http.DefaultTransport,
+		}},
+	}.resolved()
+	result, err := newImageModel(ModelNanoBanana2, cfg).Generate(
+		context.Background(), ai.GenerateImageRequest{Prompt: "x"},
+	)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if string(result.Raw) != string(srv.terminalRaw) {
+		t.Fatalf("Raw = %s, want exact %s", result.Raw, srv.terminalRaw)
+	}
 }
 
 // TestGenerate_TextToImage_Success validates the full submit→poll→download

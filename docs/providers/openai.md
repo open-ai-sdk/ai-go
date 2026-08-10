@@ -118,8 +118,40 @@ A Responses completion is not necessarily text-only. If the provider emits
 file/image events, direct completion aggregation exposes them through
 `CompletionResponse.Files` and also keeps file parts in
 `CompletionResponse.Message.Content` in their original order with text and
-other assistant content. OpenAI does not yet expose a dedicated `ImageModel`
-factory in ai-go.
+other assistant content. OpenAI also exposes a dedicated `ImageModel` through
+`NewImageModel`, `Client.ImageModel`, and the `openai` registry provider.
+
+## Native image generation and edits
+
+`gpt-image-2` uses OpenAI's synchronous Images API. A request without source
+images calls `POST /v1/images/generations`; supplying inline source images calls
+the multipart `POST /v1/images/edits` endpoint.
+
+```go
+model := openai.NewImageModel("gpt-image-2", openai.Config{
+  APIKey: os.Getenv("OPENAI_API_KEY"),
+})
+
+result, err := ai.GenerateImage(ctx, ai.GenerateImageRequest{
+  Model:  model,
+  Prompt: "A ceramic teapot photographed on a cobalt backdrop",
+  Size:   "1536x1024",
+  ProviderOptions: map[string]any{
+    "openai": openai.ImageOptions{
+      Quality:      "high",
+      OutputFormat: "png",
+      Background:   "opaque",
+    },
+  },
+})
+```
+
+For edits, add one or more `llm.ImageInput` values with inline `Data` and
+`MediaType`. URL-only edit inputs are rejected rather than fetched by the SDK.
+`Mask` and model-specific edit controls are available through
+`openai.ImageOptions`. For `gpt-image-2`, omit `InputFidelity` because the model
+always uses high fidelity, and do not request a transparent background.
+Successful responses retain their exact provider JSON in `result.Raw`.
 
 ## PDF inputs
 

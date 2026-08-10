@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
 )
@@ -37,6 +38,9 @@ type GenerateImageResult struct {
 	Images   []GeneratedImage
 	Usage    *aikit.Usage
 	Warnings []aikit.Warning
+	// Raw retains the untranslated successful provider response for diagnostics.
+	// It may contain sensitive provider data and is never logged automatically.
+	Raw json.RawMessage
 }
 
 // GeneratedImage holds one generated image.

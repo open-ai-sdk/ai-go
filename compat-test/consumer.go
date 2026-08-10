@@ -11,6 +11,8 @@ import (
 	"github.com/open-ai-sdk/ai-go/ai"
 	"github.com/open-ai-sdk/ai-go/aikit"
 	"github.com/open-ai-sdk/ai-go/llm"
+	"github.com/open-ai-sdk/ai-go/provider/anthropic"
+	"github.com/open-ai-sdk/ai-go/provider/gemini"
 	"github.com/open-ai-sdk/ai-go/provider/openaicompat"
 )
 
@@ -109,4 +111,25 @@ func CompatibleModel() llm.Model {
 		ModelID:  "external-model",
 		APIKey:   "key",
 	})
+}
+
+var (
+	_ llm.LanguageProvider = anthropic.NewProvider(anthropic.Config{})
+	_ llm.LanguageProvider = gemini.NewProvider(gemini.Config{})
+	_ llm.ImageProvider    = gemini.NewProvider(gemini.Config{})
+)
+
+// RegistryModels proves an external module can register providers and resolve
+// only the capabilities they expose.
+func RegistryModels() (llm.Model, llm.ImageModel, error) {
+	registry := ai.NewRegistry()
+	if err := registry.Register(gemini.NewProvider(gemini.Config{})); err != nil {
+		return nil, nil, err
+	}
+	language, err := registry.LanguageModel("gemini", "gemini-language")
+	if err != nil {
+		return nil, nil, err
+	}
+	image, err := registry.ImageModel("gemini", "gemini-image")
+	return language, image, err
 }

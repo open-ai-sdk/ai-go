@@ -34,6 +34,7 @@ type Client struct {
 	streamDoer   transport.Doer
 	responses    *provider.Client[providerPolicy]
 	uploads      *provider.Client[providerPolicy]
+	images       *provider.Client[providerPolicy]
 }
 
 // NewClient validates config and constructs a reusable OpenAI client.
@@ -85,6 +86,13 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	images, err := provider.NewClient(policy, provider.ClientConfig{
+		HTTPClient:   uploadDoer,
+		ProviderName: "openai-image",
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
 		apiKey:       cfg.APIKey,
 		baseURL:      baseURL,
@@ -93,7 +101,13 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 		streamDoer:   streamDoer,
 		responses:    responses,
 		uploads:      uploads,
+		images:       images,
 	}, nil
+}
+
+// ImageModel creates an OpenAI Images API model handle.
+func (c *Client) ImageModel(modelID string) *ImageModel {
+	return &ImageModel{modelID: modelID, client: c}
 }
 
 // CompletionModel creates a Responses API model handle. Responses may contain

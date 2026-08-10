@@ -24,4 +24,9 @@ func TestPublicFacade(t *testing.T) {
 	if err != nil || len(embedding) != 3 {
 		t.Fatalf("Embed = %v, %v", embedding, err)
 	}
+
+	language, image, err := RegistryModels()
+	if err != nil || language.ModelID() != "gemini-language" || image.ModelID() != "gemini-image" {
+		t.Fatalf("RegistryModels = %#v, %#v, %v", language, image, err)
+	}
 }

@@ -20,6 +20,9 @@ type (
 	ImageModel           = llm.ImageModel
 	InputTokenDetails    = aikit.InputTokenDetails
 	LanguageModel        = llm.Model
+	Provider             = llm.Provider
+	LanguageProvider     = llm.LanguageProvider
+	ImageProvider        = llm.ImageProvider
 	LanguageModelRequest = llm.Request
 	Message              = aikit.Message
 	OutputSchema         = llm.OutputSchema

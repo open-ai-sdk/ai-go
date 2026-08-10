@@ -33,9 +33,11 @@ chatModel := client.ChatModel("gpt-4o")
 
 `NewClient` validates required configuration and transport setup immediately.
 For OpenAI, a blank API key, malformed base URL, or negative timeout therefore
-returns an error before the first model request. The SDK accepts configuration
-explicitly and does not load environment variables or `.env` files; applications
-remain responsible for obtaining secrets and passing them in.
+returns an error before the first model request. Explicit configuration remains
+available. Provider wrappers also expose `NewFromEnv` for conventional API-key
+loading (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and
+`KIE_API_KEY`). They read process environment variables only; loading `.env`
+files remains the application's responsibility.
 
 Provider model handles are cheap values over the reusable client. Construct
 the client and model handles once, then reuse them across requests.
@@ -46,7 +48,8 @@ A factory method represents an operation supported by that concrete provider
 client. OpenAI currently exposes:
 
 - `CompletionModel`, which uses the Responses API;
-- `ChatModel`, which uses Chat Completions; and
+- `ChatModel`, which uses Chat Completions;
+- `ImageModel`, which uses the synchronous Images API; and
 - `UploadFile`, a provider-wide operation that is not tied to a model ID.
 
 This is Go's method-set capability system: a client that does not implement an
@@ -60,9 +63,10 @@ factory does not promise that every model ID accepted by the provider supports
 it; the upstream API remains authoritative and can reject an incompatible
 model-operation pair.
 
-OpenAI does not currently expose an `ImageModel` factory in ai-go. A dedicated
-image-generation implementation would add that method to the concrete client;
-it should not be inferred merely because a completion can contain an image.
+The additive capability registry is useful when provider names come from
+configuration. `ai.Registry.LanguageModel` and `ai.Registry.ImageModel` check
+the registered provider's method set before constructing a model. Providers do
+not add placeholder methods for unsupported capabilities.
 
 The base `llm.Model` remains stream-first. Providers with a native
 single-response endpoint may also implement `llm.CompletionModel`. Native
@@ -132,6 +136,18 @@ Applications should normally use `openai.Client` or another concrete provider
 client. Keeping the generic layer behind a concrete type prevents provider
 policy details and generic parameters from leaking into ordinary application
 code.
+
+For dynamic selection, register provider wrappers and resolve by capability:
+
+```go
+registry := ai.NewRegistry()
+_ = registry.Register(openai.NewFromEnv())
+_ = registry.Register(gemini.NewFromEnv())
+_ = registry.Register(kie.NewFromEnv())
+
+language, err := registry.LanguageModel("openai", "gpt-5")
+image, err := registry.ImageModel("kie", "nano-banana-2")
+```
 
 ## Compatibility constructors
 

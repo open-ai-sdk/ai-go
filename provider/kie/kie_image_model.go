@@ -81,7 +81,7 @@ func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest)
 	if err != nil {
 		return nil, err
 	}
-	return &llm.GenerateImageResult{Images: images}, nil
+	return &llm.GenerateImageResult{Images: images, Raw: final.raw}, nil
 }
 
 // submitTask serializes the per-model `input` envelope and POSTs createTask.
@@ -170,6 +170,7 @@ func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfo
 			Status: status, RawBody: string(respBody),
 		}
 	}
+	parsed.Data.raw = append(json.RawMessage(nil), respBody...)
 	return parsed.Data, nil
 }
 
@@ -182,6 +183,10 @@ func (m *ImageModel) buildInput(req llm.GenerateImageRequest, opts ImageOptions)
 		return buildGPTImage2EditInput(req, opts)
 	case ModelNanoBanana2:
 		return buildNanoBanana2Input(req, opts)
+	case ModelSeedreamV4TextToImage:
+		return buildSeedreamV4TextInput(req, opts)
+	case ModelSeedreamV4Edit:
+		return buildSeedreamV4EditInput(req, opts)
 	default:
 		return nil, fmt.Errorf("kie: unsupported model %q", m.modelID)
 	}
