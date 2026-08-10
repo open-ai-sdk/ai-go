@@ -4,6 +4,7 @@
 package anthropic
 
 import (
+	"os"
 	"time"
 
 	"github.com/open-ai-sdk/ai-go/llm"
@@ -46,8 +47,18 @@ func NewProvider(cfg Config) *Provider {
 	return &Provider{config: cfg.withDefaults()}
 }
 
+// NewFromEnv creates an Anthropic provider using ANTHROPIC_API_KEY.
+func NewFromEnv() *Provider {
+	return NewProvider(Config{APIKey: os.Getenv("ANTHROPIC_API_KEY")})
+}
+
+// Name returns the stable provider registry name.
+func (*Provider) Name() string { return "anthropic" }
+
 // LanguageModel returns an [llm.Model] for the given model ID.
 // Supported: claude-4-sonnet, claude-4-opus, claude-3.7-sonnet, claude-3.5-sonnet, etc.
 func (p *Provider) LanguageModel(modelID string) llm.Model {
 	return NewLanguageModel(modelID, p.config)
 }
+
+var _ llm.LanguageProvider = (*Provider)(nil)

@@ -180,7 +180,7 @@ func (m *ImageModel) parseResponse(data []byte) (*llm.GenerateImageResult, error
 		return nil, fmt.Errorf("gemini-image: unmarshal response: %w", err)
 	}
 
-	result := &llm.GenerateImageResult{}
+	result := &llm.GenerateImageResult{Raw: append(json.RawMessage(nil), data...)}
 
 	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 		for _, part := range resp.Candidates[0].Content.Parts {

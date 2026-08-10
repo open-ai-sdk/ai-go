@@ -39,7 +39,10 @@ func (m *ImageModel) ModelID() string { return m.modelID.String() }
 
 // Generate submits a createTask, polls recordInfo until terminal, then
 // downloads the result images in parallel.
-func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest) (*llm.GenerateImageResult, error) {
+func (m *ImageModel) Generate(
+	ctx context.Context,
+	req llm.GenerateImageRequest,
+) (*llm.GenerateImageResult, error) {
 	taskID, err := m.submitTask(ctx, req)
 	if err != nil {
 		return nil, err
@@ -63,11 +66,19 @@ func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest)
 			return recordInfoData{}, false, nil
 		default:
 			// Unknown state: treat as terminal failure to avoid forever-loops.
-			return recordInfoData{}, false, fmt.Errorf("kie: task %s unknown state %q", taskID, info.State)
+			return recordInfoData{}, false, fmt.Errorf(
+				"kie: task %s unknown state %q",
+				taskID,
+				info.State,
+			)
 		}
 	}
 
-	final, err := poll(ctx, poller{Interval: m.cfg.PollInterval, MaxWait: m.cfg.PollTimeout}, statusFn)
+	final, err := poll(
+		ctx,
+		poller{Interval: m.cfg.PollInterval, MaxWait: m.cfg.PollTimeout},
+		statusFn,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +92,7 @@ func (m *ImageModel) Generate(ctx context.Context, req llm.GenerateImageRequest)
 	if err != nil {
 		return nil, err
 	}
-	return &llm.GenerateImageResult{Images: images}, nil
+	return &llm.GenerateImageResult{Images: images, Raw: final.raw}, nil
 }
 
 // submitTask serializes the per-model `input` envelope and POSTs createTask.
@@ -129,7 +140,12 @@ func (m *ImageModel) submitTask(ctx context.Context, req llm.GenerateImageReques
 		return "", fmt.Errorf("kie: parse createTask response: %w", err)
 	}
 	if parsed.Code != 200 || parsed.Data.TaskID == "" {
-		return "", &KieError{Code: parsed.Code, Msg: parsed.Msg, Status: status, RawBody: string(respBody)}
+		return "", &KieError{
+			Code:    parsed.Code,
+			Msg:     parsed.Msg,
+			Status:  status,
+			RawBody: string(respBody),
+		}
 	}
 	return parsed.Data.TaskID, nil
 }
@@ -170,11 +186,15 @@ func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfo
 			Status: status, RawBody: string(respBody),
 		}
 	}
+	parsed.Data.raw = append(json.RawMessage(nil), respBody...)
 	return parsed.Data, nil
 }
 
 // buildInput dispatches to the per-model option builder.
-func (m *ImageModel) buildInput(req llm.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
+func (m *ImageModel) buildInput(
+	req llm.GenerateImageRequest,
+	opts ImageOptions,
+) (map[string]any, error) {
 	switch m.modelID {
 	case ModelGPTImage2TextToImage:
 		return buildGPTImage2TextInput(req, opts)
@@ -182,6 +202,46 @@ func (m *ImageModel) buildInput(req llm.GenerateImageRequest, opts ImageOptions)
 		return buildGPTImage2EditInput(req, opts)
 	case ModelNanoBanana2:
 		return buildNanoBanana2Input(req, opts)
+	case ModelSeedreamV4TextToImage:
+		return buildSeedreamV4TextInput(req, opts)
+	case ModelSeedreamV4Edit:
+		return buildSeedreamV4EditInput(req, opts)
+	case ModelSeedreamV3:
+		return buildSeedreamV3Input(req, opts)
+	case ModelSeedreamV45TextToImage:
+		return buildSeedreamAspectRatioInput(req, opts, seedreamAspectRatioConfig{})
+	case ModelSeedreamV45Edit:
+		return buildSeedreamAspectRatioInput(
+			req,
+			opts,
+			seedreamAspectRatioConfig{edit: true, maxInputImages: 14},
+		)
+	case ModelSeedreamV5LiteTextToImage:
+		return buildSeedreamAspectRatioInput(
+			req,
+			opts,
+			seedreamAspectRatioConfig{allowUltraQuality: true, outputFormat: true},
+		)
+	case ModelSeedreamV5LiteImageToImage:
+		return buildSeedreamAspectRatioInput(
+			req,
+			opts,
+			seedreamAspectRatioConfig{edit: true, allowUltraQuality: true, outputFormat: true, maxInputImages: 14},
+		)
+	case ModelSeedreamV5ProTextToImage:
+		return buildSeedreamAspectRatioInput(
+			req,
+			opts,
+			seedreamAspectRatioConfig{outputFormat: true},
+		)
+	case ModelSeedreamV5ProImageToImage:
+		return buildSeedreamAspectRatioInput(
+			req,
+			opts,
+			seedreamAspectRatioConfig{edit: true, outputFormat: true, maxInputImages: 10},
+		)
+	case ModelSeedreamV5ProLayerDecomposition:
+		return buildSeedreamLayerDecompositionInput(req, opts)
 	default:
 		return nil, fmt.Errorf("kie: unsupported model %q", m.modelID)
 	}
@@ -189,7 +249,10 @@ func (m *ImageModel) buildInput(req llm.GenerateImageRequest, opts ImageOptions)
 
 // downloadImages fetches each URL in parallel. HTTPS-only — non-https URLs are
 // rejected to avoid accidental plaintext fetches.
-func (m *ImageModel) downloadImages(ctx context.Context, urls []string) ([]llm.GeneratedImage, error) {
+func (m *ImageModel) downloadImages(
+	ctx context.Context,
+	urls []string,
+) ([]llm.GeneratedImage, error) {
 	results := make([]llm.GeneratedImage, len(urls))
 	errs := make([]error, len(urls))
 

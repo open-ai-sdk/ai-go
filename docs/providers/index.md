@@ -11,7 +11,7 @@ infrastructure for provider authors rather than the normal application API.
 
 | Provider | Package | Main capability |
 | --- | --- | --- |
-| OpenAI | `provider/openai` | Responses API and Chat Completions |
+| OpenAI | `provider/openai` | Responses API, Chat Completions, and native Images API |
 | Anthropic | `provider/anthropic` | Language models |
 | Gemini | `provider/gemini` | Language, embeddings, images, and native Gemini features |
 | Kie | `provider/kie` | Image models |

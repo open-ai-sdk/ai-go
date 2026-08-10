@@ -48,6 +48,7 @@ type recordInfoData struct {
 	ResultJSON string          `json:"resultJson,omitempty"`
 	ResultURLs []string        `json:"resultUrls,omitempty"`
 	Param      json.RawMessage `json:"param,omitempty"`
+	raw        json.RawMessage
 }
 
 // ResultURLs returns the result URLs regardless of which field the upstream

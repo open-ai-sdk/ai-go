@@ -1,8 +1,8 @@
-// Package openai implements OpenAI Responses, Chat Completions, and file
-// upload integrations.
+// Package openai implements OpenAI Responses, Chat Completions, Images, and
+// file upload integrations.
 //
-// NewClient constructs the provider entry point and validates its configuration
-// eagerly. A Client owns credentials and reusable HTTP resources, and creates
-// lightweight capability-specific model handles with CompletionModel and
-// ChatModel. Legacy model constructors remain available for compatibility.
+// NewProvider constructs the registry-compatible provider entry point.
+// NewClient eagerly validates configuration and creates reusable model handles
+// with CompletionModel, ChatModel, and ImageModel. Legacy model constructors
+// remain available for compatibility.
 package openai

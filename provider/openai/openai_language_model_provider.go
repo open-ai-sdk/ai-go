@@ -32,6 +32,10 @@ type Config struct {
 	Timeout      time.Duration // optional; defaults to 120s
 	ChunkTimeout time.Duration // optional; per-chunk SSE read timeout (0 = disabled)
 	HTTPClient   transport.Doer
+	// ImageResponseMaxBytes bounds a successful Images API response body. Zero
+	// defaults to 64 MiB; image requests use a five-minute HTTP timeout unless
+	// Timeout or HTTPClient is explicitly configured.
+	ImageResponseMaxBytes int64
 }
 
 // NewLanguageModel creates an OpenAI-backed aikit.LanguageModel using the Responses API.

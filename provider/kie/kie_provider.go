@@ -3,6 +3,7 @@ package kie
 import (
 	"os"
 
+	"github.com/open-ai-sdk/ai-go/llm"
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
@@ -18,6 +19,9 @@ type Provider struct {
 
 // Option mutates a Config during NewProvider construction.
 type Option func(*Config)
+
+// Name returns the stable provider registry key.
+func (*Provider) Name() string { return "kie" }
 
 // WithBaseURL routes traffic through a proxy mirror.
 // Pass the proxy origin with no trailing slash, e.g. "https://gen.example.com".
@@ -50,9 +54,18 @@ func NewProvider(apiKey string, opts ...Option) *Provider {
 	return &Provider{cfg: cfg, client: client, clientErr: clientErr}
 }
 
+// NewFromEnv builds a Kie.AI provider using KIE_API_KEY.
+func NewFromEnv(opts ...Option) *Provider { return NewProvider("", opts...) }
+
 // Image constructs an ai.ImageModel for the given Kie model ID.
 func (p *Provider) Image(modelID ImageModelID) *ImageModel {
 	return newImageModel(modelID, p.cfg)
+}
+
+// ImageModel constructs an image model by string ID for use with ai.Registry.
+// Image remains available for callers that prefer typed ImageModelID constants.
+func (p *Provider) ImageModel(modelID string) llm.ImageModel {
+	return p.Image(ImageModelID(modelID))
 }
 
 // Config returns a deep copy of the resolved configuration so callers cannot
@@ -76,3 +89,5 @@ func (p *Provider) Config() Config {
 
 	return cp
 }
+
+var _ llm.ImageProvider = (*Provider)(nil)

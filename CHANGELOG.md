@@ -10,6 +10,20 @@ optional `otelagent` package, which adapts OpenTelemetry to the
 
 ## Unreleased
 
+### Provider registry and image generation
+
+- Added additive `llm.Provider`, `llm.LanguageProvider`, and
+  `llm.ImageProvider` capabilities plus `ai.Registry` lookup by stable provider
+  name. Existing provider-specific constructors remain source-compatible.
+- Added OpenAI native synchronous image generation and multipart edits,
+  including `gpt-image-2`, typed image options, and client/provider factories.
+- Added provider wrappers and `NewFromEnv` constructors for OpenAI, Anthropic,
+  Gemini, and KIE.
+- Added KIE Seedream 4.0 support with exact model IDs
+  `bytedance/seedream-v4-text-to-image` and `bytedance/seedream-v4-edit`.
+- `llm.GenerateImageResult.Raw` now retains the exact successful provider
+  response. OpenAI, Gemini, and KIE image implementations populate it.
+
 ### Streaming
 
 | Changed behavior | Replacement |
