@@ -79,11 +79,12 @@ provider-specific constructors remain available.
 | `gemini` | Yes | Yes, synchronous native API | `gemini.NewFromEnv()` (`GEMINI_API_KEY`) |
 | `kie` | No | Yes, asynchronous task API with polling | `kie.NewFromEnv()` (`KIE_API_KEY`) |
 
-KIE includes the exact Seedream 4.0 Market IDs
-`bytedance/seedream-v4-text-to-image` and `bytedance/seedream-v4-edit`. The
-typed constants are `kie.ModelSeedreamV4TextToImage` and
-`kie.ModelSeedreamV4Edit`. Seedream options map to `image_size`,
-`image_resolution`, `max_images`, `seed`, and `nsfw_checker`; edits additionally
-send source URLs as `image_urls`. See KIE's official
+KIE includes Seedream 3.0, 4.0, 4.5, and 5.0 Lite/Pro model IDs. Their option
+sets differ by upstream family: Seedream 3 uses `image_size` and
+`guidance_scale`; Seedream 4 uses `image_size`, `image_resolution`, and
+`max_images`; Seedream 4.5/5 use `aspect_ratio` and `quality`. Edits send
+source URLs as `image_urls`. `kie.ModelSeedreamV5ProLayerDecomposition`
+requires exactly one source image and supports layer-specific `size` and
+`output_format`. See KIE's official
 [text-to-image](https://docs.kie.ai/market/seedream/seedream-v4-text-to-image)
 and [edit](https://docs.kie.ai/market/seedream/seedream-v4-edit) contracts.

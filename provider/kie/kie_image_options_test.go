@@ -153,7 +153,11 @@ func TestSeedreamV4ValidatesRequiredFieldsAndLimits(t *testing.T) {
 			edit: true,
 			want: "at most 10",
 		},
-		{name: "request count too high", req: llm.GenerateImageRequest{Prompt: "draw", N: 7}, want: "between 1 and 6"},
+		{
+			name: "request count too high",
+			req:  llm.GenerateImageRequest{Prompt: "draw", N: 7},
+			want: "between 1 and 6",
+		},
 		{
 			name: "option count negative",
 			req:  llm.GenerateImageRequest{Prompt: "draw"},
@@ -199,5 +203,327 @@ func TestSeedreamV4ExtraCannotOverrideReservedInput(t *testing.T) {
 	)
 	if err != nil || got["custom_setting"] != true {
 		t.Fatalf("input = %#v, error = %v", got, err)
+	}
+}
+
+func TestBuildSeedreamV3Input(t *testing.T) {
+	guidanceScale := 2.5
+	seed := 0
+	got, err := buildSeedreamV3Input(llm.GenerateImageRequest{
+		Prompt: "draw a campsite", AspectRatio: "1:1", Seed: &seed,
+	}, ImageOptions{GuidanceScale: &guidanceScale})
+	if err != nil {
+		t.Fatalf("buildSeedreamV3Input() error = %v", err)
+	}
+	want := map[string]any{
+		"prompt": "draw a campsite", "image_size": "square_hd",
+		"guidance_scale": guidanceScale, "seed": seed,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("input = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSeedreamAspectRatioInputs(t *testing.T) {
+	nsfw := false
+	tests := []struct {
+		name string
+		cfg  seedreamAspectRatioConfig
+		req  llm.GenerateImageRequest
+		opts ImageOptions
+		want map[string]any
+	}{
+		{
+			name: "4.5 text to image",
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "16:9"},
+			opts: ImageOptions{Quality: "basic", NSFWChecker: &nsfw},
+			want: map[string]any{
+				"prompt": "draw", "aspect_ratio": "16:9", "quality": "basic", "nsfw_checker": false,
+			},
+		},
+		{
+			name: "5 lite image to image",
+			cfg:  seedreamAspectRatioConfig{edit: true},
+			req: llm.GenerateImageRequest{
+				Prompt:      "edit",
+				AspectRatio: "1:1",
+				Images:      []llm.ImageInput{{URL: "https://cdn.example.com/source.png"}},
+			},
+			opts: ImageOptions{Quality: "high"},
+			want: map[string]any{
+				"prompt":       "edit",
+				"image_urls":   []string{"https://cdn.example.com/source.png"},
+				"aspect_ratio": "1:1",
+				"quality":      "high",
+			},
+		},
+		{
+			name: "5 pro text to image",
+			cfg:  seedreamAspectRatioConfig{outputFormat: true},
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "2:3"},
+			opts: ImageOptions{Quality: "high", OutputFormat: "png"},
+			want: map[string]any{
+				"prompt": "draw", "aspect_ratio": "2:3", "quality": "high", "output_format": "png",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := buildSeedreamAspectRatioInput(test.req, test.opts, test.cfg)
+			if err != nil {
+				t.Fatalf("buildSeedreamAspectRatioInput() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("input = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSeedreamAspectRatioInputValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		req  llm.GenerateImageRequest
+		opts ImageOptions
+		cfg  seedreamAspectRatioConfig
+		want string
+	}{
+		{name: "missing prompt", want: "prompt is required"},
+		{
+			name: "missing aspect ratio", req: llm.GenerateImageRequest{Prompt: "draw"},
+			opts: ImageOptions{Quality: "basic"}, want: "aspect ratio is required",
+		},
+		{
+			name: "missing quality",
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+			want: "quality is required",
+		},
+		{
+			name: "missing edit image",
+			req:  llm.GenerateImageRequest{Prompt: "edit"},
+			cfg:  seedreamAspectRatioConfig{edit: true},
+			want: "requires at least one",
+		},
+		{
+			name: "unsupported aspect ratio",
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "5:4"},
+			want: "aspect ratio",
+		},
+		{
+			name: "unsupported quality",
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+			opts: ImageOptions{Quality: "ultra"},
+			want: "quality",
+		},
+		{
+			name: "output format unavailable for lite",
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+			opts: ImageOptions{Quality: "basic", OutputFormat: "png"},
+			want: "does not support output format",
+		},
+		{
+			name: "invalid pro output format",
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+			opts: ImageOptions{Quality: "basic", OutputFormat: "webp"},
+			cfg:  seedreamAspectRatioConfig{outputFormat: true},
+			want: "output format",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := buildSeedreamAspectRatioInput(test.req, test.opts, test.cfg)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestBuildSeedreamLayerDecompositionInput(t *testing.T) {
+	got, err := buildSeedreamLayerDecompositionInput(llm.GenerateImageRequest{
+		Prompt: "separate the parrot",
+		Images: []llm.ImageInput{
+			{URL: "https://cdn.example.com/image.png"},
+		},
+		Size: "1.5K",
+	}, ImageOptions{OutputFormat: "jpeg"})
+	if err != nil {
+		t.Fatalf("buildSeedreamLayerDecompositionInput() error = %v", err)
+	}
+	want := map[string]any{
+		"prompt":        "separate the parrot",
+		"image_url":     "https://cdn.example.com/image.png",
+		"size":          "1.5K",
+		"output_format": "jpeg",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("input = %#v, want %#v", got, want)
+	}
+}
+
+func TestSeedreamLayerDecompositionValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		req  llm.GenerateImageRequest
+		opts ImageOptions
+		want string
+	}{
+		{name: "no image", want: "exactly one"},
+		{
+			name: "multiple images",
+			req: llm.GenerateImageRequest{
+				Images: []llm.ImageInput{
+					{URL: "https://cdn.example.com/1.png"},
+					{URL: "https://cdn.example.com/2.png"},
+				},
+			},
+			want: "exactly one",
+		},
+		{
+			name: "invalid size",
+			req: llm.GenerateImageRequest{
+				Images: []llm.ImageInput{{URL: "https://cdn.example.com/1.png"}},
+			},
+			opts: ImageOptions{LayerSize: "4K"},
+			want: "layer size",
+		},
+		{
+			name: "invalid output",
+			req: llm.GenerateImageRequest{
+				Images: []llm.ImageInput{{URL: "https://cdn.example.com/1.png"}},
+			},
+			opts: ImageOptions{OutputFormat: "webp"},
+			want: "output format",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := buildSeedreamLayerDecompositionInput(test.req, test.opts)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestImageModelBuildInputSupportsSeedream5LiteOutputFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		id   ImageModelID
+		req  llm.GenerateImageRequest
+	}{
+		{
+			name: "text to image",
+			id:   ModelSeedreamV5LiteTextToImage,
+			req:  llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+		},
+		{
+			name: "image to image",
+			id:   ModelSeedreamV5LiteImageToImage,
+			req: llm.GenerateImageRequest{
+				Prompt:      "edit",
+				AspectRatio: "1:1",
+				Images:      []llm.ImageInput{{URL: "https://cdn.example.com/source.png"}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := (&ImageModel{modelID: test.id}).buildInput(
+				test.req,
+				ImageOptions{Quality: "basic", OutputFormat: "jpeg"},
+			)
+			if err != nil {
+				t.Fatalf("buildInput() error = %v", err)
+			}
+			if got["output_format"] != "jpeg" {
+				t.Fatalf("output_format = %v, want jpeg", got["output_format"])
+			}
+		})
+	}
+}
+
+func TestSeedreamEditInputImageLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		id   ImageModelID
+		max  int
+	}{
+		{name: "4.5", id: ModelSeedreamV45Edit, max: 14},
+		{name: "5 lite", id: ModelSeedreamV5LiteImageToImage, max: 14},
+		{name: "5 pro", id: ModelSeedreamV5ProImageToImage, max: 10},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := func(count int) llm.GenerateImageRequest {
+				images := make([]llm.ImageInput, count)
+				for index := range images {
+					images[index].URL = fmt.Sprintf("https://cdn.example.com/%d.png", index)
+				}
+				return llm.GenerateImageRequest{
+					Prompt:      "edit",
+					AspectRatio: "1:1",
+					Images:      images,
+				}
+			}
+			model := &ImageModel{modelID: test.id}
+			opts := ImageOptions{Quality: "basic"}
+			if _, err := model.buildInput(request(test.max), opts); err != nil {
+				t.Fatalf("buildInput(%d) error = %v", test.max, err)
+			}
+			_, err := model.buildInput(request(test.max+1), opts)
+			if err == nil || !strings.Contains(err.Error(), "at most") {
+				t.Fatalf("buildInput(%d) error = %v, want image-limit error", test.max+1, err)
+			}
+		})
+	}
+}
+
+func TestSeedreamExtraCannotOverrideNewFamilyReservedInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(ImageOptions) error
+		key   string
+	}{
+		{
+			name: "v3", key: "guidance_scale",
+			build: func(opts ImageOptions) error {
+				_, err := buildSeedreamV3Input(llm.GenerateImageRequest{Prompt: "draw"}, opts)
+				return err
+			},
+		},
+		{
+			name: "5 pro", key: "quality",
+			build: func(opts ImageOptions) error {
+				_, err := buildSeedreamAspectRatioInput(
+					llm.GenerateImageRequest{Prompt: "draw", AspectRatio: "1:1"},
+					opts,
+					seedreamAspectRatioConfig{outputFormat: true},
+				)
+				return err
+			},
+		},
+		{
+			name: "layer", key: "image_url",
+			build: func(opts ImageOptions) error {
+				_, err := buildSeedreamLayerDecompositionInput(
+					llm.GenerateImageRequest{
+						Images: []llm.ImageInput{{URL: "https://cdn.example.com/1.png"}},
+					},
+					opts,
+				)
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.build(
+				ImageOptions{Quality: "basic", Extra: map[string]any{test.key: "override"}},
+			)
+			if err == nil || !strings.Contains(err.Error(), "cannot override reserved field") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
