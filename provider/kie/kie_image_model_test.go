@@ -101,7 +101,9 @@ func newFakeKieServer(t *testing.T, pollsToWait int) *fakeKieServer {
 
 func TestGeneratePreservesExactTerminalRawResponse(t *testing.T) {
 	srv := newFakeKieServer(t, 0)
-	srv.terminalRaw = []byte(`{"code":200,"msg":"success","data":{"taskId":"task-fake-1","state":"success","resultUrls":["https://api.kie.ai/result/img1.jpg"],"creditsConsumed":12}}`)
+	srv.terminalRaw = []byte(
+		`{"code":200,"msg":"success","data":{"taskId":"task-fake-1","state":"success","resultUrls":["https://api.kie.ai/result/img1.jpg"],"creditsConsumed":12}}`,
+	)
 	cfg := Config{
 		APIKey: "k", PollInterval: time.Millisecond, PollTimeout: time.Second,
 		HTTPClient: &http.Client{Transport: rewriteTransport{

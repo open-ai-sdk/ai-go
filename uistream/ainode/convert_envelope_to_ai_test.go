@@ -233,10 +233,10 @@ func TestToAIMessages_PartsOverrideContent(t *testing.T) {
 func TestToAIContentParts_CanonicalFilename(t *testing.T) {
 	parts := []EnvelopePartUnion{
 		{
-			Type:     EnvelopePartTypeFile,
-			URL:      "https://example.com/report.pdf",
+			Type:      EnvelopePartTypeFile,
+			URL:       "https://example.com/report.pdf",
 			MediaType: "application/pdf",
-			Filename: "report.pdf",
+			Filename:  "report.pdf",
 		},
 	}
 	got := ToAIContentParts(parts)
@@ -253,10 +253,10 @@ func TestToAIContentParts_CanonicalFilename(t *testing.T) {
 func TestToAIContentParts_LegacyNameFallback(t *testing.T) {
 	parts := []EnvelopePartUnion{
 		{
-			Type:     EnvelopePartTypeFile,
-			URL:      "https://example.com/legacy.pdf",
+			Type:      EnvelopePartTypeFile,
+			URL:       "https://example.com/legacy.pdf",
 			MediaType: "application/pdf",
-			Name:     "legacy.pdf",
+			Name:      "legacy.pdf",
 		},
 	}
 	got := ToAIContentParts(parts)
@@ -273,11 +273,11 @@ func TestToAIContentParts_LegacyNameFallback(t *testing.T) {
 func TestToAIContentParts_FilenamePrecedence(t *testing.T) {
 	parts := []EnvelopePartUnion{
 		{
-			Type:     EnvelopePartTypeFile,
-			URL:      "https://example.com/doc.pdf",
+			Type:      EnvelopePartTypeFile,
+			URL:       "https://example.com/doc.pdf",
 			MediaType: "application/pdf",
-			Filename: "canonical.pdf",
-			Name:     "legacy.pdf",
+			Filename:  "canonical.pdf",
+			Name:      "legacy.pdf",
 		},
 	}
 	got := ToAIContentParts(parts)

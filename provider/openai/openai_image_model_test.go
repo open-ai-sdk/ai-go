@@ -58,13 +58,15 @@ func TestImageModelGenerateUsesJSONAndPreservesRawResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if len(result.Images) != 1 || string(result.Images[0].Data) != "hello" || result.Images[0].MediaType != "image/webp" {
+	if len(result.Images) != 1 || string(result.Images[0].Data) != "hello" ||
+		result.Images[0].MediaType != "image/webp" {
 		t.Fatalf("images = %#v", result.Images)
 	}
 	if string(result.Raw) != responseBody {
 		t.Fatalf("Raw = %q, want exact %q", result.Raw, responseBody)
 	}
-	if result.Usage == nil || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 3 || result.Usage.TotalTokens != 5 {
+	if result.Usage == nil || result.Usage.InputTokens != 2 || result.Usage.OutputTokens != 3 ||
+		result.Usage.TotalTokens != 5 {
 		t.Fatalf("Usage = %#v", result.Usage)
 	}
 	if result.Usage.Raw["input_tokens_details"] == nil {
@@ -183,13 +185,60 @@ func TestImageModelRejectsUnsafeAndInvalidInputsBeforeHTTP(t *testing.T) {
 		req  llm.GenerateImageRequest
 		want string
 	}{
-		{"url source", llm.GenerateImageRequest{Prompt: "x", Images: []llm.ImageInput{{URL: "http://169.254.169.254/latest"}}}, "URL-only"},
-		{"url mask", llm.GenerateImageRequest{Prompt: "x", Images: []llm.ImageInput{{Data: []byte("x")}}, ProviderOptions: map[string]any{"openai": ImageOptions{Mask: &llm.ImageInput{URL: "https://example.com/mask"}}}}, "URL-only"},
+		{
+			"url source",
+			llm.GenerateImageRequest{Prompt: "x", Images: []llm.ImageInput{{URL: "http://169.254.169.254/latest"}}},
+			"URL-only",
+		},
+		{
+			"url mask",
+			llm.GenerateImageRequest{
+				Prompt: "x",
+				Images: []llm.ImageInput{{Data: []byte("x")}},
+				ProviderOptions: map[string]any{
+					"openai": ImageOptions{Mask: &llm.ImageInput{URL: "https://example.com/mask"}},
+				},
+			},
+			"URL-only",
+		},
 		{"too many", llm.GenerateImageRequest{Prompt: "x", Images: make([]llm.ImageInput, 17)}, "at most 16"},
-		{"transparent jpeg", llm.GenerateImageRequest{Prompt: "x", ProviderOptions: map[string]any{"openai": ImageOptions{Background: "transparent", OutputFormat: "jpeg"}}}, "transparent background"},
-		{"gpt-image-2 transparent png", llm.GenerateImageRequest{Prompt: "x", ProviderOptions: map[string]any{"openai": ImageOptions{Background: "transparent", OutputFormat: "png"}}}, "does not support transparent"},
-		{"gpt-image-2 input fidelity", llm.GenerateImageRequest{Prompt: "x", Images: []llm.ImageInput{{Data: []byte("x")}}, ProviderOptions: map[string]any{"openai": ImageOptions{InputFidelity: "high"}}}, "omit input fidelity"},
-		{"compression png", llm.GenerateImageRequest{Prompt: "x", ProviderOptions: map[string]any{"openai": ImageOptions{OutputFormat: "png", OutputCompression: &compression}}}, "compression requires"},
+		{
+			"transparent jpeg",
+			llm.GenerateImageRequest{
+				Prompt: "x",
+				ProviderOptions: map[string]any{
+					"openai": ImageOptions{Background: "transparent", OutputFormat: "jpeg"},
+				},
+			},
+			"transparent background",
+		},
+		{
+			"gpt-image-2 transparent png",
+			llm.GenerateImageRequest{
+				Prompt:          "x",
+				ProviderOptions: map[string]any{"openai": ImageOptions{Background: "transparent", OutputFormat: "png"}},
+			},
+			"does not support transparent",
+		},
+		{
+			"gpt-image-2 input fidelity",
+			llm.GenerateImageRequest{
+				Prompt:          "x",
+				Images:          []llm.ImageInput{{Data: []byte("x")}},
+				ProviderOptions: map[string]any{"openai": ImageOptions{InputFidelity: "high"}},
+			},
+			"omit input fidelity",
+		},
+		{
+			"compression png",
+			llm.GenerateImageRequest{
+				Prompt: "x",
+				ProviderOptions: map[string]any{
+					"openai": ImageOptions{OutputFormat: "png", OutputCompression: &compression},
+				},
+			},
+			"compression requires",
+		},
 		{"n out of range", llm.GenerateImageRequest{Prompt: "x", N: 11}, "between 1 and 10"},
 	}
 	for _, test := range tests {
@@ -241,7 +290,8 @@ func TestOpenAIProviderAndClientImageModel(t *testing.T) {
 	if provider.Name() != "openai" || provider.config.APIKey != "env-key" {
 		t.Fatalf("provider = %#v", provider)
 	}
-	if provider.LanguageModel("gpt-5").ModelID() != "gpt-5" || provider.ImageModel("gpt-image-2").ModelID() != "gpt-image-2" {
+	if provider.LanguageModel("gpt-5").ModelID() != "gpt-5" ||
+		provider.ImageModel("gpt-image-2").ModelID() != "gpt-image-2" {
 		t.Fatal("provider model handles have unexpected IDs")
 	}
 

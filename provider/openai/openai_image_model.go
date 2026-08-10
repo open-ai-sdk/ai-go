@@ -44,7 +44,10 @@ func (model *ImageModel) ModelID() string { return model.modelID }
 
 // Generate creates or edits images. Requests without source images use JSON
 // at images/generations; edits use multipart data at images/edits.
-func (model *ImageModel) Generate(ctx context.Context, request llm.GenerateImageRequest) (*llm.GenerateImageResult, error) {
+func (model *ImageModel) Generate(
+	ctx context.Context,
+	request llm.GenerateImageRequest,
+) (*llm.GenerateImageResult, error) {
 	if model.clientErr != nil {
 		return nil, fmt.Errorf("openai-image: configure transport: %w", model.clientErr)
 	}
@@ -111,12 +114,21 @@ func (model *ImageModel) apiRequest(request llm.GenerateImageRequest, options Im
 	return apiRequest
 }
 
-func (model *ImageModel) buildGenerationRequest(ctx context.Context, request llm.GenerateImageRequest, options ImageOptions) (*http.Request, error) {
+func (model *ImageModel) buildGenerationRequest(
+	ctx context.Context,
+	request llm.GenerateImageRequest,
+	options ImageOptions,
+) (*http.Request, error) {
 	body, err := json.Marshal(model.apiRequest(request, options))
 	if err != nil {
 		return nil, fmt.Errorf("openai-image: marshal request: %w", err)
 	}
-	httpRequest, err := model.client.images.NewRequest(ctx, http.MethodPost, "images/generations", bytes.NewReader(body))
+	httpRequest, err := model.client.images.NewRequest(
+		ctx,
+		http.MethodPost,
+		"images/generations",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("openai-image: build request: %w", err)
 	}
@@ -124,22 +136,34 @@ func (model *ImageModel) buildGenerationRequest(ctx context.Context, request llm
 	return httpRequest, nil
 }
 
-func (model *ImageModel) buildEditRequest(ctx context.Context, request llm.GenerateImageRequest, options ImageOptions) (*http.Request, error) {
+func (model *ImageModel) buildEditRequest(
+	ctx context.Context,
+	request llm.GenerateImageRequest,
+	options ImageOptions,
+) (*http.Request, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	apiRequest := model.apiRequest(request, options)
 	fields := []struct{ name, value string }{
-		{"model", apiRequest.Model}, {"prompt", apiRequest.Prompt}, {"size", apiRequest.Size},
-		{"quality", apiRequest.Quality}, {"background", apiRequest.Background},
-		{"output_format", apiRequest.OutputFormat}, {"moderation", apiRequest.Moderation},
-		{"user", apiRequest.User}, {"input_fidelity", apiRequest.InputFidelity},
+		{"model", apiRequest.Model},
+		{"prompt", apiRequest.Prompt},
+		{"size", apiRequest.Size},
+		{"quality", apiRequest.Quality},
+		{"background", apiRequest.Background},
+		{"output_format", apiRequest.OutputFormat},
+		{"moderation", apiRequest.Moderation},
+		{"user", apiRequest.User},
+		{"input_fidelity", apiRequest.InputFidelity},
 		{"response_format", apiRequest.ResponseFormat},
 	}
 	if apiRequest.N > 0 {
 		fields = append(fields, struct{ name, value string }{"n", fmt.Sprint(apiRequest.N)})
 	}
 	if apiRequest.OutputCompression != nil {
-		fields = append(fields, struct{ name, value string }{"output_compression", fmt.Sprint(*apiRequest.OutputCompression)})
+		fields = append(
+			fields,
+			struct{ name, value string }{"output_compression", fmt.Sprint(*apiRequest.OutputCompression)},
+		)
 	}
 	for _, field := range fields {
 		if field.value != "" {
@@ -185,6 +209,25 @@ func writeImagePart(writer *multipart.Writer, field string, index int, image llm
 }
 
 func validateImageRequest(modelID string, request llm.GenerateImageRequest, options ImageOptions) error {
+	if err := validateImageRequestFields(request); err != nil {
+		return err
+	}
+	if err := validateSourceImages(request.Images); err != nil {
+		return err
+	}
+	if err := validateMask(request.Images, options.Mask); err != nil {
+		return err
+	}
+	if err := validateImageOptions(options); err != nil {
+		return err
+	}
+	if err := validateModelImageOptions(modelID, options); err != nil {
+		return err
+	}
+	return validateOutputOptions(options)
+}
+
+func validateImageRequestFields(request llm.GenerateImageRequest) error {
 	if strings.TrimSpace(request.Prompt) == "" {
 		return fmt.Errorf("openai-image: prompt is required")
 	}
@@ -200,25 +243,39 @@ func validateImageRequest(modelID string, request llm.GenerateImageRequest, opti
 	if request.Seed != nil {
 		return fmt.Errorf("openai-image: seed is not supported")
 	}
-	for index, image := range request.Images {
-		if len(image.Data) == 0 {
-			if image.URL != "" {
-				return fmt.Errorf("openai-image: image[%d]: URL-only inputs are not supported; provide inline data", index)
-			}
-			return fmt.Errorf("openai-image: image[%d]: inline data is required", index)
+	return nil
+}
+
+func validateSourceImages(images []llm.ImageInput) error {
+	for index, image := range images {
+		if len(image.Data) != 0 {
+			continue
 		}
+		if image.URL != "" {
+			return fmt.Errorf("openai-image: image[%d]: URL-only inputs are not supported; provide inline data", index)
+		}
+		return fmt.Errorf("openai-image: image[%d]: inline data is required", index)
 	}
-	if options.Mask != nil {
-		if len(request.Images) == 0 {
-			return fmt.Errorf("openai-image: mask requires at least one source image")
-		}
-		if len(options.Mask.Data) == 0 {
-			if options.Mask.URL != "" {
-				return fmt.Errorf("openai-image: mask: URL-only inputs are not supported; provide inline data")
-			}
-			return fmt.Errorf("openai-image: mask: inline data is required")
-		}
+	return nil
+}
+
+func validateMask(images []llm.ImageInput, mask *llm.ImageInput) error {
+	if mask == nil {
+		return nil
 	}
+	if len(images) == 0 {
+		return fmt.Errorf("openai-image: mask requires at least one source image")
+	}
+	if len(mask.Data) != 0 {
+		return nil
+	}
+	if mask.URL != "" {
+		return fmt.Errorf("openai-image: mask: URL-only inputs are not supported; provide inline data")
+	}
+	return fmt.Errorf("openai-image: mask: inline data is required")
+}
+
+func validateImageOptions(options ImageOptions) error {
 	if err := validateChoice("quality", options.Quality, "auto", "low", "medium", "high"); err != nil {
 		return err
 	}
@@ -234,6 +291,10 @@ func validateImageRequest(modelID string, request llm.GenerateImageRequest, opti
 	if err := validateChoice("input fidelity", options.InputFidelity, "low", "high"); err != nil {
 		return err
 	}
+	return nil
+}
+
+func validateModelImageOptions(modelID string, options ImageOptions) error {
 	if isGPTImage2(modelID) {
 		if options.InputFidelity != "" {
 			return fmt.Errorf("openai-image: gpt-image-2 always uses high input fidelity; omit input fidelity")
@@ -242,7 +303,12 @@ func validateImageRequest(modelID string, request llm.GenerateImageRequest, opti
 			return fmt.Errorf("openai-image: gpt-image-2 does not support transparent backgrounds")
 		}
 	}
-	if options.Background == "transparent" && options.OutputFormat != "" && options.OutputFormat != "png" && options.OutputFormat != "webp" {
+	return nil
+}
+
+func validateOutputOptions(options ImageOptions) error {
+	if options.Background == "transparent" && options.OutputFormat != "" && options.OutputFormat != "png" &&
+		options.OutputFormat != "webp" {
 		return fmt.Errorf("openai-image: transparent background requires png or webp output format")
 	}
 	if options.OutputCompression != nil {
@@ -343,7 +409,12 @@ func parseImageResponse(body []byte, requestedFormat string) (*llm.GenerateImage
 		if json.Unmarshal(body, &envelope) == nil {
 			raw = envelope.Usage
 		}
-		result.Usage = &aikit.Usage{InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.TotalTokens, Raw: raw}
+		result.Usage = &aikit.Usage{
+			InputTokens:  response.Usage.InputTokens,
+			OutputTokens: response.Usage.OutputTokens,
+			TotalTokens:  response.Usage.TotalTokens,
+			Raw:          raw,
+		}
 	}
 	return result, nil
 }
@@ -359,7 +430,12 @@ func decodeImageBase64(value string) ([]byte, error) {
 		}
 		return r
 	}, value)
-	encodings := []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding}
+	encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
 	var lastErr error
 	for _, encoding := range encodings {
 		decoded, err := encoding.DecodeString(value)

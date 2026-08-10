@@ -6,7 +6,9 @@ import (
 )
 
 func TestImageModelParseResponsePreservesRaw(t *testing.T) {
-	raw := []byte(`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5},"providerField":"preserved"}`)
+	raw := []byte(
+		`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5},"providerField":"preserved"}`,
+	)
 	result, err := (&ImageModel{}).parseResponse(raw)
 	if err != nil {
 		t.Fatalf("parseResponse() error = %v", err)

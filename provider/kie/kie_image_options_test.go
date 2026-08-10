@@ -141,10 +141,25 @@ func TestSeedreamV4ValidatesRequiredFieldsAndLimits(t *testing.T) {
 		want string
 	}{
 		{name: "empty prompt", req: llm.GenerateImageRequest{}, want: "prompt is required"},
-		{name: "missing edit image", req: llm.GenerateImageRequest{Prompt: "edit"}, edit: true, want: "requires at least one"},
-		{name: "too many edit images", req: llm.GenerateImageRequest{Prompt: "edit", Images: elevenURLs}, edit: true, want: "at most 10"},
+		{
+			name: "missing edit image",
+			req:  llm.GenerateImageRequest{Prompt: "edit"},
+			edit: true,
+			want: "requires at least one",
+		},
+		{
+			name: "too many edit images",
+			req:  llm.GenerateImageRequest{Prompt: "edit", Images: elevenURLs},
+			edit: true,
+			want: "at most 10",
+		},
 		{name: "request count too high", req: llm.GenerateImageRequest{Prompt: "draw", N: 7}, want: "between 1 and 6"},
-		{name: "option count negative", req: llm.GenerateImageRequest{Prompt: "draw"}, opts: ImageOptions{MaxImages: -1}, want: "between 1 and 6"},
+		{
+			name: "option count negative",
+			req:  llm.GenerateImageRequest{Prompt: "draw"},
+			opts: ImageOptions{MaxImages: -1},
+			want: "between 1 and 6",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

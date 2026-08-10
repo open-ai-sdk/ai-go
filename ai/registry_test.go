@@ -31,6 +31,7 @@ func (provider registryFullProvider) Name() string { return provider.name }
 func (registryFullProvider) LanguageModel(id string) llm.Model {
 	return registryLanguageModel{id: id}
 }
+
 func (registryFullProvider) ImageModel(id string) llm.ImageModel {
 	return registryImageModel{id: id}
 }
