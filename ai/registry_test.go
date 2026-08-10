@@ -59,6 +59,19 @@ func TestRegistryResolvesCapabilities(t *testing.T) {
 	}
 }
 
+func TestRegistryCanonicalLLMContract(t *testing.T) {
+	registry := llm.NewRegistry()
+	if err := registry.Register(registryFullProvider{name: "canonical"}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if _, err := registry.ImageModel("missing", "image"); !errors.Is(err, llm.ErrProviderNotFound) {
+		t.Fatalf("ImageModel() error = %v", err)
+	}
+	if !errors.Is(ErrProviderNotFound, llm.ErrProviderNotFound) {
+		t.Fatal("ai error alias does not preserve error matching")
+	}
+}
+
 func TestRegistryRejectsDuplicateAndUnknownProviders(t *testing.T) {
 	var registry Registry
 	if err := registry.Register(registryFullProvider{name: "test"}); err != nil {

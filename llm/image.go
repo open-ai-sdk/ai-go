@@ -40,7 +40,7 @@ type GenerateImageResult struct {
 	Warnings []aikit.Warning
 	// Raw retains the untranslated successful provider response for diagnostics.
 	// It may contain sensitive provider data and is never logged automatically.
-	Raw json.RawMessage
+	Raw json.RawMessage `json:"-"`
 }
 
 // GeneratedImage holds one generated image.

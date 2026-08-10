@@ -172,78 +172,116 @@ func TestImageModelUsesResponseOutputFormatWhenRequestOmitsIt(t *testing.T) {
 	}
 }
 
+func TestImageModelRejectsOversizedResponse(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, `{"data":[{"b64_json":"eA=="}]}`)
+	}))
+	defer server.Close()
+
+	_, err := NewImageModel("gpt-image-2", Config{
+		BaseURL:               server.URL,
+		ImageResponseMaxBytes: 8,
+	}).Generate(context.Background(), llm.GenerateImageRequest{Prompt: "x"})
+	if err == nil || !strings.Contains(err.Error(), "response exceeds maximum size") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestImageModelRejectsUnsafeAndInvalidInputsBeforeHTTP(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
 	defer server.Close()
-	model := NewImageModel("gpt-image-2", Config{BaseURL: server.URL})
+	gptImageModel := NewImageModel("gpt-image-2", Config{BaseURL: server.URL})
+	sharedImageModel := NewImageModel("dall-e-3", Config{BaseURL: server.URL})
 	compression := 50
 	tests := []struct {
-		name string
-		req  llm.GenerateImageRequest
-		want string
+		name  string
+		model *ImageModel
+		req   llm.GenerateImageRequest
+		want  string
 	}{
 		{
-			"url source",
-			llm.GenerateImageRequest{Prompt: "x", Images: []llm.ImageInput{{URL: "http://169.254.169.254/latest"}}},
-			"URL-only",
+			name:  "url source",
+			model: gptImageModel,
+			req: llm.GenerateImageRequest{
+				Prompt: "x",
+				Images: []llm.ImageInput{{URL: "http://169.254.169.254/latest"}},
+			},
+			want: "URL-only",
 		},
 		{
-			"url mask",
-			llm.GenerateImageRequest{
+			name:  "url mask",
+			model: gptImageModel,
+			req: llm.GenerateImageRequest{
 				Prompt: "x",
 				Images: []llm.ImageInput{{Data: []byte("x")}},
 				ProviderOptions: map[string]any{
 					"openai": ImageOptions{Mask: &llm.ImageInput{URL: "https://example.com/mask"}},
 				},
 			},
-			"URL-only",
+			want: "URL-only",
 		},
-		{"too many", llm.GenerateImageRequest{Prompt: "x", Images: make([]llm.ImageInput, 17)}, "at most 16"},
 		{
-			"transparent jpeg",
-			llm.GenerateImageRequest{
+			name:  "too many",
+			model: gptImageModel,
+			req:   llm.GenerateImageRequest{Prompt: "x", Images: make([]llm.ImageInput, 17)},
+			want:  "at most 16",
+		},
+		{
+			name:  "transparent jpeg",
+			model: sharedImageModel,
+			req: llm.GenerateImageRequest{
 				Prompt: "x",
 				ProviderOptions: map[string]any{
 					"openai": ImageOptions{Background: "transparent", OutputFormat: "jpeg"},
 				},
 			},
-			"transparent background",
+			want: "transparent background",
 		},
 		{
-			"gpt-image-2 transparent png",
-			llm.GenerateImageRequest{
+			name:  "gpt-image-2 transparent png",
+			model: gptImageModel,
+			req: llm.GenerateImageRequest{
 				Prompt:          "x",
 				ProviderOptions: map[string]any{"openai": ImageOptions{Background: "transparent", OutputFormat: "png"}},
 			},
-			"does not support transparent",
+			want: "does not support transparent",
 		},
 		{
-			"gpt-image-2 input fidelity",
-			llm.GenerateImageRequest{
+			name:  "gpt-image-2 input fidelity",
+			model: gptImageModel,
+			req: llm.GenerateImageRequest{
 				Prompt:          "x",
 				Images:          []llm.ImageInput{{Data: []byte("x")}},
 				ProviderOptions: map[string]any{"openai": ImageOptions{InputFidelity: "high"}},
 			},
-			"omit input fidelity",
+			want: "omit input fidelity",
 		},
 		{
-			"compression png",
-			llm.GenerateImageRequest{
+			name:  "compression png",
+			model: gptImageModel,
+			req: llm.GenerateImageRequest{
 				Prompt: "x",
 				ProviderOptions: map[string]any{
 					"openai": ImageOptions{OutputFormat: "png", OutputCompression: &compression},
 				},
 			},
-			"compression requires",
+			want: "compression requires",
 		},
-		{"n out of range", llm.GenerateImageRequest{Prompt: "x", N: 11}, "between 1 and 10"},
+		{
+			name:  "n out of range",
+			model: gptImageModel,
+			req:   llm.GenerateImageRequest{Prompt: "x", N: 11},
+			want:  "between 1 and 10",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := model.Generate(context.Background(), test.req)
+			_, err := test.model.Generate(context.Background(), test.req)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v", err)
 			}

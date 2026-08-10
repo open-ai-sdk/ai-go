@@ -18,7 +18,10 @@ import (
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-const maxImageInputs = 16
+const (
+	maxImageInputs               = 16
+	defaultImageResponseMaxBytes = 64 << 20
+)
 
 // ImageModel implements [llm.ImageModel] using OpenAI's synchronous Images API.
 type ImageModel struct {
@@ -79,9 +82,9 @@ func (model *ImageModel) Generate(
 		return nil, transport.APIErrorFromResponse(ctx, "openai-image", response)
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
+	body, err := readImageResponse(response.Body, model.client.imageResponseMaxBytes)
 	if err != nil {
-		return nil, fmt.Errorf("openai-image: read response: %w", err)
+		return nil, err
 	}
 	return parseImageResponse(body, options.OutputFormat)
 }
@@ -144,7 +147,11 @@ func (model *ImageModel) buildEditRequest(
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	apiRequest := model.apiRequest(request, options)
-	fields := []struct{ name, value string }{
+	type formField struct {
+		name  string
+		value string
+	}
+	fields := []formField{
 		{"model", apiRequest.Model},
 		{"prompt", apiRequest.Prompt},
 		{"size", apiRequest.Size},
@@ -157,12 +164,12 @@ func (model *ImageModel) buildEditRequest(
 		{"response_format", apiRequest.ResponseFormat},
 	}
 	if apiRequest.N > 0 {
-		fields = append(fields, struct{ name, value string }{"n", fmt.Sprint(apiRequest.N)})
+		fields = append(fields, formField{name: "n", value: fmt.Sprint(apiRequest.N)})
 	}
 	if apiRequest.OutputCompression != nil {
 		fields = append(
 			fields,
-			struct{ name, value string }{"output_compression", fmt.Sprint(*apiRequest.OutputCompression)},
+			formField{name: "output_compression", value: fmt.Sprint(*apiRequest.OutputCompression)},
 		)
 	}
 	for _, field := range fields {
@@ -191,6 +198,18 @@ func (model *ImageModel) buildEditRequest(
 	}
 	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
 	return httpRequest, nil
+}
+
+func readImageResponse(body io.Reader, maxBytes int64) ([]byte, error) {
+	limited := io.LimitReader(body, maxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("openai-image: read response: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("openai-image: response exceeds maximum size of %d bytes", maxBytes)
+	}
+	return data, nil
 }
 
 func writeImagePart(writer *multipart.Writer, field string, index int, image llm.ImageInput) error {

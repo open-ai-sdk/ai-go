@@ -175,3 +175,29 @@ func TestSeedreamV4ValidatesRequiredFieldsAndLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestSeedreamV4ExtraCannotOverrideReservedInput(t *testing.T) {
+	reserved := []string{
+		"prompt", "image_urls", "image_size", "image_resolution",
+		"max_images", "seed", "nsfw_checker",
+	}
+	for _, key := range reserved {
+		t.Run(key, func(t *testing.T) {
+			_, err := buildSeedreamV4TextInput(
+				llm.GenerateImageRequest{Prompt: "draw"},
+				ImageOptions{Extra: map[string]any{key: "override"}},
+			)
+			if err == nil || !strings.Contains(err.Error(), "cannot override reserved field") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+
+	got, err := buildSeedreamV4TextInput(
+		llm.GenerateImageRequest{Prompt: "draw"},
+		ImageOptions{Extra: map[string]any{"custom_setting": true}},
+	)
+	if err != nil || got["custom_setting"] != true {
+		t.Fatalf("input = %#v, error = %v", got, err)
+	}
+}

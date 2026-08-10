@@ -28,6 +28,7 @@ type (
 	OutputSchema         = llm.OutputSchema
 	OutputTokenDetails   = aikit.OutputTokenDetails
 	Role                 = aikit.Role
+	Registry             = llm.Registry
 	RuntimeContext       = aikit.RuntimeContext
 	Source               = aikit.Source
 	StreamEvent          = aikit.StreamEvent

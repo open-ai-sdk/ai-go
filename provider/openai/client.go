@@ -11,7 +11,10 @@ import (
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-const defaultTimeout = 120 * time.Second
+const (
+	defaultTimeout      = 120 * time.Second
+	defaultImageTimeout = 5 * time.Minute
+)
 
 type providerPolicy struct {
 	apiKey  string
@@ -27,14 +30,15 @@ func (p providerPolicy) Authorize(req *http.Request) {
 // Client owns OpenAI credentials, endpoints, and reusable HTTP resources.
 // Construct one Client and derive lightweight model handles from it.
 type Client struct {
-	apiKey       string
-	baseURL      string
-	timeout      time.Duration
-	chunkTimeout time.Duration
-	streamDoer   transport.Doer
-	responses    *provider.Client[providerPolicy]
-	uploads      *provider.Client[providerPolicy]
-	images       *provider.Client[providerPolicy]
+	apiKey                string
+	baseURL               string
+	timeout               time.Duration
+	chunkTimeout          time.Duration
+	imageResponseMaxBytes int64
+	streamDoer            transport.Doer
+	responses             *provider.Client[providerPolicy]
+	uploads               *provider.Client[providerPolicy]
+	images                *provider.Client[providerPolicy]
 }
 
 // NewClient validates config and constructs a reusable OpenAI client.
@@ -71,6 +75,21 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 	if uploadDoer == nil {
 		uploadDoer = &http.Client{Timeout: timeout}
 	}
+	imageDoer := cfg.HTTPClient
+	if imageDoer == nil {
+		imageTimeout := cfg.Timeout
+		if imageTimeout == 0 {
+			imageTimeout = defaultImageTimeout
+		}
+		imageDoer = &http.Client{Timeout: imageTimeout}
+	}
+	imageResponseMaxBytes := cfg.ImageResponseMaxBytes
+	if imageResponseMaxBytes == 0 {
+		imageResponseMaxBytes = defaultImageResponseMaxBytes
+	}
+	if imageResponseMaxBytes < 0 || imageResponseMaxBytes == int64(^uint64(0)>>1) {
+		return nil, fmt.Errorf("openai: image response max bytes must be positive")
+	}
 	policy := providerPolicy{apiKey: cfg.APIKey, baseURL: baseURL}
 	responses, err := provider.NewClient(policy, provider.ClientConfig{
 		Headers:    http.Header{"Content-Type": []string{"application/json"}},
@@ -87,21 +106,22 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 		return nil, err
 	}
 	images, err := provider.NewClient(policy, provider.ClientConfig{
-		HTTPClient:   uploadDoer,
+		HTTPClient:   imageDoer,
 		ProviderName: "openai-image",
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Client{
-		apiKey:       cfg.APIKey,
-		baseURL:      baseURL,
-		timeout:      timeout,
-		chunkTimeout: cfg.ChunkTimeout,
-		streamDoer:   streamDoer,
-		responses:    responses,
-		uploads:      uploads,
-		images:       images,
+		apiKey:                cfg.APIKey,
+		baseURL:               baseURL,
+		timeout:               timeout,
+		chunkTimeout:          cfg.ChunkTimeout,
+		imageResponseMaxBytes: imageResponseMaxBytes,
+		streamDoer:            streamDoer,
+		responses:             responses,
+		uploads:               uploads,
+		images:                images,
 	}, nil
 }
 

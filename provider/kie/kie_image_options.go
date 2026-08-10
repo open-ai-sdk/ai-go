@@ -120,6 +120,26 @@ func buildGPTImage2TextInput(req llm.GenerateImageRequest, opts ImageOptions) (m
 	return in, nil
 }
 
+var seedreamReservedInputKeys = map[string]struct{}{
+	"prompt":           {},
+	"image_urls":       {},
+	"image_size":       {},
+	"image_resolution": {},
+	"max_images":       {},
+	"seed":             {},
+	"nsfw_checker":     {},
+}
+
+func applySeedreamExtra(dst, extra map[string]any) error {
+	for key := range extra {
+		if _, reserved := seedreamReservedInputKeys[key]; reserved {
+			return fmt.Errorf("kie: seedream extra cannot override reserved field %q", key)
+		}
+	}
+	applyExtra(dst, extra)
+	return nil
+}
+
 // buildGPTImage2EditInput builds the `input` for `gpt-image-2-image-to-image`.
 // Schema fields: prompt, input_urls, aspect_ratio, resolution, n, seed.
 func buildGPTImage2EditInput(req llm.GenerateImageRequest, opts ImageOptions) (map[string]any, error) {
@@ -237,7 +257,9 @@ func buildSeedreamV4Input(req llm.GenerateImageRequest, opts ImageOptions, edit 
 	if opts.NSFWChecker != nil {
 		in["nsfw_checker"] = *opts.NSFWChecker
 	}
-	applyExtra(in, opts.Extra)
+	if err := applySeedreamExtra(in, opts.Extra); err != nil {
+		return nil, err
+	}
 	return in, nil
 }
 
