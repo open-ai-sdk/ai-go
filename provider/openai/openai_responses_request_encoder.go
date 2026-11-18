@@ -13,6 +13,7 @@ import (
 // responsesRequest is the JSON body sent to the OpenAI Responses API POST /v1/responses.
 type responsesRequest struct {
 	Model              string              `json:"model"`
+	Instructions       string              `json:"instructions,omitempty"`
 	Input              []inputItem         `json:"input"`
 	Stream             bool                `json:"stream,omitempty"`
 	MaxOutputTokens    int                 `json:"max_output_tokens,omitempty"`
@@ -28,6 +29,14 @@ type responsesRequest struct {
 	Include            []string            `json:"include,omitempty"`
 	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions *promptCacheOptions `json:"prompt_cache_options,omitempty"`
+	// ToolChoice is a string ("auto", "none", "required") or a
+	// {"type":"function","name":...} object. Normally set only with tools.
+	ToolChoice        any   `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
+
+	// Local decoder configuration; never sent to the provider.
+	emitReasoningEvents       bool `json:"-"`
+	allowMissingTerminalEvent bool `json:"-"`
 }
 
 type promptCacheOptions struct {
@@ -62,6 +71,8 @@ type inputItem struct {
 
 	// Function call (assistant tool use).
 	Type      string `json:"type,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Status    string `json:"status,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
@@ -130,6 +141,14 @@ type responsesTool struct {
 	Name        string         `json:"name,omitempty"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
+	Strict      *bool          `json:"strict,omitempty"`
+}
+
+func instructionText(value string, trim bool) string {
+	if trim {
+		return strings.TrimSpace(value)
+	}
+	return value
 }
 
 // encodeRequest builds a responsesRequest from an llm.Request.
@@ -138,32 +157,55 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
-	if err := validateProviderOptions(req, opts); err != nil {
+	inputReq := req
+	inputReq.Instructions = instructionText(inputReq.Instructions, opts.TrimInstructions)
+	if err := validateProviderOptions(inputReq, opts); err != nil {
 		return responsesRequest{}, nil, err
 	}
 	var warnings []aikit.Warning
 
-	input, encWarnings, err := encodeInput(req, opts.PDFDetail, opts.PromptCacheInstructions)
+	instructions := inputReq.Instructions
+	if opts.InstructionsAsTopLevel {
+		inputReq.Instructions = ""
+	}
+	input, encWarnings, err := encodeInput(inputReq, opts.PDFDetail, opts.PromptCacheInstructions)
 	if err != nil {
 		return responsesRequest{}, nil, err
 	}
 	warnings = append(warnings, encWarnings...)
 
 	r := responsesRequest{
-		Model:  modelID,
-		Input:  input,
-		Stream: stream,
+		Model:                     modelID,
+		Input:                     input,
+		Stream:                    stream,
+		emitReasoningEvents:       opts.EmitReasoningEvents,
+		allowMissingTerminalEvent: opts.AllowMissingTerminalEvent,
 	}
+	if opts.InstructionsAsTopLevel {
+		r.Instructions = instructions
+	}
+	r.Input = applyInputOptions(r.Input, opts)
 	warnings = append(warnings, applyRequestOptions(&r, req, opts)...)
 
 	// Tools: function tools + optional built-in web search.
 	tools, toolWarnings := encodeTools(req.Tools, opts)
 	warnings = append(warnings, toolWarnings...)
 	r.Tools = tools
+	toolChoice, err := encodeToolChoice(req.ToolChoice, req.Tools)
+	if err != nil {
+		return responsesRequest{}, nil, err
+	}
+	if len(tools) > 0 || opts.ToolPolicyWithoutTools {
+		r.ToolChoice = toolChoice
+		r.ParallelToolCalls = opts.ParallelToolCalls
+	}
 
 	// Include list: add sources when web search + IncludeSources requested.
 	if opts.EnableWebSearch && opts.IncludeSources {
 		r.Include = append(r.Include, "web_search_call.action.sources")
+	}
+	if opts.IncludeEncryptedReasoning {
+		r.Include = append(r.Include, "reasoning.encrypted_content")
 	}
 
 	// Structured output schema.
@@ -171,6 +213,12 @@ func encodeRequest(modelID string, req llm.Request, stream bool) (responsesReque
 		r.Text, err = encodeOutputSchema(req.Output)
 		if err != nil {
 			return responsesRequest{}, nil, err
+		}
+		if opts.OutputSchemaName != "" && r.Text.Format.Type == "json_schema" {
+			r.Text.Format.Name = opts.OutputSchemaName
+		}
+		if opts.OutputSchemaName == "" && req.Output.Name != "" && r.Text.Format.Type == "json_schema" {
+			r.Text.Format.Name = req.Output.Name
 		}
 	}
 
@@ -201,6 +249,13 @@ func applyRequestOptions(r *responsesRequest, req llm.Request, opts ProviderOpti
 		})
 	}
 
+	if req.Settings.TopK != nil {
+		warnings = append(warnings, unsupportedResponsesSetting("topK"))
+	}
+	if req.Settings.Seed != nil {
+		warnings = append(warnings, unsupportedResponsesSetting("seed"))
+	}
+
 	if opts.PreviousResponseID != "" {
 		r.PreviousResponseID = opts.PreviousResponseID
 	}
@@ -229,6 +284,14 @@ func applyRequestOptions(r *responsesRequest, req llm.Request, opts ProviderOpti
 		r.PromptCacheOptions = &promptCacheOptions{Mode: opts.PromptCacheMode}
 	}
 	return warnings
+}
+
+func unsupportedResponsesSetting(name string) aikit.Warning {
+	return aikit.Warning{
+		Type:    "unsupported-setting",
+		Setting: name,
+		Message: name + " is not supported by the OpenAI Responses API",
+	}
 }
 
 // encodeInput converts system prompt + messages to Responses API input items.
@@ -262,6 +325,60 @@ func encodeInput(
 	return items, warnings, nil
 }
 
+// applyInputOptions applies optional wire presentation without changing the
+// default content encoding or ordering.
+func applyInputOptions(items []inputItem, opts ProviderOptions) []inputItem {
+	var split []inputItem
+	if opts.SplitUserContentParts {
+		split = make([]inputItem, 0, len(items))
+	}
+	for i := range items {
+		item := &items[i]
+		if item.Role != "" && opts.ExplicitMessageType {
+			item.Type = "message"
+		}
+		if item.Type == "function_call" || item.Type == "function_call_output" {
+			item.Status = opts.HistoryItemStatus
+		}
+		if item.Role == "user" {
+			applyImageDetail(item.Content, opts.ImageDetail)
+		}
+		if item.Type == "function_call_output" {
+			if output, ok := item.Output.([]inputPart); ok {
+				applyImageDetail(output, opts.ImageDetail)
+			}
+		}
+		if opts.SplitUserContentParts {
+			if item.Role == "user" {
+				for _, part := range item.Content {
+					copy := *item
+					copy.Content = []inputPart{part}
+					split = append(split, copy)
+				}
+			} else {
+				split = append(split, *item)
+			}
+		}
+	}
+	if opts.SplitUserContentParts {
+		return split
+	}
+	return items
+}
+
+func applyImageDetail(parts []inputPart, detail string) {
+	for i, part := range parts {
+		switch p := part.(type) {
+		case inputImageURLPart:
+			p.Detail = detail
+			parts[i] = p
+		case inputImageFileIDPart:
+			p.Detail = detail
+			parts[i] = p
+		}
+	}
+}
+
 func validatePromptCacheOptions(req llm.Request, opts ProviderOptions) error {
 	switch opts.PromptCacheMode {
 	case "", PromptCacheModeImplicit, PromptCacheModeExplicit:
@@ -280,6 +397,14 @@ func validatePromptCacheOptions(req llm.Request, opts ProviderOptions) error {
 func validateProviderOptions(req llm.Request, opts ProviderOptions) error {
 	if err := validatePDFDetail(opts.PDFDetail); err != nil {
 		return err
+	}
+	switch opts.ImageDetail {
+	case "", "auto", "low", "high":
+	default:
+		return fmt.Errorf("openai: image detail must be one of auto, low, or high, got %q", opts.ImageDetail)
+	}
+	if opts.InstructionsAsTopLevel && opts.PromptCacheInstructions {
+		return fmt.Errorf("openai: top-level instructions cannot carry a prompt cache breakpoint")
 	}
 	return validatePromptCacheOptions(req, opts)
 }
@@ -493,6 +618,7 @@ func encodeAssistantMessage(m aikit.Message) ([]inputItem, []aikit.Warning, erro
 			}
 			items = append(items, inputItem{
 				Type:      "function_call",
+				ID:        p.ItemID,
 				CallID:    p.ToolCallID,
 				Name:      p.ToolCallName,
 				Arguments: string(p.ToolCallArgs),
@@ -542,6 +668,10 @@ func encodeResponsesToolResultOutput(part aikit.ContentPart) (any, error) {
 			}
 			output = append(output, inputTextPart{Type: "input_text", Text: string(content.JSON)})
 		case aikit.ToolResultContentTypeImage:
+			if content.FileURL != "" {
+				output = append(output, inputImageURLPart{Type: "input_image", ImageURL: content.FileURL})
+				continue
+			}
 			if len(content.Data) == 0 {
 				return nil, fmt.Errorf("openai: image tool result has no data")
 			}
@@ -562,19 +692,60 @@ func encodeTools(defs []aikit.ToolDefinition, opts ProviderOptions) ([]responses
 	var tools []responsesTool
 
 	for _, d := range defs {
-		tools = append(tools, responsesTool{
+		t := responsesTool{
 			Type:        "function",
 			Name:        d.Name,
 			Description: d.Description,
 			Parameters:  d.InputSchema,
-		})
+		}
+		if d.Strict {
+			strict := true
+			t.Strict = &strict
+		}
+		tools = append(tools, t)
 	}
 
 	if opts.EnableWebSearch {
-		tools = append(tools, responsesTool{Type: "web_search_preview"})
+		toolType := opts.WebSearchToolType
+		if toolType == "" {
+			toolType = defaultWebSearchToolType
+		}
+		tools = append(tools, responsesTool{Type: toolType})
 	}
 
 	return tools, nil
+}
+
+// defaultWebSearchToolType is used when ProviderOptions.WebSearchToolType is empty.
+const defaultWebSearchToolType = "web_search_preview"
+
+// encodeToolChoice maps an aikit.ToolChoice to the Responses wire form. A nil
+// choice returns nil so the field is omitted and the API default (auto) applies.
+// A named choice must reference one of the declared function tools.
+func encodeToolChoice(tc *aikit.ToolChoice, defs []aikit.ToolDefinition) (any, error) {
+	if tc == nil {
+		return nil, nil
+	}
+	switch tc.Type {
+	case "", "auto":
+		return "auto", nil
+	case "none":
+		return "none", nil
+	case "required":
+		return "required", nil
+	case "tool":
+		if tc.ToolName == "" {
+			return nil, fmt.Errorf("openai: tool choice %q requires a tool name", tc.Type)
+		}
+		for _, d := range defs {
+			if d.Name == tc.ToolName {
+				return map[string]any{"type": "function", "name": tc.ToolName}, nil
+			}
+		}
+		return nil, fmt.Errorf("openai: tool choice names undeclared tool %q", tc.ToolName)
+	default:
+		return nil, fmt.Errorf("openai: unsupported tool choice type %q", tc.Type)
+	}
 }
 
 func encodeOutputSchema(o *llm.OutputSchema) (*textConfig, error) {

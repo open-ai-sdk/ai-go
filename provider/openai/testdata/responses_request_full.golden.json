@@ -1,0 +1,84 @@
+{
+  "include": [
+    "web_search_call.action.sources"
+  ],
+  "input": [
+    {
+      "content": [
+        {
+          "text": "be brief",
+          "type": "input_text"
+        }
+      ],
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "find the weather",
+          "type": "input_text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "max_output_tokens": 256,
+  "metadata": {
+    "k": "v"
+  },
+  "model": "gpt-test",
+  "parallel_tool_calls": false,
+  "previous_response_id": "resp_prev",
+  "prompt_cache_key": "cache-key",
+  "reasoning": {
+    "effort": "low",
+    "summary": "auto"
+  },
+  "store": false,
+  "stream": true,
+  "temperature": 0.25,
+  "text": {
+    "format": {
+      "name": "structured_output",
+      "schema": {
+        "properties": {
+          "answer": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+    }
+  },
+  "tool_choice": {
+    "name": "lookup",
+    "type": "function"
+  },
+  "tools": [
+    {
+      "description": "look something up",
+      "name": "lookup",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "q": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "type": "object"
+      },
+      "strict": true,
+      "type": "function"
+    },
+    {
+      "type": "web_search"
+    }
+  ],
+  "top_p": 0.5,
+  "user": "user-1"
+}

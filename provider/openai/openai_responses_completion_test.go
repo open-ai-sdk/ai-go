@@ -156,3 +156,25 @@ func TestResponsesRejectsAssistantImageReplay(t *testing.T) {
 		t.Fatal("expected assistant image replay to be rejected")
 	}
 }
+
+func TestResponsesCompleteMetadataIncludesAnsweringModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_9","model":"gpt-test-snapshot","status":"completed",` +
+			`"output":[{"type":"message","id":"msg_9","role":"assistant","content":[` +
+			`{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer server.Close()
+	model := NewLanguageModel("gpt-test", Config{BaseURL: server.URL + "/v1", HTTPClient: server.Client()})
+	response, err := model.Complete(
+		context.Background(),
+		llm.Request{Messages: []aikit.Message{aikit.UserMessage("q")}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, _ := response.ProviderMetadata["openai"].(map[string]any)
+	if meta["responseId"] != "resp_9" || meta["model"] != "gpt-test-snapshot" {
+		t.Fatalf("metadata = %#v", response.ProviderMetadata)
+	}
+}

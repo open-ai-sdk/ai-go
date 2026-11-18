@@ -32,6 +32,11 @@ type Config struct {
 	Timeout      time.Duration // optional; defaults to 120s
 	ChunkTimeout time.Duration // optional; per-chunk SSE read timeout (0 = disabled)
 	HTTPClient   transport.Doer
+	// Headers are optional additional request headers.
+	Headers map[string]string
+	// ResponsesPath overrides the Responses route relative to BaseURL.
+	// Empty uses "responses".
+	ResponsesPath string
 	// ImageResponseMaxBytes bounds a successful Images API response body. Zero
 	// defaults to 64 MiB; image requests use a five-minute HTTP timeout unless
 	// Timeout or HTTPClient is explicitly configured.
@@ -54,6 +59,10 @@ func (m *LanguageModel) ModelID() string { return m.modelID }
 // normalized aikit.StreamEvents. Warnings from request encoding are emitted as
 // the first event when non-empty.
 func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aikit.StreamEvent, error) {
+	var requestID string
+	ctx = transport.WithResponseObserver(ctx, func(metadata transport.ResponseMetadata) {
+		requestID = metadata.Header.Get("x-request-id")
+	})
 	apiReq, warnings, err := encodeRequest(m.modelID, req, true)
 	if err != nil {
 		return nil, fmt.Errorf("openai: encode request: %w", err)
@@ -79,10 +88,13 @@ func (m *LanguageModel) Stream(ctx context.Context, req llm.Request) (<-chan aik
 			reader *transport.SSEReader,
 			events chan<- aikit.StreamEvent,
 		) error {
-			return decodeResponsesSSEStream(
+			return decodeResponsesSSEStreamWithOptions(
 				ctx,
 				reader,
 				events,
+				requestID,
+				apiReq.emitReasoningEvents,
+				apiReq.allowMissingTerminalEvent,
 				warnings...,
 			)
 		},
@@ -103,11 +115,14 @@ func (m *LanguageModel) buildRequest(ctx context.Context, apiReq responsesReques
 	httpReq, err := m.client.responses.NewRequest(
 		ctx,
 		http.MethodPost,
-		"responses",
+		m.client.responsesPath,
 		bytes.NewReader(body),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("openai: build http request: %w", err)
+	}
+	for name, value := range m.client.headers {
+		httpReq.Header.Set(name, value)
 	}
 	return httpReq, nil
 }

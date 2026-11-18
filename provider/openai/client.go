@@ -35,6 +35,8 @@ type Client struct {
 	timeout               time.Duration
 	chunkTimeout          time.Duration
 	imageResponseMaxBytes int64
+	headers               map[string]string
+	responsesPath         string
 	streamDoer            transport.Doer
 	responses             *provider.Client[providerPolicy]
 	uploads               *provider.Client[providerPolicy]
@@ -90,6 +92,10 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 	if imageResponseMaxBytes < 0 || imageResponseMaxBytes == int64(^uint64(0)>>1) {
 		return nil, fmt.Errorf("openai: image response max bytes must be positive")
 	}
+	responsesPath := cfg.ResponsesPath
+	if responsesPath == "" {
+		responsesPath = "responses"
+	}
 	policy := providerPolicy{apiKey: cfg.APIKey, baseURL: baseURL}
 	responses, err := provider.NewClient(policy, provider.ClientConfig{
 		Headers:    http.Header{"Content-Type": []string{"application/json"}},
@@ -118,6 +124,8 @@ func newClient(cfg Config, requireAPIKey bool) (*Client, error) {
 		timeout:               timeout,
 		chunkTimeout:          cfg.ChunkTimeout,
 		imageResponseMaxBytes: imageResponseMaxBytes,
+		headers:               cloneHeaders(cfg.Headers),
+		responsesPath:         responsesPath,
 		streamDoer:            streamDoer,
 		responses:             responses,
 		uploads:               uploads,
@@ -153,3 +161,14 @@ func (Client) String() string { return "openai.Client{}" }
 
 // GoString provides the same credential-safe representation for %#v.
 func (c Client) GoString() string { return c.String() }
+
+func cloneHeaders(headers map[string]string) map[string]string {
+	if headers == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(headers))
+	for name, value := range headers {
+		cloned[name] = value
+	}
+	return cloned
+}

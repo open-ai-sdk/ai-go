@@ -23,6 +23,12 @@ type ImageOptions struct {
 	// Mask optionally supplies an inline mask for an edit. URL-only masks are
 	// rejected so this package never fetches caller-controlled URLs.
 	Mask *llm.ImageInput `json:"mask"`
+	// ResponseFormat overrides the automatic response_format selection. A
+	// pointer to "" omits the field, including for custom model identifiers.
+	ResponseFormat *string `json:"responseFormat"`
+	// FirstImageOnly selects the first row with b64_json and ignores other
+	// rows. The default validates and returns every response image.
+	FirstImageOnly bool `json:"firstImageOnly"`
 }
 
 // ProviderName identifies the provider-options key.

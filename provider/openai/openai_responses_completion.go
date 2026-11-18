@@ -25,6 +25,7 @@ type ResponsesResponse struct {
 	Output            []ResponsesOutputItem      `json:"output"`
 	Usage             *ResponsesUsage            `json:"usage,omitempty"`
 	Raw               json.RawMessage            `json:"-"`
+	RequestID         string                     `json:"-"`
 }
 
 type ResponsesIncompleteDetail struct {
@@ -76,6 +77,10 @@ func (m *LanguageModel) Complete(ctx context.Context, req llm.Request) (*llm.Com
 	}
 	ctx, cancel := context.WithTimeout(ctx, m.client.timeout)
 	defer cancel()
+	var requestID string
+	ctx = transport.WithResponseObserver(ctx, func(metadata transport.ResponseMetadata) {
+		requestID = metadata.Header.Get("x-request-id")
+	})
 	apiReq, warnings, err := encodeRequest(m.modelID, req, false)
 	if err != nil {
 		return nil, llm.WrapCompletionError(llm.CompletionErrorRequest, "complete", "openai", err)
@@ -106,6 +111,7 @@ func (m *LanguageModel) Complete(ctx context.Context, req llm.Request) (*llm.Com
 		return nil, llm.WrapCompletionError(llm.CompletionErrorJSON, "complete", "openai", err)
 	}
 	native.Raw = append(json.RawMessage(nil), raw...)
+	native.RequestID = requestID
 	response, err := normalizeResponsesResponse(&native, warnings)
 	if err != nil {
 		return nil, llm.WrapCompletionError(llm.CompletionErrorResponse, "complete", "openai", err)
@@ -134,12 +140,14 @@ func normalizeResponsesResponse(
 	if native.Status == "incomplete" && native.IncompleteDetails != nil && native.IncompleteDetails.Reason != "" {
 		rawFinishReason = native.IncompleteDetails.Reason
 	}
+	metadata := responsesNativeMetadata(native.ID, native.Model)
+	if native.RequestID != "" {
+		metadata["requestID"] = native.RequestID
+	}
 	response := &llm.CompletionResponse{
 		Message: state.message, MessageID: state.messageID, Text: state.text, Reasoning: state.reasoning,
 		FinishReason:    mapResponsesFinishReason(rawFinishReason, hasToolCall(state.message.Content)),
-		RawFinishReason: rawFinishReason, ProviderMetadata: map[string]any{
-			"openai": map[string]any{"responseId": native.ID},
-		},
+		RawFinishReason: rawFinishReason, ProviderMetadata: map[string]any{"openai": metadata},
 		Warnings: append([]aikit.Warning(nil), warnings...), Files: state.files, RawResponse: native,
 	}
 	if native.Usage != nil {
@@ -184,6 +192,7 @@ func (state *responsesNormalization) appendItem(item ResponsesOutputItem) error 
 	case "function_call":
 		state.message.Content = append(state.message.Content, aikit.ContentPart{
 			Type: aikit.ContentPartTypeToolCall, ToolCallID: item.CallID,
+			ItemID:       item.ID,
 			ToolCallName: item.Name,
 			ToolCallArgs: append(json.RawMessage(nil), item.Arguments...),
 		})

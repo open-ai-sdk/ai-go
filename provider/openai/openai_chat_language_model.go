@@ -39,6 +39,11 @@ func (chatBackend) RewriteRequest(
 	if opts.User != "" {
 		body["user"] = opts.User
 	}
+	if opts.ParallelToolCalls != nil {
+		if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
+			body["parallel_tool_calls"] = *opts.ParallelToolCalls
+		}
+	}
 	if opts.StrictJSONSchema != nil {
 		if format, ok := body["response_format"].(map[string]any); ok {
 			if schema, ok := format["json_schema"].(map[string]any); ok {

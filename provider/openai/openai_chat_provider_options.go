@@ -26,6 +26,10 @@ type ChatProviderOptions struct {
 	// Set false for schemas that cannot satisfy OpenAI strict-schema constraints
 	// (e.g., not all properties in required, or additionalProperties not false).
 	StrictJSONSchema *bool `json:"strictJsonSchema"`
+
+	// ParallelToolCalls sets parallel_tool_calls on requests that declare
+	// tools. Nil omits the field and keeps the API default.
+	ParallelToolCalls *bool `json:"parallelToolCalls"`
 }
 
 // ProviderName identifies the key used in llm.Request.ProviderOptions.

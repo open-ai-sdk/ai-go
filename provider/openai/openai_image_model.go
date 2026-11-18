@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -86,7 +87,11 @@ func (model *ImageModel) Generate(
 	if err != nil {
 		return nil, err
 	}
-	return parseImageResponse(body, options.OutputFormat)
+	result, err := parseImageResponseWithOptions(body, options.OutputFormat, options.FirstImageOnly)
+	if result != nil {
+		result.ResponseHeaders = response.Header.Clone()
+	}
+	return result, err
 }
 
 type imageAPIRequest struct {
@@ -113,6 +118,9 @@ func (model *ImageModel) apiRequest(request llm.GenerateImageRequest, options Im
 	}
 	if !isGPTImageModel(model.modelID) {
 		apiRequest.ResponseFormat = "b64_json"
+	}
+	if options.ResponseFormat != nil {
+		apiRequest.ResponseFormat = *options.ResponseFormat
 	}
 	return apiRequest
 }
@@ -213,9 +221,16 @@ func readImageResponse(body io.Reader, maxBytes int64) ([]byte, error) {
 }
 
 func writeImagePart(writer *multipart.Writer, field string, index int, image llm.ImageInput) error {
-	filename := fmt.Sprintf("%s-%d%s", field, index+1, mediaExtension(image.MediaType))
+	filename := image.FileName
+	if filename == "" {
+		filename = fmt.Sprintf("%s-%d%s", field, index+1, mediaExtension(image.MediaType))
+	}
 	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, field, filename))
+	disposition := fmt.Sprintf(`form-data; name=%q; filename=%q`, field, filename)
+	if image.FileName != "" {
+		disposition = mime.FormatMediaType("form-data", map[string]string{"name": field, "filename": filename})
+	}
+	header.Set("Content-Disposition", disposition)
 	header.Set("Content-Type", normalizedMediaType(image.MediaType))
 	part, err := writer.CreatePart(header)
 	if err != nil {
@@ -387,16 +402,20 @@ func mediaExtension(mediaType string) string {
 type imageAPIResponse struct {
 	OutputFormat string `json:"output_format"`
 	Data         []struct {
-		B64JSON string `json:"b64_json"`
+		B64JSON *string `json:"b64_json"`
 	} `json:"data"`
-	Usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage json.RawMessage `json:"usage"`
 }
 
 func parseImageResponse(body []byte, requestedFormat string) (*llm.GenerateImageResult, error) {
+	return parseImageResponseWithOptions(body, requestedFormat, false)
+}
+
+func parseImageResponseWithOptions(
+	body []byte,
+	requestedFormat string,
+	firstOnly bool,
+) (*llm.GenerateImageResult, error) {
 	var response imageAPIResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("openai-image: unmarshal response: %w", err)
@@ -408,31 +427,38 @@ func parseImageResponse(body []byte, requestedFormat string) (*llm.GenerateImage
 	}
 	mediaType := outputMediaType(responseFormat)
 	for index, item := range response.Data {
-		if strings.TrimSpace(item.B64JSON) == "" {
+		if item.B64JSON == nil || (!firstOnly && strings.TrimSpace(*item.B64JSON) == "") {
+			if firstOnly {
+				continue
+			}
 			return nil, fmt.Errorf("openai-image: image[%d] is missing b64_json", index)
 		}
-		decoded, err := decodeImageBase64(item.B64JSON)
+		decoded, err := decodeImageBase64(*item.B64JSON)
 		if err != nil {
 			return nil, fmt.Errorf("openai-image: decode image[%d]: %w", index, err)
 		}
 		result.Images = append(result.Images, llm.GeneratedImage{Data: decoded, MediaType: mediaType})
+		if firstOnly {
+			break
+		}
 	}
 	if len(result.Images) == 0 {
 		return nil, fmt.Errorf("openai-image: response contained no image data")
 	}
-	if response.Usage != nil {
+	if len(response.Usage) != 0 && string(response.Usage) != "null" {
 		var raw map[string]any
-		var envelope struct {
-			Usage map[string]any `json:"usage"`
-		}
-		if json.Unmarshal(body, &envelope) == nil {
-			raw = envelope.Usage
-		}
-		result.Usage = &aikit.Usage{
-			InputTokens:  response.Usage.InputTokens,
-			OutputTokens: response.Usage.OutputTokens,
-			TotalTokens:  response.Usage.TotalTokens,
-			Raw:          raw,
+		if json.Unmarshal(response.Usage, &raw) == nil && raw != nil {
+			usage := &aikit.Usage{Raw: raw}
+			if value, ok := raw["input_tokens"].(float64); ok {
+				usage.InputTokens = int(value)
+			}
+			if value, ok := raw["output_tokens"].(float64); ok {
+				usage.OutputTokens = int(value)
+			}
+			if value, ok := raw["total_tokens"].(float64); ok {
+				usage.TotalTokens = int(value)
+			}
+			result.Usage = usage
 		}
 	}
 	return result, nil

@@ -35,6 +35,32 @@ const (
 //	    ReasoningEffort:    "medium",
 //	})
 type ProviderOptions struct {
+	// InstructionsAsTopLevel sends Request.Instructions as instructions instead
+	// of a system input message.
+	InstructionsAsTopLevel bool `json:"instructionsAsTopLevel"`
+	// TrimInstructions removes surrounding Unicode whitespace from
+	// Request.Instructions before encoding; empty results are omitted.
+	// Message history and the caller-owned request remain unchanged.
+	TrimInstructions bool `json:"trimInstructions"`
+	// ExplicitMessageType emits type:message on role-based history items.
+	ExplicitMessageType bool `json:"explicitMessageType"`
+	// SplitUserContentParts emits a separate user message for each content part.
+	SplitUserContentParts bool `json:"splitUserContentParts"`
+	// ImageDetail supplies detail for user and tool-result image inputs.
+	// Empty preserves the default omission.
+	ImageDetail string `json:"imageDetail"`
+	// IncludeEncryptedReasoning requests reasoning.encrypted_content regardless
+	// of the Store setting.
+	IncludeEncryptedReasoning bool `json:"includeEncryptedReasoning"`
+	// ToolPolicyWithoutTools permits explicit tool choice and parallel-call
+	// policy even when no tool definitions are supplied.
+	ToolPolicyWithoutTools bool `json:"toolPolicyWithoutTools"`
+	// HistoryItemStatus supplies status on function calls and their outputs.
+	// Empty preserves the default omission.
+	HistoryItemStatus string `json:"historyItemStatus"`
+	// OutputSchemaName overrides the default structured_output schema name.
+	OutputSchemaName string `json:"outputSchemaName"`
+
 	// PreviousResponseID continues a prior Responses API response by id.
 	// When set, the new request appends to that conversation thread.
 	PreviousResponseID string `json:"previousResponseId"`
@@ -47,8 +73,29 @@ type ProviderOptions struct {
 	// Valid values: "auto", "concise", "detailed".
 	ReasoningSummary string `json:"reasoningSummary"`
 
-	// EnableWebSearch enables OpenAI's built-in web_search_preview tool.
+	// EmitReasoningEvents preserves source reasoning item IDs on deltas and
+	// emits a terminal summary for each completed reasoning item. The default
+	// retains legacy reasoning deltas without IDs or terminal summary events.
+	// This controls local stream normalization, not the request wire body.
+	EmitReasoningEvents bool `json:"emitReasoningEvents"`
+
+	// AllowMissingTerminalEvent restores legacy delta-only stream EOF behavior.
+	// By default, EOF without a terminal Responses event is a typed error.
+	AllowMissingTerminalEvent bool `json:"allowMissingTerminalEvent"`
+
+	// EnableWebSearch enables OpenAI's built-in web search tool. The tool type
+	// defaults to "web_search_preview"; see WebSearchToolType.
 	EnableWebSearch bool `json:"enableWebSearch"`
+
+	// WebSearchToolType overrides the built-in web search tool type sent when
+	// EnableWebSearch is true (for example "web_search"). Empty uses
+	// "web_search_preview". Endpoints that proxy the Responses API may accept
+	// only one of the two spellings.
+	WebSearchToolType string `json:"webSearchToolType"`
+
+	// ParallelToolCalls sets parallel_tool_calls when tools are declared or
+	// ToolPolicyWithoutTools is enabled. Nil keeps the API default.
+	ParallelToolCalls *bool `json:"parallelToolCalls"`
 
 	// IncludeSources requests that web search sources be included in the
 	// response metadata. Only meaningful when EnableWebSearch is true.
