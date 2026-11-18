@@ -354,13 +354,21 @@ goroutine and never blocks the caller.
 | Constant | Carries |
 |---|---|
 | `StreamEventTextDelta` | `TextDelta`, `ThoughtSignature` |
-| `StreamEventReasoningDelta` | `TextDelta`, `ThoughtSignature` |
+| `StreamEventReasoningDelta` | `TextDelta`, `ThoughtSignature`, optional `ReasoningID` |
 | `StreamEventToolCallDelta` | `ToolCallIndex`, `ToolCallID`, `ToolCallName`, `ToolCallArgsDelta` |
 | `StreamEventUsage` | `Usage` — may be reported across several events, and may arrive after finish |
 | `StreamEventSource` | `Source` |
 | `StreamEventFileDelta` | `FileData`, `FileMediaType` |
 | `StreamEventFinish` | `MessageID`, `FinishReason`, `RawFinishReason`, `ProviderMetadata`, `Warnings` |
 | `StreamEventError` | `Error` — surfaced through the sequence's error half, not as an event |
+| `StreamEventReasoningSummary` | `ReasoningID`, `ReasoningSummary` — opt-in completed public reasoning summary |
+| `StreamEventRetry` | `Error` — informational cause at an opt-in retry boundary, not a terminal failure |
+
+Reasoning item IDs are separate from message and tool-call IDs: nil means the
+provider omitted the ID, while a pointer to `""` preserves an explicit empty ID.
+OpenAI's `EmitReasoningEvents` enables item IDs and terminal summaries;
+`RetryOptions.EmitRetryEvents` enables ordered attempt boundaries. Both default
+off. At a retry boundary, consumers own resetting any provisional attempt state.
 
 `aikit.StepEventType` — one multi-turn agent run:
 

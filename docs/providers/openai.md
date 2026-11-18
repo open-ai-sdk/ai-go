@@ -66,6 +66,91 @@ content, when `max_output_tokens` is exhausted during reasoning. In that case
 inspect `response.FinishReason`, usage, and `native.IncompleteDetails`; increase
 the output budget or reduce reasoning effort when visible output is required.
 
+## Tools, tool choice, and web search
+
+`llm.Request.ToolChoice` reaches the Responses request body: `auto`, `none`,
+and `required` are sent as strings and a named choice as
+`{"type":"function","name":"..."}`. A named choice must refer to a declared
+tool, and an unknown choice type is an error rather than a silent drop. Nil
+omits the field. `tool_choice` and `parallel_tool_calls` are sent only when the
+request declares tools, unless `ToolPolicyWithoutTools` is enabled.
+
+```go
+runner := assistant.Runner().With(openai.ProviderOptions{
+  ParallelToolCalls: ptr(false), // nil keeps the API default
+})
+```
+
+`aikit.ToolDefinition.Strict` sends `strict: true` on the function tool. The
+schema must already satisfy strict-mode rules; `tool.Strictify` rewrites a raw
+schema to comply. `ChatProviderOptions.ParallelToolCalls` does the same for
+Chat Completions.
+
+`ProviderOptions.EnableWebSearch` adds OpenAI's built-in web search tool. The
+tool type defaults to `web_search_preview`; set `WebSearchToolType` (for
+example `"web_search"`) for endpoints that expect the other spelling. Settings
+the Responses API has no field for (`TopK`, `Seed`, `StopSequences`) produce
+`unsupported-setting` warnings instead of being dropped silently.
+
+The finish event's `ProviderMetadata["openai"]` carries `responseId`, `model`,
+`requestID` (when the server supplies `x-request-id`), and `rawResponse`
+(`json.RawMessage`, the terminal Responses payload). This includes unknown
+provider fields without intercepting the HTTP body. Non-streaming `Complete`
+results carry the identifiers in metadata and expose exact JSON plus `RequestID`
+on `ResponsesResponse`. Tool-call delta events expose the native history item
+identifier at `ProviderMetadata["openai"]["itemID"]`; completed tool-call content
+retains it as `aikit.ContentPart.ItemID`.
+
+## Optional Responses wire controls
+
+All presentation controls below are opt-in `openai.ProviderOptions`; zero
+values preserve existing request encoding:
+
+| Option | Behavior |
+| --- | --- |
+| `InstructionsAsTopLevel` | Send `Request.Instructions` as top-level `instructions`, not a system message |
+| `TrimInstructions` | Trim surrounding Unicode whitespace from `Request.Instructions` and omit blank results; history messages remain unchanged |
+| `ExplicitMessageType` | Include `type: "message"` on role-based inputs |
+| `SplitUserContentParts` | Emit one user message per content part, preserving order |
+| `ImageDetail` | Set user and nested tool-result image detail (`auto`, `low`, or `high`); empty omits it |
+| `IncludeEncryptedReasoning` | Include `reasoning.encrypted_content`, independently of `Store` |
+| `ToolPolicyWithoutTools` | Send explicitly supplied tool choice/parallel policy without tool definitions |
+| `HistoryItemStatus` | Set status on replayed function calls and outputs, e.g. `completed` |
+| `OutputSchemaName` | Override a JSON schema's name |
+
+Schema names otherwise use `llm.OutputSchema.Name`, falling back to
+`structured_output`. Function-call history uses `ContentPart.ItemID` for `id`
+and `ToolCallID` for `call_id`; they are separate identifiers.
+Top-level instructions cannot carry the per-part prompt cache breakpoint and
+cannot be combined with `PromptCacheInstructions`.
+
+`EmitReasoningEvents` is a separate, default-off stream presentation option. It
+preserves nullable source item IDs on reasoning deltas and emits one terminal
+`StreamEventReasoningSummary` per completed item. Only nonblank `summary_text`
+blocks are retained, trimmed and joined with two newlines; encrypted/redacted
+blocks are never exposed as summaries. Part completion alone is not an item
+terminal. This option does not alter the provider request body.
+
+Responses streams require a terminal response event. EOF or `[DONE]` without
+one produces `*aikit.MissingTerminalEventError`, also detectable with
+`errors.Is(err, io.ErrUnexpectedEOF)`. Existing retry middleware handles it only
+before commitment. Set `AllowMissingTerminalEvent: true` explicitly for a
+delta-only legacy endpoint. `response.failed` is an API error, never a successful
+finish. Neither local decoder option is sent in the request body.
+
+`Config.Headers` supplies extra request headers. `Config.ResponsesPath`
+overrides the route relative to `BaseURL` for both `Stream` and `Complete`;
+empty uses `responses`. For example, a base of `https://api.example.org` and
+path `custom/v1/responses` targets that exact route.
+
+Both top-level SSE errors (`{"type":"error","code":...,"message":...}`) and
+nested `error` objects produce `*aikit.APIError` with `StatusCode == 0`.
+`server_error` is retryable; `invalid_request_error` is not. Parsed error code,
+message, and request ID remain available. Use
+`transport.WithErrorBodyCapture(ctx)` to retain the exact SSE error JSON in
+`APIError.RawBody`; raw errors and successful responses may contain sensitive
+data and must be redacted before logging.
+
 ## Prompt caching
 
 For GPT-5.6 and later Responses models, use `PromptCacheKey` with a stable,

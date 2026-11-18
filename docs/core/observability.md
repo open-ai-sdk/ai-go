@@ -43,4 +43,10 @@ dependencies outside the core runtime and provider packages. Pass the adapter
 to `Builder.Tracer` or `Runner.Tracer`; package `ai` has no Agent tracing
 options or forwarding API.
 
+Model-call spans carry OpenTelemetry `gen_ai.*` attributes: request and
+response model, response id, finish reasons, and input/output tokens, plus
+cache-read, cache-creation, and reasoning token counts when non-zero. The
+response id and answering model are read from the provider metadata on the
+finish event. See the `otelagent` README for the exact keys.
+
 See [Agent Runner](/core/agent-runner) for the Runner lifecycle and hook ordering.

@@ -189,3 +189,24 @@ Tool result content appears in `Result`, the transcript, and the next model
 request according to provider capability. Use [Hooks](/core/hooks) to audit or
 steer tool calls. In particular, `ToolResultHook` can inspect immutable raw
 execution facts while separately changing the model presentation.
+
+## Strict schemas from raw JSON Schema
+
+`tool.StrictSchema[T]` builds a strict schema from a Go type. For a schema that
+only exists as JSON (for example from MCP or a dynamic tool), `tool.Strictify`
+rewrites it to OpenAI strict-mode shape: every object is closed
+(`additionalProperties: false`), every property is required with optional
+fields made nullable, `$ref`s are inlined, and unsupported keywords are
+stripped. It returns a `*tool.StrictifyError` when a violation remains that no
+rewrite can fix (for example an object without properties); use
+`tool.StrictifyWithReport` to receive the violations instead. The input is not
+mutated. Set `aikit.ToolDefinition.Strict` to send `strict: true` to providers
+that support it.
+
+`tool.StrictifyWithOptions` accepts `StrictifyOptions` for wire compatibility:
+`PreserveRequiredOrder` keeps an explicit complete `required` array, including
+inside referenced and nested schemas; incomplete or invalid arrays are still
+synthesized in sorted order. `AssumeAllPropertiesRequired` leaves property
+nullability unchanged while requiring all properties, rather than making
+previously omitted fields nullable. Both default to false, so `Strictify` and
+`StrictifyWithReport` retain their established behavior. Inputs are never mutated.

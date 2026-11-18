@@ -53,6 +53,10 @@ as `CompletionResponse.MessageID` and `Message.ID`.
 ordered explicit text, JSON, or image content. JSON-looking text stays text;
 call `JSONToolResultContent` or `ParseToolResultJSON` to opt into structured
 JSON semantics.
+`ImageToolResultContent` copies inline bytes; `ImageURLToolResultContent` keeps
+an external image reference in `ToolResultContent.FileURL`. OpenAI Responses
+accepts both sources inside ordered rich tool results, without fetching the URL
+in the SDK. Nested image detail remains an explicit provider option.
 
 ## Ownership
 

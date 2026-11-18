@@ -35,6 +35,7 @@ const docsSidebar = [
       { text: 'Tools', link: '/core/tools' },
       { text: 'Structured output', link: '/core/structured-output' },
       { text: 'Hooks', link: '/core/hooks' },
+      { text: 'Middleware', link: '/core/middleware' },
       { text: 'Observability', link: '/core/observability' },
     ],
   },
@@ -49,6 +50,8 @@ const docsSidebar = [
         items: [
           { text: 'Overview', link: '/providers/' },
           { text: 'OpenAI', link: '/providers/openai' },
+          { text: 'OpenRouter', link: '/providers/openrouter' },
+          { text: 'Kie language', link: '/providers/kie-language' },
           { text: 'Other providers', link: '/providers/other-providers' },
         ],
       },

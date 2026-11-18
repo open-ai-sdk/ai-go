@@ -10,6 +10,102 @@ optional `otelagent` package, which adapts OpenTelemetry to the
 
 ## Unreleased
 
+### Provider parity and runtime middleware
+
+- **Responses terminal correctness:** EOF (including a lone `[DONE]`) without a
+  terminal response now returns `*aikit.MissingTerminalEventError`, which unwraps
+  to `io.ErrUnexpectedEOF` for pre-commit retry policies. The explicit
+  `AllowMissingTerminalEvent` option restores legacy delta-only behavior.
+  A `response.failed` envelope now produces its typed API error, not a successful
+  unknown finish; diagnostic bodies remain opt-in.
+- **Optional reasoning lifecycle:** Responses `EmitReasoningEvents` preserves
+  nullable reasoning-item IDs and emits deduplicated completed public summaries,
+  excluding encrypted/redacted blocks. `StreamEventReasoningSummary` and
+  `StreamEventRetry` extend the normalized vocabulary without renumbering
+  existing event constants.
+- **Optional retry lifecycle:** `RetryOptions.CommitOn` selects the commitment
+  boundary; `EmitRetryEvents` forwards provisional events and ordered retry
+  boundaries after cancelling/joining the old producer. Startup failures then
+  arrive on the channel. Both defaults preserve the existing buffered policy.
+- **Rich image results:** `ImageURLToolResultContent` supplies external image
+  references for Responses tool results; the existing optional `ImageDetail`
+  now also applies to nested images. Fixed `ContentPart.Clone` losing rich
+  tool-result payloads instead of copying them independently.
+- **Optional instruction normalization:** OpenAI Responses
+  `ProviderOptions.TrimInstructions` trims surrounding Unicode whitespace from
+  `Request.Instructions` and omits blank instructions, for either top-level or
+  system-message placement. History messages and the original request are
+  unchanged; the default continues to preserve instructions verbatim.
+- **OpenAI Responses request parity:** `llm.Request.ToolChoice` is now encoded
+  (`auto`, `none`, `required`, or a named function; an unknown type or an
+  undeclared named tool is an error instead of being dropped). Added
+  `ProviderOptions.ParallelToolCalls` (also `ChatProviderOptions`),
+  `aikit.ToolDefinition.Strict` (sends `strict: true` on function tools; also
+  honored by `openaicompat`), and `ProviderOptions.WebSearchToolType` (default
+  stays `web_search_preview`). `TopK` and `Seed` now raise
+  `unsupported-setting` warnings like `StopSequences`. Request snapshot tests
+  pin the complete wire body and fail when `llm.Request` gains an unhandled
+  field. The finish event and `Complete` results report the answering model as
+  `ProviderMetadata["openai"]["model"]` next to `responseId`.
+- **OpenAI-compatible stream metadata:** `StreamChunk` keeps `id`, `model`, and
+  an `error` object; `Usage.Raw` retains the complete provider usage object
+  (for example `cost` and `cost_details`) alongside `cached_tokens` and
+  `reasoning_tokens`; finish events carry
+  `ProviderMetadata[<provider>]{responseId, model}`. An in-stream
+  `data: {"error":...}` now ends the stream with an error instead of being
+  ignored.
+- **`provider/openrouter`:** new OpenAI-compatible provider with typed
+  `ProviderOptions` (reasoning, provider routing, fallback `models`,
+  `transforms`, `usage.include`, `parallel_tool_calls`), attribution headers,
+  `response_format` json_schema, and `openrouter.Cost(usage)` for the
+  provider-reported `usage.cost`. Recorded SSE fixtures cover keepalive
+  comments, tool-call deltas, and mid-stream errors.
+- **Middleware:** `llm.WithStallTimeout` (the timer resets only on decoded
+  events, never on SSE keepalive bytes; reports `*llm.StallTimeoutError`) and
+  `llm.WithRetry` (retries only before the first content event, never after a
+  provider rejection, context-aware). Both have no default durations or counts.
+  The core still performs no implicit retries.
+- **`tool.Strictify`:** rewrites raw JSON Schema to OpenAI strict mode, with
+  `StrictifyWithReport`, `StrictViolations`, and empty-object coercion helpers.
+  `StrictifyWithOptions` optionally preserves complete explicit required-array
+  order and treats all input properties as required without adding nullability;
+  defaults and input immutability remain unchanged.
+- **Embeddings:** `openaicompat.NewEmbeddingModel` implements
+  `llm.EmbeddingModel` for OpenAI-compatible `/embeddings` endpoints (works with
+  Ollama), with `Dimensions`, `BatchSize`, and `EmbedBatchWithUsage`.
+- **Kie:** `Provider.CreateTask` / `TaskStatus` split task creation from
+  polling (`TaskRecord`, `TaskState`); model ids without a typed builder are
+  accepted through `ImageOptions.RawInput`; new `llm.VideoModel`,
+  `llm.VideoProvider`, and `Provider.Video` (with `SubmitVideo` /
+  `VideoStatus`).
+- **OpenTelemetry:** model-call spans carry `gen_ai.request.model`,
+  `gen_ai.response.model`, `gen_ai.response.id`,
+  `gen_ai.response.finish_reasons`, input/output tokens, and cache-read,
+  cache-creation, and reasoning token counts.
+- **Optional wire controls:** Responses supports top-level instructions,
+  explicit/split messages, image detail, encrypted reasoning inclusion, tool
+  policy without definitions, history item status and schema name overrides.
+  `aikit.ContentPart.ItemID` retains native history identifiers;
+  `llm.OutputSchema.Name` names structured output without modifying its schema.
+  All presentation controls preserve existing defaults.
+- **Responses diagnostics:** terminal events retain native response JSON and
+  request IDs; top-level and nested SSE errors are decoded consistently with
+  no invented HTTP status. Status-less `server_error` is transient, while
+  `invalid_request_error` cannot bypass retry rejection guards.
+- **Transport diagnostics:** composable response-header observers and explicit
+  error-body capture expose provider diagnostics without adding raw bodies to
+  printable errors or retaining them by default.
+- **Additional provider capabilities:** OpenRouter Responses and image models;
+  Kie Responses/chat language models accepting JSON or nonstream SSE replies;
+  caller-configured language paths, native tools and named JSON schemas.
+- **Media and embeddings controls:** caller-provided image upload filenames,
+  opt-in image response-format/first-result controls, compatible embedding
+  encoding-format omission and index handling; durable Kie raw job replies
+  retain bounded acceptance diagnostics. Generic allowlisted, DNS-pinned result
+  downloads and image downloads now belong to the SDK.
+  Typed image/video receipt decoders preserve numeric task failure codes,
+  reported credits and rejected-versus-ambiguous durable acceptance outcomes.
+
 ### Provider registry and image generation
 
 - Added additive `llm.Provider`, `llm.LanguageProvider`, and
