@@ -339,7 +339,8 @@ func TestMessagesSnapshotPreservesUnmodelledFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	if frame := frameOfType(t, output.String(), "MESSAGES_SNAPSHOT"); !strings.Contains(
-		frame, `"parts":[{"type":"text","content":"hi"}]`) {
+		frame, `"parts":[{"type":"text","content":"hi"}]`,
+	) {
 		t.Errorf("unmodelled fields were dropped: %s", frame)
 	}
 }
@@ -349,7 +350,8 @@ func TestMessagesSnapshotPreservesUnmodelledFields(t *testing.T) {
 // conforming client would clobber its own state with it.
 func TestNoStateKeyEchoesNoSnapshot(t *testing.T) {
 	request, err := (decoder{}).Decode(strings.NewReader(
-		`{"threadId":"t1","runId":"run_1","messages":[{"id":"m1","role":"user","content":"hi"}]}`))
+		`{"threadId":"t1","runId":"run_1","messages":[{"id":"m1","role":"user","content":"hi"}]}`,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

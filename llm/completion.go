@@ -210,9 +210,17 @@ func (b CompletionRequestBuilder) Send(ctx context.Context) (*CompletionResponse
 	if err != nil {
 		return nil, err
 	}
-	for range stream.Events() {
+	var streamErr error
+	for _, eventErr := range stream.Events() {
+		if eventErr != nil {
+			streamErr = eventErr
+			break
+		}
 	}
 	response, err := stream.Response()
+	if err == nil {
+		err = streamErr
+	}
 	if err != nil {
 		return response, wrapCompletionError(err, CompletionErrorKindProvider, "collect")
 	}

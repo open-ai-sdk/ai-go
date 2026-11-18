@@ -594,7 +594,8 @@ func TestApproval_ResumedTransformOrCompleteFailurePreservesResultAndStopsModel(
 				Model: model,
 				Tools: testToolSet(
 					[]ToolDefinition{{Name: "deleteFile", ToModelOutput: tt.transform}},
-					exec),
+					exec,
+				),
 
 				ToolApproval: requireApproval("deleteFile"), ApprovalKey: approvalTestKey,
 				ApprovalReplayGuard: tt.guard,
