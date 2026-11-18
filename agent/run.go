@@ -144,11 +144,16 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error 
 		// dispatch to know NoopTracer discards it), so skipping the literal
 		// here — not just relying on NoopTracer's no-op body — is what keeps
 		// the disabled path allocation-free.
-		var spanAttrs []tracing.Attr
+		var spanAttrs, modelAttrs []tracing.Attr
 		if tracingEnabled {
 			spanAttrs = []tracing.Attr{
 				{Key: "ai.step_number", Value: step},
 				{Key: "ai.model_id", Value: model.ModelID()},
+			}
+			modelAttrs = []tracing.Attr{
+				{Key: "ai.step_number", Value: step},
+				{Key: "ai.model_id", Value: model.ModelID()},
+				{Key: attrGenAIRequestModel, Value: model.ModelID()},
 			}
 		}
 		stepCtx, stepSpan := tracer.Start(stepCtx, "ai.step", spanAttrs...)
@@ -161,7 +166,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error 
 		// stayed off the heap once they crossed a return. Keeping it inline
 		// keeps the disabled path's allocation count within one of the
 		// pre-instrumentation baseline.
-		modelCtx, modelSpan := tracer.Start(stepCtx, "ai.model_call", spanAttrs...)
+		modelCtx, modelSpan := tracer.Start(stepCtx, "ai.model_call", modelAttrs...)
 		if r.traceContent {
 			modelSpan.SetAttributes(
 				tracing.Attr{Key: "ai.prompt.messages", Value: marshalMessagesForTrace(req.Messages)},
@@ -201,6 +206,7 @@ func runLoop(ctx context.Context, out chan<- StepEvent, params runConfig) error 
 		cancelStep()
 		if tracingEnabled {
 			modelSpan.SetAttributes(stepAttrs(sr)...)
+			modelSpan.SetAttributes(modelCallAttrs(sr)...)
 		}
 		if r.traceContent {
 			modelSpan.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})

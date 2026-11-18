@@ -62,6 +62,7 @@ func emitStructuredOutput(
 		startAttrs = []tracing.Attr{
 			{Key: "ai.model_id", Value: model.ModelID()},
 			{Key: "ai.structured_output", Value: true},
+			{Key: attrGenAIRequestModel, Value: model.ModelID()},
 		}
 	}
 	modelCtx, span := r.tracer.Start(ctx, "ai.model_call", startAttrs...)
@@ -90,6 +91,9 @@ func emitStructuredOutput(
 	sr, interrupted := consumeStructuredStreamSilent(r, eventCh, span)
 	if interrupted {
 		return false
+	}
+	if r.tracingEnabled {
+		span.SetAttributes(modelCallAttrs(sr)...)
 	}
 	if r.traceContent {
 		span.SetAttributes(tracing.Attr{Key: "ai.completion.text", Value: sr.text})

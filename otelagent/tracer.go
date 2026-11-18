@@ -56,8 +56,12 @@ func keyValues(attrs []agent.Attr) []attribute.KeyValue {
 			values[index] = attribute.Int(attr.Key, value)
 		case int64:
 			values[index] = attribute.Int64(attr.Key, value)
+		case float64:
+			values[index] = attribute.Float64(attr.Key, value)
 		case bool:
 			values[index] = attribute.Bool(attr.Key, value)
+		case []string:
+			values[index] = attribute.StringSlice(attr.Key, value)
 		default:
 			values[index] = attribute.String(attr.Key, fmt.Sprint(value))
 		}
