@@ -54,6 +54,10 @@ jobs:
         run: vp exec playwright install --with-deps chromium
         working-directory: conformance
 
+      - name: Warm Go cache for live-server conformance
+        run: go build -o "$RUNNER_TEMP/ai-go-conformance-server" ../examples/chat-server
+        working-directory: conformance
+
       - name: Run schema, semantic, and live-server gates
         run: bun run test
         working-directory: conformance
