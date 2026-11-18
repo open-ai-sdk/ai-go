@@ -24,6 +24,14 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Restore compiled Go cache
+        uses: dacsang97/naspeed-action@v1
+        with:
+          cache-key: go-conformance
+
+      - name: Use naspeed Go cache
+        run: echo "GOCACHE=${NASPEED_STORE:?}/go/build" >> "$GITHUB_ENV"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -74,6 +82,14 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Restore compiled Go cache
+        uses: dacsang97/naspeed-action@v1
+        with:
+          cache-key: go-lint
+
+      - name: Use naspeed Go cache
+        run: echo "GOCACHE=${NASPEED_STORE:?}/go/build" >> "$GITHUB_ENV"
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -241,6 +257,14 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Restore compiled Go cache
+        uses: dacsang97/naspeed-action@v1
+        with:
+          cache-key: go-build-vet-race
+
+      - name: Use naspeed Go cache
+        run: echo "GOCACHE=${NASPEED_STORE:?}/go/build" >> "$GITHUB_ENV"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
