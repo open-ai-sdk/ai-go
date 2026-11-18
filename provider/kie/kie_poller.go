@@ -51,6 +51,11 @@ func poll[T any](parent context.Context, p poller, statusFn pollerStatusFn[T]) (
 		case <-timer.C:
 			value, done, err := statusFn(ctx)
 			if err != nil {
+				// A status request cut off by the poll deadline is a poll
+				// timeout, not a transport failure.
+				if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return zero, errPollTimeout
+				}
 				return zero, err
 			}
 			if done {

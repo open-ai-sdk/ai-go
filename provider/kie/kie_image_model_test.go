@@ -210,18 +210,20 @@ func TestGenerate_ImageToImagePreservesURLs(t *testing.T) {
 }
 
 func TestNormalizeState(t *testing.T) {
-	cases := map[string]taskState{
-		"success":    stateSuccess,
-		"SUCCESS":    stateSuccess,
-		"succeeded":  stateSuccess,
-		"fail":       stateFail,
-		"FAILED":     stateFail,
-		"error":      stateFail,
-		"waiting":    statePending,
-		"queuing":    statePending,
-		"processing": statePending,
-		"":           stateUnknown,
-		"weird":      stateUnknown,
+	cases := map[string]TaskState{
+		"success":    TaskStateSuccess,
+		"SUCCESS":    TaskStateSuccess,
+		"succeeded":  TaskStateSuccess,
+		"fail":       TaskStateFail,
+		"FAILED":     TaskStateFail,
+		"error":      TaskStateFail,
+		"waiting":    TaskStateWaiting,
+		"queuing":    TaskStateQueuing,
+		"queued":     TaskStateQueuing,
+		"generating": TaskStateGenerating,
+		"processing": TaskStateGenerating,
+		"":           TaskStateUnknown,
+		"weird":      TaskStateUnknown,
 	}
 	for in, want := range cases {
 		if got := normalizeState(in); got != want {

@@ -21,6 +21,17 @@ type Config struct {
 	// BaseURL optionally overrides the upstream host with a proxy URL.
 	BaseURL string
 
+	// DirectBaseURL keeps upstream paths under BaseURL instead of proxy mapping.
+	// Unset preserves the existing proxy routing convention.
+	DirectBaseURL bool
+
+	// MaxReplyBytes bounds raw jobs replies; zero leaves replies unbounded.
+	MaxReplyBytes int64
+	// RequireUTF8Reply rejects non-UTF-8 raw jobs reply bodies.
+	RequireUTF8Reply bool
+	// DisableRedirects returns redirect responses without following them.
+	DisableRedirects bool
+
 	// Timeout bounds a single HTTP call (defaults to 120s).
 	Timeout time.Duration
 
@@ -83,6 +94,9 @@ func (c Config) resolved() Config {
 		// One-shot POST plus polling GETs (not a stream), so a client-wide
 		// timeout is safe here — it bounds each request rather than a stream.
 		c.HTTPClient = &http.Client{Timeout: c.Timeout}
+		if c.DisableRedirects {
+			c.HTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		}
 	}
 	return c
 }

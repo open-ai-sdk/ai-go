@@ -7,14 +7,15 @@ import (
 	"github.com/open-ai-sdk/ai-go/transport"
 )
 
-// Provider is the entry point for constructing Kie.AI image models and
-// invoking file-upload helpers.
+// Provider is the entry point for constructing Kie.AI language, image, and video
+// models and invoking jobs and file-upload helpers.
 //
 // Construct with NewProvider; reuse across goroutines (HTTP client is shared).
 type Provider struct {
 	cfg       Config
 	client    *transport.Client
 	clientErr error
+	jobs      jobsClient
 }
 
 // Option mutates a Config during NewProvider construction.
@@ -51,7 +52,7 @@ func NewProvider(apiKey string, opts ...Option) *Provider {
 	}
 	cfg = cfg.resolved()
 	client, clientErr := newTransportClient(cfg)
-	return &Provider{cfg: cfg, client: client, clientErr: clientErr}
+	return &Provider{cfg: cfg, client: client, clientErr: clientErr, jobs: newJobsClient(cfg)}
 }
 
 // NewFromEnv builds a Kie.AI provider using KIE_API_KEY.
@@ -66,6 +67,18 @@ func (p *Provider) Image(modelID ImageModelID) *ImageModel {
 // Image remains available for callers that prefer typed ImageModelID constants.
 func (p *Provider) ImageModel(modelID string) llm.ImageModel {
 	return p.Image(ImageModelID(modelID))
+}
+
+// Video constructs a Kie video model for any jobs-API model id. Ids need not
+// be known to the SDK: input is built from the request and
+// [VideoOptions.RawInput].
+func (p *Provider) Video(modelID string) *VideoModel {
+	return newVideoModel(modelID, p.cfg)
+}
+
+// VideoModel constructs a video model by string ID for use with ai.Registry.
+func (p *Provider) VideoModel(modelID string) llm.VideoModel {
+	return p.Video(modelID)
 }
 
 // Config returns a deep copy of the resolved configuration so callers cannot
@@ -90,4 +103,7 @@ func (p *Provider) Config() Config {
 	return cp
 }
 
-var _ llm.ImageProvider = (*Provider)(nil)
+var (
+	_ llm.ImageProvider = (*Provider)(nil)
+	_ llm.VideoProvider = (*Provider)(nil)
+)

@@ -1,10 +1,7 @@
 package kie
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,26 +9,21 @@ import (
 	"sync"
 
 	"github.com/open-ai-sdk/ai-go/llm"
-	"github.com/open-ai-sdk/ai-go/transport"
 )
 
 // ImageModel implements aikit.ImageModel by submitting a Kie task and polling
 // the unified job-status endpoint until terminal.
 type ImageModel struct {
-	modelID   ImageModelID
-	cfg       Config
-	client    *transport.Client
-	clientErr error
+	modelID ImageModelID
+	cfg     Config
+	jobs    jobsClient
 }
 
 var _ llm.ImageModel = (*ImageModel)(nil)
 
 func newImageModel(modelID ImageModelID, cfg Config) *ImageModel {
 	cfg = cfg.resolved()
-	client, clientErr := newTransportClient(cfg)
-	return &ImageModel{
-		modelID: modelID, cfg: cfg, client: client, clientErr: clientErr,
-	}
+	return &ImageModel{modelID: modelID, cfg: cfg, jobs: newJobsClient(cfg)}
 }
 
 // ModelID returns the Kie model identifier.
@@ -47,43 +39,12 @@ func (m *ImageModel) Generate(
 	if err != nil {
 		return nil, err
 	}
-
-	statusFn := func(ctx context.Context) (recordInfoData, bool, error) {
-		info, err := m.fetchStatus(ctx, taskID)
-		if err != nil {
-			return recordInfoData{}, false, err
-		}
-		switch normalizeState(info.State) {
-		case stateSuccess:
-			return info, true, nil
-		case stateFail:
-			msg := info.FailMsg
-			if msg == "" {
-				msg = info.State
-			}
-			return recordInfoData{}, false, fmt.Errorf("kie: task %s failed: %s", taskID, msg)
-		case statePending:
-			return recordInfoData{}, false, nil
-		default:
-			// Unknown state: treat as terminal failure to avoid forever-loops.
-			return recordInfoData{}, false, fmt.Errorf(
-				"kie: task %s unknown state %q",
-				taskID,
-				info.State,
-			)
-		}
-	}
-
-	final, err := poll(
-		ctx,
-		poller{Interval: m.cfg.PollInterval, MaxWait: m.cfg.PollTimeout},
-		statusFn,
-	)
+	final, err := m.jobs.await(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 
-	urls := final.URLs()
+	urls := final.ResultURLs
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("kie: task %s succeeded with no result URLs", taskID)
 	}
@@ -92,7 +53,7 @@ func (m *ImageModel) Generate(
 	if err != nil {
 		return nil, err
 	}
-	return &llm.GenerateImageResult{Images: images, Raw: final.raw}, nil
+	return &llm.GenerateImageResult{Images: images, Raw: final.Raw}, nil
 }
 
 // submitTask serializes the per-model `input` envelope and POSTs createTask.
@@ -106,88 +67,11 @@ func (m *ImageModel) submitTask(ctx context.Context, req llm.GenerateImageReques
 		return "", err
 	}
 
-	body, err := json.Marshal(createTaskRequest{
-		Model:       m.modelID.String(),
-		Input:       input,
-		CallBackURL: opts.CallBackURL,
-	})
-	if err != nil {
-		return "", fmt.Errorf("kie: marshal createTask: %w", err)
+	var taskOpts []TaskOption
+	if opts.CallBackURL != "" {
+		taskOpts = append(taskOpts, WithCallBackURL(opts.CallBackURL))
 	}
-
-	url := buildKieURL(&m.cfg, "/api/v1/jobs/createTask")
-	if m.clientErr != nil {
-		return "", fmt.Errorf("kie: configure transport: %w", m.clientErr)
-	}
-	httpReq, err := m.client.NewRequest(
-		ctx, http.MethodPost, url, bytes.NewReader(body),
-	)
-	if err != nil {
-		return "", fmt.Errorf("kie: build createTask request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	respBody, status, err := doHTTP(m.client, httpReq)
-	if err != nil {
-		return "", err
-	}
-	if status != http.StatusOK {
-		return "", parseKieError(status, respBody)
-	}
-
-	var parsed createTaskResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", fmt.Errorf("kie: parse createTask response: %w", err)
-	}
-	if parsed.Code != 200 || parsed.Data.TaskID == "" {
-		return "", &KieError{
-			Code:    parsed.Code,
-			Msg:     parsed.Msg,
-			Status:  status,
-			RawBody: string(respBody),
-		}
-	}
-	return parsed.Data.TaskID, nil
-}
-
-// fetchStatus calls `GET /api/v1/jobs/recordInfo?taskId=...`.
-//
-// NOTE: The exact path is the assumed Kie convention (see kie-types.go for
-// rationale). If a future doc lookup contradicts this, swap the URL here in
-// one place — the rest of the SDK is endpoint-agnostic.
-func (m *ImageModel) fetchStatus(ctx context.Context, taskID string) (recordInfoData, error) {
-	url := buildKieURL(&m.cfg, "/api/v1/jobs/recordInfo") + "?taskId=" + taskID
-	if m.clientErr != nil {
-		return recordInfoData{}, fmt.Errorf(
-			"kie: configure transport: %w",
-			m.clientErr,
-		)
-	}
-	httpReq, err := m.client.NewRequest(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return recordInfoData{}, fmt.Errorf("kie: build recordInfo request: %w", err)
-	}
-
-	respBody, status, err := doHTTP(m.client, httpReq)
-	if err != nil {
-		return recordInfoData{}, err
-	}
-	if status != http.StatusOK {
-		return recordInfoData{}, parseKieError(status, respBody)
-	}
-
-	var parsed recordInfoResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return recordInfoData{}, fmt.Errorf("kie: parse recordInfo response: %w", err)
-	}
-	if parsed.Code != 200 {
-		return recordInfoData{}, &KieError{
-			Code: parsed.Code, Msg: parsed.Msg,
-			Status: status, RawBody: string(respBody),
-		}
-	}
-	parsed.Data.raw = append(json.RawMessage(nil), respBody...)
-	return parsed.Data, nil
+	return m.jobs.createTask(ctx, m.modelID.String(), input, taskOpts...)
 }
 
 // buildInput dispatches to the per-model option builder.
@@ -243,7 +127,7 @@ func (m *ImageModel) buildInput(
 	case ModelSeedreamV5ProLayerDecomposition:
 		return buildSeedreamLayerDecompositionInput(req, opts)
 	default:
-		return nil, fmt.Errorf("kie: unsupported model %q", m.modelID)
+		return buildPassthroughImageInput(req, opts)
 	}
 }
 
@@ -308,46 +192,4 @@ func (m *ImageModel) downloadOne(ctx context.Context, url string) (llm.Generated
 		Data:      data,
 		MediaType: resp.Header.Get("Content-Type"),
 	}, nil
-}
-
-// taskState is the canonical (lowercased) state enum.
-type taskState int
-
-const (
-	stateUnknown taskState = iota
-	statePending
-	stateSuccess
-	stateFail
-)
-
-func normalizeState(s string) taskState {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "success", "succeed", "succeeded":
-		return stateSuccess
-	case "fail", "failed", "error":
-		return stateFail
-	case "waiting", "queuing", "queued", "processing", "running", "generating":
-		return statePending
-	default:
-		return stateUnknown
-	}
-}
-
-// doHTTP runs req, returning body + status. Errors at the transport layer are
-// returned verbatim so callers (and tests) can match on them.
-func doHTTP(client transport.Doer, req *http.Request) ([]byte, int, error) {
-	resp, err := client.Do(req)
-	if err != nil {
-		// Surface ctx errors directly so callers can errors.Is(ctx.Err()).
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, 0, err
-		}
-		return nil, 0, fmt.Errorf("kie: http: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("kie: read body: %w", err)
-	}
-	return body, resp.StatusCode, nil
 }

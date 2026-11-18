@@ -49,6 +49,12 @@ type ImageOptions struct {
 	// Kie will POST a completion notification (we still poll either way).
 	CallBackURL string `json:"callBackUrl"`
 
+	// RawInput is the base `input` envelope for model ids that have no typed
+	// builder (see ImageModelID constants). The request prompt and image URLs
+	// are added as `prompt` and `image_urls` unless RawInput already sets
+	// them. It is ignored for models with a typed builder; use Extra there.
+	RawInput map[string]any `json:"rawInput"`
+
 	// Extra adds arbitrary fields to `input`. Use this for fields that have
 	// not yet been promoted to a typed option (e.g. seed). Values overwrite
 	// builder defaults.
@@ -487,4 +493,35 @@ func applyExtra(dst, extra map[string]any) {
 	for k, v := range extra {
 		dst[k] = v
 	}
+}
+
+// buildPassthroughImageInput builds `input` for a model id without a typed
+// builder: RawInput as the base, plus prompt and image URLs when provided and
+// not already present, then Extra overrides.
+func buildPassthroughImageInput(
+	req llm.GenerateImageRequest,
+	opts ImageOptions,
+) (map[string]any, error) {
+	urls, err := imageURLs(req)
+	if err != nil {
+		return nil, err
+	}
+	return passthroughInput(opts.RawInput, req.Prompt, urls, opts.Extra), nil
+}
+
+// passthroughInput merges a caller-owned base envelope with the generic
+// prompt/image_urls fields. Caller-supplied keys always win.
+func passthroughInput(raw map[string]any, prompt string, urls []string, extra map[string]any) map[string]any {
+	in := make(map[string]any, len(raw)+len(extra)+2)
+	for k, v := range raw {
+		in[k] = v
+	}
+	if _, ok := in["prompt"]; !ok && prompt != "" {
+		in["prompt"] = prompt
+	}
+	if _, ok := in["image_urls"]; !ok && len(urls) > 0 {
+		in["image_urls"] = urls
+	}
+	applyExtra(in, extra)
+	return in
 }

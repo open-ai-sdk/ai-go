@@ -24,6 +24,9 @@ func buildKieURL(cfg *Config, path string) string {
 	}
 
 	base := strings.TrimRight(cfg.BaseURL, "/")
+	if cfg.DirectBaseURL {
+		return base + path
+	}
 
 	switch {
 	case strings.HasPrefix(path, "/api/v1/"):
