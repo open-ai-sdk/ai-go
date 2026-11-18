@@ -22,7 +22,17 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
+
+      - name: Locate Go module cache
+        id: go-mod-cache
+        run: echo "path=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.go-mod-cache.outputs.path }}
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/go.sum') }}
 
       - name: Restore compiled Go cache
         uses: dacsang97/naspeed-action@v1
@@ -85,7 +95,17 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
+
+      - name: Locate Go module cache
+        id: go-mod-cache
+        run: echo "path=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.go-mod-cache.outputs.path }}
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/go.sum') }}
 
       - name: Restore compiled Go cache
         uses: dacsang97/naspeed-action@v1
@@ -260,7 +280,17 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
+
+      - name: Locate Go module cache
+        id: go-mod-cache
+        run: echo "path=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.go-mod-cache.outputs.path }}
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/go.sum') }}
 
       - name: Restore compiled Go cache
         uses: dacsang97/naspeed-action@v1
