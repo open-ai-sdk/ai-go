@@ -129,7 +129,8 @@ func TestHandlerForRequestPanicsOnIncompleteProtocol(t *testing.T) {
 func TestHandlerForRequestRejectsNonPost(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	HandlerForRequest(agui.Protocol(), successfulRequestRun).ServeHTTP(
-		recorder, httptest.NewRequest(http.MethodGet, "/ag-ui", nil))
+		recorder, httptest.NewRequest(http.MethodGet, "/ag-ui", nil),
+	)
 
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", recorder.Code)
@@ -142,7 +143,8 @@ func TestHandlerForRequestRejectsNonPost(t *testing.T) {
 func TestHandlerForRequestRejectsUndecodableBody(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	HandlerForRequest(agui.Protocol(), successfulRequestRun).ServeHTTP(
-		recorder, httptest.NewRequest(http.MethodPost, "/ag-ui", strings.NewReader("{")))
+		recorder, httptest.NewRequest(http.MethodPost, "/ag-ui", strings.NewReader("{")),
+	)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", recorder.Code)

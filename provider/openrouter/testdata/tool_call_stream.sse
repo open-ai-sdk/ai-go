@@ -15,4 +15,3 @@ data: {"id":"gen-test-2","model":"example/answering-model","object":"chat.comple
 data: {"id":"gen-test-2","model":"example/answering-model","object":"chat.completion.chunk","created":2,"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":10,"total_tokens":50,"cost":0.0001}}
 
 data: [DONE]
-

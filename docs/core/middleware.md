@@ -73,4 +73,3 @@ error bodies in `aikit.APIError.RawBody`. This diagnostic data is untrusted
 and can contain secrets. It is absent by default, never included in
 `APIError.Error()`, and must be redacted by the application before logging.
 Responses SSE error capture follows the same opt-in.
-

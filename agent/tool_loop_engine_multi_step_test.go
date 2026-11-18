@@ -150,7 +150,8 @@ func TestRunLoop_RepairToolCall_UnknownToolName(t *testing.T) {
 		},
 		Tools: testToolSet(
 			[]ToolDefinition{{Name: "search"}},
-			exec),
+			exec,
+		),
 
 		RepairToolCall: func(_ context.Context, input ToolCallRepairContext) (*ToolCallInfo, error) {
 			if input.ToolCall.Name != "Search" {
@@ -210,7 +211,8 @@ func TestRunLoop_RepairToolCall_HistoryUsesRepairedToolCall(t *testing.T) {
 		},
 		Tools: testToolSet(
 			[]ToolDefinition{{Name: "search"}},
-			exec),
+			exec,
+		),
 
 		RepairToolCall: func(_ context.Context, input ToolCallRepairContext) (*ToolCallInfo, error) {
 			return &ToolCallInfo{Name: "search"}, nil
@@ -505,7 +507,8 @@ func TestParseStructuredOutput_InvalidJSON(t *testing.T) {
 
 func TestValidateToolCall_InvalidArgsIncludesCause(t *testing.T) {
 	_, err := validateToolCall(testToolSet(
-		[]ToolDefinition{{Name: "search"}}, nil),
+		[]ToolDefinition{{Name: "search"}}, nil,
+	),
 
 		toolCallState{
 			name: "search",

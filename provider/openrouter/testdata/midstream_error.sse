@@ -3,4 +3,3 @@
 data: {"id":"gen-test-3","model":"example/answering-model","object":"chat.completion.chunk","created":3,"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}
 
 data: {"id":"gen-test-3","error":{"code":"server_error","message":"Provider disconnected unexpectedly"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}
-

@@ -200,7 +200,8 @@ func TestToModelOutputPanicPreservesToolResultBeforeFailingRun(t *testing.T) {
 							panic("history transform")
 						},
 					}},
-					&mockExecutor{results: map[string]string{"search": `{"ok":true}`}}),
+					&mockExecutor{results: map[string]string{"search": `{"ok":true}`}},
+				),
 
 				ParallelToolExecution: parallel,
 			})

@@ -55,7 +55,8 @@ func TestExecuteToolCallsParallel_SiblingFailure_OthersComplete(t *testing.T) {
 		Model: fixedToolCallsModel{toolNames: names},
 		Tools: testToolSet(
 			[]ToolDefinition{{Name: "ok-1"}, {Name: "fail"}, {Name: "ok-2"}},
-			siblingFailureExecutor{failName: "fail"}),
+			siblingFailureExecutor{failName: "fail"},
+		),
 
 		ParallelToolExecution: true,
 		MaxParallelTools:      3,
@@ -91,7 +92,8 @@ func TestExecuteToolCallsParallel_PanicRetainsTypedExecutionError(t *testing.T) 
 		Model: fixedToolCallsModel{toolNames: []string{"panic"}},
 		Tools: testToolSet(
 			[]ToolDefinition{{Name: "panic"}},
-			panicExecutor{}),
+			panicExecutor{},
+		),
 
 		ParallelToolExecution: true,
 		MaxParallelTools:      1,
@@ -148,7 +150,8 @@ func TestExecuteToolCallsParallel_CancelWhileQueued_StopsFurtherBodies(t *testin
 		Model: fixedToolCallsModel{toolNames: names},
 		Tools: testToolSet(
 			[]ToolDefinition{{Name: "slow"}},
-			executor),
+			executor,
+		),
 
 		ParallelToolExecution: true,
 		MaxParallelTools:      1,

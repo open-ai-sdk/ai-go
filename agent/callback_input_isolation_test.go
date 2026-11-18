@@ -32,7 +32,8 @@ func TestPrepareStep_CompletedStepsAreDefensiveSnapshots(t *testing.T) {
 		Model: model,
 		Tools: testToolSet(
 			[]ToolDefinition{{Name: "search"}},
-			executor),
+			executor,
+		),
 
 		PrepareStep: func(ctx PrepareStepContext) *PrepareStepResult {
 			if ctx.StepNumber != 1 {

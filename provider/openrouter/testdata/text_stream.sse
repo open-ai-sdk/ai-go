@@ -17,4 +17,3 @@ data: {"id":"gen-test-1","model":"example/answering-model","object":"chat.comple
 data: {"id":"gen-test-1","model":"example/answering-model","object":"chat.completion.chunk","created":1,"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":30,"total_tokens":150,"cost":0.000273,"is_byok":false,"prompt_tokens_details":{"cached_tokens":100},"cost_details":{"upstream_inference_cost":0.00025},"completion_tokens_details":{"reasoning_tokens":12}}}
 
 data: [DONE]
-

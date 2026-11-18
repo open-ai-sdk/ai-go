@@ -110,7 +110,9 @@ func CreateUIMessageStream(w io.Writer, opts CreateUIStreamOptions, execute func
 func Execute(w io.Writer, opts StreamOptions, fn ExecuteFunc) { ainode.Execute(w, opts, fn) }
 func HashCanonical(input json.RawMessage) (string, error)     { return ainode.HashCanonical(input) }
 func InvariantViolationCount() uint64                         { return ainode.InvariantViolationCount() }
-func MergeChunks(sources ...<-chan Chunk) <-chan Chunk        { return ainode.MergeChunks(sources...) }
+
+func MergeChunks(sources ...<-chan Chunk) <-chan Chunk { return ainode.MergeChunks(sources...) }
+
 func ProcessUIMessageStream(chunks <-chan Chunk, state *StreamingUIMessageState) <-chan Chunk {
 	return ainode.ProcessUIMessageStream(chunks, state)
 }
@@ -139,7 +141,9 @@ func StreamToWriter(
 func ToAIContentParts(parts []EnvelopePartUnion) []aikit.ContentPart {
 	return ainode.ToAIContentParts(parts)
 }
+
 func ToAIMessages(messages []EnvelopeMessage) []aikit.Message { return ainode.ToAIMessages(messages) }
+
 func ToUIMessageStream(events iter.Seq2[aikit.StepEvent, error], msgID string, opts ToUIStreamOptions) <-chan Chunk {
 	return ainode.ToUIMessageStream(events, msgID, opts)
 }
