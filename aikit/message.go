@@ -37,6 +37,9 @@ const (
 // ContentPart is a single part of a message.
 type ContentPart struct {
 	Type ContentPartType
+	// ItemID is the provider-native history item identifier, distinct from a
+	// tool call's invocation ID. Providers may use it when replaying history.
+	ItemID string
 
 	Text string
 
@@ -237,9 +240,10 @@ func (p ContentPart) Clone() ContentPart {
 	p.Data = cloneBytes(p.Data)
 	p.ToolCallArgs = cloneRawMessage(p.ToolCallArgs)
 	if p.ToolResultContent != nil {
-		p.ToolResultContent = make([]ToolResultContent, len(p.ToolResultContent))
-		for i := range p.ToolResultContent {
-			p.ToolResultContent[i] = p.ToolResultContent[i].Clone()
+		original := p.ToolResultContent
+		p.ToolResultContent = make([]ToolResultContent, len(original))
+		for i := range original {
+			p.ToolResultContent[i] = original[i].Clone()
 		}
 	}
 	return p

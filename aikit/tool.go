@@ -17,6 +17,10 @@ type ToolDefinition struct {
 	// suspends the turn so the caller's UI can execute it and return the result
 	// in the next request's history. Its output is therefore untrusted input.
 	ClientExecuted bool
+	// Strict, when true, asks providers that support strict function calling
+	// to set strict:true for this tool. Other providers ignore it. The
+	// InputSchema must already satisfy strict-mode rules; see tool.Strictify.
+	Strict bool
 }
 
 // ToolChoice controls which tool a model may call.

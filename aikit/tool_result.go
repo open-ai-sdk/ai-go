@@ -42,6 +42,9 @@ type ToolResultContent struct {
 	JSON      json.RawMessage
 	Data      []byte
 	MediaType string
+	// FileURL optionally supplies an external image source instead of inline
+	// Data for providers that accept URL-backed tool-result images.
+	FileURL string
 }
 
 // TextToolResultContent constructs literal text. JSON-looking text remains text.
@@ -57,6 +60,11 @@ func JSONToolResultContent(raw json.RawMessage) ToolResultContent {
 // ImageToolResultContent constructs inline image content and copies data.
 func ImageToolResultContent(data []byte, mediaType string) ToolResultContent {
 	return ToolResultContent{Type: ToolResultContentTypeImage, Data: cloneBytes(data), MediaType: mediaType}
+}
+
+// ImageURLToolResultContent constructs an external image reference.
+func ImageURLToolResultContent(url, mediaType string) ToolResultContent {
+	return ToolResultContent{Type: ToolResultContentTypeImage, FileURL: url, MediaType: mediaType}
 }
 
 // ToolResultTextContent is an alternate noun-first spelling.
