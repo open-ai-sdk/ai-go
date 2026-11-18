@@ -94,6 +94,9 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 		return nil, aikitTransportError(c.provider, err)
 	}
+	if resp != nil {
+		observeResponse(req.Context(), resp)
+	}
 	return resp, nil
 }
 

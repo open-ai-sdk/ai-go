@@ -6,17 +6,19 @@ import (
 	"time"
 )
 
-// APIError is a provider HTTP failure surfaced as a value, not a string. The raw
-// response body is deliberately absent: it is attacker-influenced and has leaked
-// credentials, org, and request identifiers in the past. Parsed code/message and
-// the request ID are retained; the full body goes to the debug logger, never
-// into the error value.
+// APIError is a provider HTTP failure surfaced as a value, not a string.
+// Parsed code/message and request ID are retained by default. RawBody is
+// populated only when diagnostic capture is explicitly enabled; Error never
+// includes it.
 type APIError struct {
 	Provider   string
 	StatusCode int
 	RequestID  string
 	Code       string // provider error code, when parsed
 	Message    string // provider message, when parsed — never the raw body
+	// RawBody is opt-in diagnostic data. It may contain sensitive provider
+	// fields and must not be logged without application-level redaction.
+	RawBody []byte
 	// RetryAfter is taken from the Retry-After response header; 0 when absent.
 	RetryAfter time.Duration
 	err        error // wrapped transport error, if any
@@ -69,8 +71,11 @@ func (e *APIError) Is(target error) bool {
 	return false
 }
 
-// Retryable reports whether the failure is a transient status worth retrying.
-func (e *APIError) Retryable() bool { return RetryableStatusCode(e.StatusCode) }
+// Retryable reports whether a failure is transient. Stream errors have no HTTP
+// status; only an explicit server_error code makes such an error retryable.
+func (e *APIError) Retryable() bool {
+	return RetryableStatusCode(e.StatusCode) || (e.StatusCode == 0 && e.Code == "server_error")
+}
 
 // RetryableStatusCode reports whether an HTTP status code is transient and worth
 // retrying: 429, 500, 502, 503, and Anthropic's 529 overload.

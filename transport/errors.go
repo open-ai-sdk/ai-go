@@ -15,8 +15,8 @@ import (
 const defaultErrorBodyLimit = 64 * 1024
 
 // APIErrorFromResponse converts a non-success HTTP response into a typed
-// *aikit.APIError and closes the response body. The raw provider body is
-// available only to an explicitly injected debug logger.
+// *aikit.APIError and closes the response body. The raw provider body is retained
+// only when WithErrorBodyCapture was explicitly applied to ctx.
 func APIErrorFromResponse(
 	ctx context.Context,
 	provider string,
@@ -37,6 +37,9 @@ func APIErrorFromResponse(
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, defaultErrorBodyLimit))
 	apiErr.Code, apiErr.Message = parseProviderErrorBody(body)
+	if CaptureErrorBody(ctx) {
+		apiErr.RawBody = body
+	}
 	LoggerFromContext(ctx).DebugContext(
 		ctx,
 		"provider error response",
