@@ -37,21 +37,71 @@ type StreamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens        int `json:"prompt_tokens"`
-		CompletionTokens    int `json:"completion_tokens"`
-		TotalTokens         int `json:"total_tokens"`
-		ThoughtsTokenCount  int `json:"thoughts_token_count,omitempty"`
-		PromptTokensDetails *struct {
-			CachedTokens     int `json:"cached_tokens"`
-			CacheWriteTokens int `json:"cache_write_tokens"`
-		} `json:"prompt_tokens_details,omitempty"`
-		CompletionTokensDetails *struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details,omitempty"`
-	} `json:"usage"`
+	Usage *StreamUsage `json:"usage"`
+	// ID and Model are the response id and the model that answered, repeated on
+	// every chunk by OpenAI-style endpoints.
+	ID    string `json:"id,omitempty"`
+	Model string `json:"model,omitempty"`
+	// Error is set when the endpoint reports a failure inside the event stream
+	// (for example OpenRouter mid-stream errors) instead of an HTTP status.
+	Error *StreamError `json:"error,omitempty"`
 	// ProviderMetadata holds provider-specific metadata from the response (e.g. Gemini groundingMetadata).
 	ProviderMetadata map[string]any `json:"provider_metadata,omitempty"`
+}
+
+// StreamUsage is the usage object of a stream chunk. Raw keeps the complete
+// provider-reported object, including fields this package does not model
+// (for example OpenRouter's cost and cost_details).
+type StreamUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	ThoughtsTokenCount  int `json:"thoughts_token_count,omitempty"`
+	PromptTokensDetails *struct {
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details,omitempty"`
+
+	// Raw is the full decoded usage object.
+	Raw map[string]any `json:"-"`
+}
+
+// UnmarshalJSON decodes the typed fields and retains the raw object.
+func (u *StreamUsage) UnmarshalJSON(data []byte) error {
+	type plain StreamUsage
+	var typed plain
+	if err := json.Unmarshal(data, &typed); err != nil {
+		return err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	typed.Raw = raw
+	*u = StreamUsage(typed)
+	return nil
+}
+
+// StreamError is an error object reported inside an SSE data event.
+type StreamError struct {
+	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`
+	Code    any    `json:"code,omitempty"`
+}
+
+func (e *StreamError) describe() string {
+	switch {
+	case e.Message != "" && e.Code != nil:
+		return fmt.Sprintf("%s (code %v)", e.Message, e.Code)
+	case e.Message != "":
+		return e.Message
+	case e.Code != nil:
+		return fmt.Sprintf("code %v", e.Code)
+	}
+	return "unspecified stream error"
 }
 
 // SSEDecodeParams holds configuration for DecodeSSEStream.
@@ -83,6 +133,7 @@ func DecodeSSEStream(
 
 	lineCount := 0
 	var finishEmitted bool
+	var identity responseIdentity
 	for {
 		select {
 		case <-ctx.Done():
@@ -101,10 +152,11 @@ func DecodeSSEStream(
 		if data == "[DONE]" {
 			if !finishEmitted {
 				ch <- aikit.StreamEvent{
-					Type:            aikit.StreamEventFinish,
-					FinishReason:    aikit.FinishReasonStop,
-					RawFinishReason: "stop",
-					Warnings:        params.EncodeWarnings,
+					Type:             aikit.StreamEventFinish,
+					FinishReason:     aikit.FinishReasonStop,
+					RawFinishReason:  "stop",
+					Warnings:         params.EncodeWarnings,
+					ProviderMetadata: mergeIdentity(nil, providerKey(params), identity),
 				}
 			}
 			return nil
@@ -115,7 +167,11 @@ func DecodeSSEStream(
 			return fmt.Errorf("%s: unmarshal chunk: %w", providerName, err)
 		}
 
-		emitChunkEvents(chunk, ch, params, &finishEmitted)
+		if chunk.Error != nil {
+			return fmt.Errorf("%s: stream error: %s", providerName, chunk.Error.describe())
+		}
+		identity.observe(chunk)
+		emitChunkEvents(chunk, ch, params, &finishEmitted, identity)
 	}
 
 	if lineCount == 0 {
@@ -162,15 +218,67 @@ func emitUsageEvent(chunk StreamChunk, ch chan<- aikit.StreamEvent) {
 				ReasoningTokens: reasoningTokens,
 			},
 			TotalTokens: u.TotalTokens,
-			Raw: map[string]any{
-				"prompt_tokens":     u.PromptTokens,
-				"completion_tokens": u.CompletionTokens,
-				"total_tokens":      u.TotalTokens,
-				"cached_tokens":     cachedTokens,
-				"reasoning_tokens":  reasoningTokens,
-			},
+			Raw:         usageRaw(u, cachedTokens, reasoningTokens),
 		},
 	}
+}
+
+// responseIdentity remembers the response id and answering model seen on any
+// chunk so the finish event can report them.
+type responseIdentity struct{ id, model string }
+
+func (r *responseIdentity) observe(chunk StreamChunk) {
+	if chunk.ID != "" {
+		r.id = chunk.ID
+	}
+	if chunk.Model != "" {
+		r.model = chunk.Model
+	}
+}
+
+// mergeIdentity adds responseId and model under the provider's metadata key
+// without overwriting values an extractor already set.
+func mergeIdentity(meta map[string]any, provider string, id responseIdentity) map[string]any {
+	if id.id == "" && id.model == "" {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	entry, ok := meta[provider].(map[string]any)
+	if !ok || entry == nil {
+		entry = map[string]any{}
+	}
+	if _, set := entry["responseId"]; !set && id.id != "" {
+		entry["responseId"] = id.id
+	}
+	if _, set := entry["model"]; !set && id.model != "" {
+		entry["model"] = id.model
+	}
+	meta[provider] = entry
+	return meta
+}
+
+// usageRaw returns the provider's full usage object plus the normalized
+// cached_tokens and reasoning_tokens counters.
+func usageRaw(u *StreamUsage, cachedTokens, reasoningTokens int) map[string]any {
+	raw := make(map[string]any, len(u.Raw)+5)
+	for k, v := range u.Raw {
+		raw[k] = v
+	}
+	raw["prompt_tokens"] = u.PromptTokens
+	raw["completion_tokens"] = u.CompletionTokens
+	raw["total_tokens"] = u.TotalTokens
+	raw["cached_tokens"] = cachedTokens
+	raw["reasoning_tokens"] = reasoningTokens
+	return raw
+}
+
+func providerKey(params SSEDecodeParams) string {
+	if params.ProviderName == "" {
+		return "openaichat"
+	}
+	return params.ProviderName
 }
 
 func emitChunkEvents(
@@ -178,6 +286,7 @@ func emitChunkEvents(
 	ch chan<- aikit.StreamEvent,
 	params SSEDecodeParams,
 	finishEmitted *bool,
+	identity responseIdentity,
 ) {
 	metaExtractor := params.MetadataExtractor
 	sourceExtractor := params.SourceExtractor
@@ -203,6 +312,7 @@ func emitChunkEvents(
 		if metaExtractor != nil {
 			meta = metaExtractor(chunk)
 		}
+		meta = mergeIdentity(meta, providerKey(params), identity)
 		ch <- aikit.StreamEvent{
 			Type:             aikit.StreamEventFinish,
 			FinishReason:     MapFinishReason(choice.FinishReason),

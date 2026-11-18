@@ -98,14 +98,15 @@ func EncodeRequest(
 	if len(req.Tools) > 0 || len(params.ExtraTools) > 0 {
 		toolDefs := make([]map[string]any, len(req.Tools))
 		for i, t := range req.Tools {
-			toolDefs[i] = map[string]any{
-				"type": "function",
-				"function": map[string]any{
-					"name":        t.Name,
-					"description": t.Description,
-					"parameters":  t.InputSchema,
-				},
+			fn := map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.InputSchema,
 			}
+			if t.Strict {
+				fn["strict"] = true
+			}
+			toolDefs[i] = map[string]any{"type": "function", "function": fn}
 		}
 		if params.SanitizeTools != nil {
 			toolDefs = params.SanitizeTools(toolDefs)
@@ -352,10 +353,14 @@ func encodeOutputSchema(
 			schema = wrapped
 		}
 	}
+	name := o.Name
+	if name == "" {
+		name = "structured_output"
+	}
 	return &ResponseFormat{
 		Type: "json_schema",
 		JSONSchema: &JSONSchemaRef{
-			Name:   "structured_output",
+			Name:   name,
 			Schema: schema,
 			Strict: true,
 		},
