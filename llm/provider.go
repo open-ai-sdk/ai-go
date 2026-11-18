@@ -19,3 +19,9 @@ type ImageProvider interface {
 	Provider
 	ImageModel(modelID string) ImageModel
 }
+
+// VideoProvider constructs video-model handles for a provider.
+type VideoProvider interface {
+	Provider
+	VideoModel(modelID string) VideoModel
+}

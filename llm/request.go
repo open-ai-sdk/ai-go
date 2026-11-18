@@ -17,6 +17,9 @@ type Request struct {
 
 // OutputSchema describes the desired output mode for a generation call.
 type OutputSchema struct {
+	// Name optionally names the provider's structured-output schema. Empty
+	// preserves the provider's default name.
+	Name   string
 	Type   string
 	Schema map[string]any
 }

@@ -31,6 +31,9 @@ type ImageInput struct {
 	Data      []byte
 	MediaType string
 	URL       string
+	// FileName preserves a caller-supplied multipart filename. Empty uses the
+	// provider's existing generated filename.
+	FileName string
 }
 
 // GenerateImageResult holds an image-generation result.
@@ -41,6 +44,9 @@ type GenerateImageResult struct {
 	// Raw retains the untranslated successful provider response for diagnostics.
 	// It may contain sensitive provider data and is never logged automatically.
 	Raw json.RawMessage `json:"-"`
+	// ResponseHeaders retains successful provider response headers, including
+	// request identifiers. Treat these as potentially sensitive diagnostic data.
+	ResponseHeaders map[string][]string `json:"-"`
 }
 
 // GeneratedImage holds one generated image.
