@@ -13,11 +13,23 @@ type JobsVideoAcceptance struct{ TaskID string }
 
 // JobsVideoState contains the verified video task outcome.
 type JobsVideoState struct {
-	State           string
-	VideoURL        string
+	State    string
+	VideoURL string
+	// LastFrameURL is the optional https last-frame image some jobs models
+	// return beside the video (resultJson.lastFrameUrl). It is only read when
+	// VideoResultOptions.AllowExtraFields is set.
+	LastFrameURL    string
 	CreditsConsumed *float64
 	Code, Message   *string
 	ProviderState   string
+}
+
+// VideoResultOptions relaxes the verified resultJson shape. The default (zero)
+// value accepts only resultUrls/originUrls, as the original Veo contract did;
+// newer jobs video models add fields such as lastFrameUrl.
+type VideoResultOptions struct {
+	// AllowExtraFields accepts resultJson fields besides the URL lists.
+	AllowExtraFields bool
 }
 
 // JobsSubmitError classifies a rejected or indeterminate submission.
@@ -99,6 +111,17 @@ func DecodeVideoSubmission(status int, body []byte, readErr error) (JobsVideoAcc
 
 // DecodeVideoStatus verifies task/model identity and decodes a single-result video task.
 func DecodeVideoStatus(taskID, model string, status int, body []byte, readErr error) (JobsVideoState, error) {
+	return DecodeVideoStatusWithOptions(taskID, model, status, body, readErr, VideoResultOptions{})
+}
+
+// DecodeVideoStatusWithOptions is DecodeVideoStatus with a relaxed result shape.
+func DecodeVideoStatusWithOptions(
+	taskID, model string,
+	status int,
+	body []byte,
+	readErr error,
+	opts VideoResultOptions,
+) (JobsVideoState, error) {
 	fail := func(contract bool, message string) (JobsVideoState, error) {
 		return JobsVideoState{}, &JobsQueryError{contract, message}
 	}
@@ -133,10 +156,10 @@ func DecodeVideoStatus(taskID, model string, status int, body []byte, readErr er
 	if value, ok := d["model"].(string); ok && value != model {
 		return fail(true, fmt.Sprintf("recordInfo task is model %s, not %s", value, model))
 	}
-	return decodeVideoState(d)
+	return decodeVideoState(d, opts)
 }
 
-func decodeVideoState(d map[string]any) (JobsVideoState, error) {
+func decodeVideoState(d map[string]any, opts VideoResultOptions) (JobsVideoState, error) {
 	fail := func(message string) (JobsVideoState, error) {
 		return JobsVideoState{}, &JobsQueryError{true, message}
 	}
@@ -149,11 +172,14 @@ func decodeVideoState(d map[string]any) (JobsVideoState, error) {
 	case "waiting", "queuing", "generating":
 		return JobsVideoState{State: "pending", ProviderState: state}, nil
 	case "success":
-		endpoint, err := DecodeVideoResultURL(d["resultJson"])
+		result, err := decodeVideoResult(d["resultJson"], opts)
 		if err != nil {
 			return JobsVideoState{}, err
 		}
-		return JobsVideoState{State: "succeeded", VideoURL: endpoint, CreditsConsumed: credits}, nil
+		return JobsVideoState{
+			State: "succeeded", VideoURL: result.videoURL, LastFrameURL: result.lastFrameURL,
+			CreditsConsumed: credits,
+		}, nil
 	case "fail":
 		var codePtr, messagePtr *string
 		if code, ok := jobsLooseString(d["failCode"]); ok {
@@ -170,7 +196,14 @@ func decodeVideoState(d map[string]any) (JobsVideoState, error) {
 
 // DecodeVideoResultURL verifies the jobs video resultJson string and its HTTPS URL.
 func DecodeVideoResultURL(raw any) (string, error) {
-	fail := func(message string) (string, error) { return "", &JobsQueryError{true, message} }
+	result, err := decodeVideoResult(raw, VideoResultOptions{})
+	return result.videoURL, err
+}
+
+type videoResult struct{ videoURL, lastFrameURL string }
+
+func decodeVideoResult(raw any, opts VideoResultOptions) (videoResult, error) {
+	fail := func(message string) (videoResult, error) { return videoResult{}, &JobsQueryError{true, message} }
 	text, ok := raw.(string)
 	if !ok || strings.TrimSpace(text) == "" {
 		return fail("a succeeded task has no resultJson string")
@@ -183,7 +216,7 @@ func DecodeVideoResultURL(raw any) (string, error) {
 		return fail("resultJson is not a JSON object")
 	}
 	for key := range result {
-		if key != "resultUrls" && key != "originUrls" {
+		if !opts.AllowExtraFields && key != "resultUrls" && key != "originUrls" {
 			return fail(fmt.Sprintf("resultJson has an unknown field %s: the result shape is not verified", key))
 		}
 	}
@@ -198,11 +231,22 @@ func DecodeVideoResultURL(raw any) (string, error) {
 	if !ok {
 		return fail("resultJson must hold exactly one result URL")
 	}
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+	if !isHTTPSURL(endpoint) {
 		return fail("the result URL is not an https URL")
 	}
-	return endpoint, nil
+	out := videoResult{videoURL: endpoint}
+	if opts.AllowExtraFields {
+		// An absent or malformed optional frame is dropped, never a failure.
+		if frame, ok := result["lastFrameUrl"].(string); ok && isHTTPSURL(frame) {
+			out.lastFrameURL = frame
+		}
+	}
+	return out, nil
+}
+
+func isHTTPSURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Hostname() != ""
 }
 
 func jobsLooseNumber(raw any) *float64 {
