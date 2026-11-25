@@ -39,8 +39,11 @@ func TestToolExecutionAbortStopsRunWithoutToolResult(t *testing.T) {
 			cause := errors.New("effect outcome not recorded")
 			var siblings atomic.Int32
 			events := driveStream(t.Context(), runConfig{
-				Model:                 fixedToolCallsModel{toolNames: []string{"uncertain", "sibling"}},
-				Tools:                 testToolSet([]ToolDefinition{{Name: "uncertain"}, {Name: "sibling"}}, abortingExecutor{cause: cause, siblings: &siblings}),
+				Model: fixedToolCallsModel{toolNames: []string{"uncertain", "sibling"}},
+				Tools: testToolSet(
+					[]ToolDefinition{{Name: "uncertain"}, {Name: "sibling"}},
+					abortingExecutor{cause: cause, siblings: &siblings},
+				),
 				ParallelToolExecution: tc.parallel,
 				MaxParallelTools:      1,
 				MaxSteps:              2,
@@ -74,14 +77,32 @@ func TestToolExecutionAbortOnApprovalResumeConsumesGrant(t *testing.T) {
 	const id, name = "call-1", "uncertain"
 	signature := approvalSignatureForTest(t, id, name, `{}`)
 	history := []Message{
-		{Role: "assistant", Content: []ContentPart{{Type: "tool_call", ToolCallID: id, ToolCallName: name, ToolCallArgs: json.RawMessage(`{}`)}}},
-		{Role: "user", Content: []ContentPart{{Type: "tool_approval_response", ToolApprovalID: id, ToolApprovalSignature: signature, ToolApprovalApproved: true}}},
+		{
+			Role: "assistant",
+			Content: []ContentPart{
+				{Type: "tool_call", ToolCallID: id, ToolCallName: name, ToolCallArgs: json.RawMessage(`{}`)},
+			},
+		},
+		{
+			Role: "user",
+			Content: []ContentPart{
+				{
+					Type:                  "tool_approval_response",
+					ToolApprovalID:        id,
+					ToolApprovalSignature: signature,
+					ToolApprovalApproved:  true,
+				},
+			},
+		},
 	}
 	model := &mockModel{calls: [][]StreamEvent{{textEvt("must not run"), finishEvt(FinishReasonStop)}}}
 	params := runConfig{
-		Model: model, Tools: testToolSet([]ToolDefinition{{Name: name}}, abortingExecutor{cause: cause, calls: &calls}),
-		ToolApproval: requireApproval(name), ApprovalKey: approvalTestKey, ApprovalReplayGuard: NewMemoryApprovalReplayGuard(),
-		Request: Request{Messages: history},
+		Model:               model,
+		Tools:               testToolSet([]ToolDefinition{{Name: name}}, abortingExecutor{cause: cause, calls: &calls}),
+		ToolApproval:        requireApproval(name),
+		ApprovalKey:         approvalTestKey,
+		ApprovalReplayGuard: NewMemoryApprovalReplayGuard(),
+		Request:             Request{Messages: history},
 	}
 	events := collectEvents(driveStream(t.Context(), params))
 	assertApprovalError(t, events, cause)

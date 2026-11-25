@@ -51,12 +51,21 @@ func TestRunnerHostCanReplayReceiptOrRequireReconciliation(t *testing.T) {
 			}
 			model := &runnerScriptModel{scripts: [][]aikit.StreamEvent{
 				{
-					{Type: aikit.StreamEventToolCallDelta, ToolCallID: callID, ToolCallName: toolName, ToolCallArgsDelta: `{}`},
+					{
+						Type:              aikit.StreamEventToolCallDelta,
+						ToolCallID:        callID,
+						ToolCallName:      toolName,
+						ToolCallArgsDelta: `{}`,
+					},
 					{Type: aikit.StreamEventFinish, FinishReason: aikit.FinishReasonToolCalls},
 				},
 				runnerTextEvents("answer", "Complete."),
 			}}
-			built := mustRunnerAgent(t, model, func(b agent.Builder) agent.Builder { return b.Tools(tools).MaxTurns(2) })
+			built := mustRunnerAgent(
+				t,
+				model,
+				func(b agent.Builder) agent.Builder { return b.Tools(tools).MaxTurns(2) },
+			)
 			result, err := built.Runner().Prompt("Record the change").Run(t.Context())
 			requests := model.requestSnapshots()
 			if got := launches.Load(); got != tc.wantLaunch {

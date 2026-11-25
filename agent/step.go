@@ -92,16 +92,9 @@ func executeToolCalls(
 			continue
 		}
 
-		var result *ToolResult
-		approvalResolved := false
-		var approvalErr error
-		if skip {
-			result = skippedToolResult(tc, skipReason)
-		} else {
-			result, approvalResolved, approvalErr = approvedToolCall(
-				r, r.ctx, tools, tc, preparedCall.def, approval, approver,
-			)
-		}
+		result, approvalResolved, approvalErr := resolveToolCall(
+			r, r.ctx, tools, tc, preparedCall.def, approval, approver, skip, skipReason,
+		)
 		if approvalErr != nil {
 			controlErr = preferControlErr(controlErr, approvalErr)
 			continue
@@ -285,14 +278,9 @@ func executeToolCallsParallel(
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			var result *ToolResult
-			approvalResolved := false
-			var approvalErr error
-			if skip {
-				result = skippedToolResult(tc, skipReason)
-			} else {
-				result, approvalResolved, approvalErr = approvedToolCall(r, gctx, tools, tc, def, approval, approver)
-			}
+			result, approvalResolved, approvalErr := resolveToolCall(
+				r, gctx, tools, tc, def, approval, approver, skip, skipReason,
+			)
 			if approvalErr != nil {
 				results[idx].controlErr = approvalErr
 				return nil
@@ -385,6 +373,23 @@ func executeToolCallsParallel(
 		controlErr = preferControlErr(controlErr, res.controlErr)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
+}
+
+func resolveToolCall(
+	r *run,
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+	approval map[string]func(string, string) bool,
+	approver ApprovalResponder,
+	skip bool,
+	skipReason string,
+) (*ToolResult, bool, error) {
+	if skip {
+		return skippedToolResult(tc, skipReason), false, nil
+	}
+	return approvedToolCall(r, ctx, tools, tc, def, approval, approver)
 }
 
 func approvedToolCall(
