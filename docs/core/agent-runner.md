@@ -133,6 +133,14 @@ The last committed step retains its real finish reason.
 `GeneratedMessages()` derives only the continuation produced by the run; it
 does not store a second message history.
 
+Return `&tool.AbortRunError{Cause: err}` from a tool handler when the outcome
+is unknown and continuing would be unsafe. The runner returns the error,
+preserves its cause for `errors.Is` / `errors.As`, and does not submit a result
+for that call to the model. A sequential runner launches no later calls;
+parallel calls already in flight are not rolled back. On signed approval
+resumption, the authorization is consumed even if execution aborts. The host
+remains responsible for reconciling the operation before retrying it.
+
 ## Stream one run
 
 `Runner.Stream` returns a single-use, single-owner

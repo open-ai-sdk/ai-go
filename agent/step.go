@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -91,19 +92,15 @@ func executeToolCalls(
 			continue
 		}
 
-		var result *ToolResult
-		approvalResolved := false
-		var approvalErr error
-		if skip {
-			result = skippedToolResult(tc, skipReason)
-		} else {
-			result, approvalResolved, approvalErr = approvedToolCall(
-				r, r.ctx, tools, tc, preparedCall.def, approval, approver,
-			)
-		}
+		result, approvalResolved, approvalErr := resolveToolCall(
+			r, r.ctx, tools, tc, preparedCall.def, approval, approver, skip, skipReason,
+		)
 		if approvalErr != nil {
 			controlErr = preferControlErr(controlErr, approvalErr)
 			continue
+		}
+		if abort := toolAbort(result); abort != nil {
+			return toolNames, stepToolCalls, stepToolResults, abort
 		}
 		result, hookErr := r.afterTool(result)
 		if hookErr != nil {
@@ -152,13 +149,9 @@ func skippedToolResult(tc toolCallState, reason string) *ToolResult {
 	return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: reason, Disposition: aikit.ToolResultSkipped}
 }
 
-// executeToolCallsParallel processes tool calls concurrently, bounded by
-// maxParallel via errgroup.SetLimit. g.Go always returns nil: sibling tool calls
-// continue when one fails and report the failure per-call, so an
-// errgroup first-error-cancels policy would silently change that semantic.
-// Per-call errors travel through results[i].result.Output instead of through
-// g.Wait's return value. errgroup is used here only for concurrency limiting
-// and ctx propagation, not for fail-fast error aggregation.
+// executeToolCallsParallel dispatches bounded concurrent work and commits
+// results in call order. Ordinary tool errors do not cancel siblings. An
+// explicit run abort cancels the group and prevents committing the batch.
 //
 //nolint:gocyclo // Parallel execution keeps validation, cancellation, and ordered commit together.
 func executeToolCallsParallel(
@@ -285,17 +278,15 @@ func executeToolCallsParallel(
 				results[idx].modelOutput = results[idx].result.Output
 			}, "phase", "parallel-tool-exec", "tool", tc.name)
 
-			var result *ToolResult
-			approvalResolved := false
-			var approvalErr error
-			if skip {
-				result = skippedToolResult(tc, skipReason)
-			} else {
-				result, approvalResolved, approvalErr = approvedToolCall(r, gctx, tools, tc, def, approval, approver)
-			}
+			result, approvalResolved, approvalErr := resolveToolCall(
+				r, gctx, tools, tc, def, approval, approver, skip, skipReason,
+			)
 			if approvalErr != nil {
 				results[idx].controlErr = approvalErr
 				return nil
+			}
+			if abort := toolAbort(result); abort != nil {
+				return abort
 			}
 			result, hookErr := r.afterTool(result)
 			if hookErr != nil {
@@ -321,13 +312,10 @@ func executeToolCallsParallel(
 			return nil
 		})
 	}
-	// g.Go bodies always return nil (per-tool failures ride the results slice,
-	// so a sibling failure never cancels the group), so g.Wait blocks until all
-	// queued calls finish and its error is expected to be nil. The check is
-	// forward-defensive: if a future body ever returns an error, it surfaces
-	// instead of being silently dropped.
+	// Ordinary failures are tool results. An explicit abort cancels queued
+	// work and stops the run before its batch is committed to model history.
 	if err := g.Wait(); err != nil {
-		r.emitError(err)
+		return nil, nil, nil, err
 	}
 
 	// Emit events and build history in original order. A recovered control
@@ -385,6 +373,23 @@ func executeToolCallsParallel(
 		controlErr = preferControlErr(controlErr, res.controlErr)
 	}
 	return toolNames, stepToolCalls, stepToolResults, controlErr
+}
+
+func resolveToolCall(
+	r *run,
+	ctx context.Context,
+	tools *ToolSet,
+	tc toolCallState,
+	def ToolDefinition,
+	approval map[string]func(string, string) bool,
+	approver ApprovalResponder,
+	skip bool,
+	skipReason string,
+) (*ToolResult, bool, error) {
+	if skip {
+		return skippedToolResult(tc, skipReason), false, nil
+	}
+	return approvedToolCall(r, ctx, tools, tc, def, approval, approver)
 }
 
 func approvedToolCall(
@@ -462,6 +467,14 @@ func approvedToolCall(
 		return nil, false, err
 	}
 	return executeApprovedToolCall(r, ctx, tools, tc, def), false, nil
+}
+
+func toolAbort(result *ToolResult) *tool.AbortRunError {
+	var abort *tool.AbortRunError
+	if result != nil {
+		errors.As(result.Error, &abort)
+	}
+	return abort
 }
 
 func executeApprovedToolCall(

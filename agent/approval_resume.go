@@ -310,6 +310,9 @@ func resumeToolApprovals(r *run, params runConfig, history []Message) ([]Message
 				r, plan.stepTools, tc, definition, reservation, plan.grantsByCall[call],
 			)
 		}
+		if abort := toolAbort(result); abort != nil {
+			return nil, errors.Join(abort, terminalErr)
+		}
 
 		modelOutput, transformErr := transformToolOutput(r, definition, result)
 		if transformErr != nil {
