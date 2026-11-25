@@ -16,6 +16,7 @@ infrastructure for provider authors rather than the normal application API.
 | Gemini | `provider/gemini` | Language, embeddings, images, and native Gemini features |
 | OpenRouter | `provider/openrouter` | Chat, Responses and synchronous image models |
 | Kie | `provider/kie` | [Language models](/providers/kie-language), images, video and jobs |
+| fal | `provider/fal` | [Video models](/providers/fal) over the queue API, with durable submit/status/result |
 | Compatible endpoints | `provider/openaicompat` | OpenAI-style Chat Completions and embeddings |
 
 Start with [OpenAI](/providers/openai), read the

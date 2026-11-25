@@ -52,6 +52,7 @@ const docsSidebar = [
           { text: 'OpenAI', link: '/providers/openai' },
           { text: 'OpenRouter', link: '/providers/openrouter' },
           { text: 'Kie language', link: '/providers/kie-language' },
+          { text: 'fal', link: '/providers/fal' },
           { text: 'Other providers', link: '/providers/other-providers' },
         ],
       },
