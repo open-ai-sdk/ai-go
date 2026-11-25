@@ -156,13 +156,9 @@ func skippedToolResult(tc toolCallState, reason string) *ToolResult {
 	return &ToolResult{ID: tc.id, Name: tc.name, Args: tc.args, Output: reason, Disposition: aikit.ToolResultSkipped}
 }
 
-// executeToolCallsParallel processes tool calls concurrently, bounded by
-// maxParallel via errgroup.SetLimit. g.Go always returns nil: sibling tool calls
-// continue when one fails and report the failure per-call, so an
-// errgroup first-error-cancels policy would silently change that semantic.
-// Per-call errors travel through results[i].result.Output instead of through
-// g.Wait's return value. errgroup is used here only for concurrency limiting
-// and ctx propagation, not for fail-fast error aggregation.
+// executeToolCallsParallel dispatches bounded concurrent work and commits
+// results in call order. Ordinary tool errors do not cancel siblings. An
+// explicit run abort cancels the group and prevents committing the batch.
 //
 //nolint:gocyclo // Parallel execution keeps validation, cancellation, and ordered commit together.
 func executeToolCallsParallel(
