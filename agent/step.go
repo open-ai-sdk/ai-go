@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/open-ai-sdk/ai-go/aikit"
@@ -104,6 +105,9 @@ func executeToolCalls(
 		if approvalErr != nil {
 			controlErr = preferControlErr(controlErr, approvalErr)
 			continue
+		}
+		if abort := toolAbort(result); abort != nil {
+			return toolNames, stepToolCalls, stepToolResults, abort
 		}
 		result, hookErr := r.afterTool(result)
 		if hookErr != nil {
@@ -297,6 +301,9 @@ func executeToolCallsParallel(
 				results[idx].controlErr = approvalErr
 				return nil
 			}
+			if abort := toolAbort(result); abort != nil {
+				return abort
+			}
 			result, hookErr := r.afterTool(result)
 			if hookErr != nil {
 				results[idx].controlErr = hookErr
@@ -321,13 +328,10 @@ func executeToolCallsParallel(
 			return nil
 		})
 	}
-	// g.Go bodies always return nil (per-tool failures ride the results slice,
-	// so a sibling failure never cancels the group), so g.Wait blocks until all
-	// queued calls finish and its error is expected to be nil. The check is
-	// forward-defensive: if a future body ever returns an error, it surfaces
-	// instead of being silently dropped.
+	// Ordinary failures are tool results. An explicit abort cancels queued
+	// work and stops the run before its batch is committed to model history.
 	if err := g.Wait(); err != nil {
-		r.emitError(err)
+		return nil, nil, nil, err
 	}
 
 	// Emit events and build history in original order. A recovered control
@@ -462,6 +466,14 @@ func approvedToolCall(
 		return nil, false, err
 	}
 	return executeApprovedToolCall(r, ctx, tools, tc, def), false, nil
+}
+
+func toolAbort(result *ToolResult) *tool.AbortRunError {
+	var abort *tool.AbortRunError
+	if result != nil {
+		errors.As(result.Error, &abort)
+	}
+	return abort
 }
 
 func executeApprovedToolCall(

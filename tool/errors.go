@@ -132,6 +132,23 @@ func (e *ExecutionError) Unwrap() error {
 
 func (e *ExecutionError) Is(target error) bool { return target == ErrExecution }
 
+// AbortRunError tells an agent runner that execution cannot safely continue,
+// for example when the outcome of a dispatched operation is unknown. It is
+// returned to the caller rather than sent to the model. It does not roll back
+// effects which have already started.
+type AbortRunError struct {
+	Cause error
+}
+
+func (e *AbortRunError) Error() string { return "tool execution requires run termination" }
+
+func (e *AbortRunError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // DeniedError reports a tool call rejected by policy.
 type DeniedError struct {
 	ToolName string
